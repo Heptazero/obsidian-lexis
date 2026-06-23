@@ -252,6 +252,11 @@
 - **迁移 18 个 02-root 根笔记**:dataview → `lexis derived`,保留 meaning/意思 内容。备份 `/tmp/02-root-*.tgz`。
 - 双向达成:词的 `#### 词根` 写 `[[词根]]`;词根笔记里自动列出所有派生词。
 
+## 修复:背单词背面看不到 lexis 块(v0.5.1)
+- 根因:`renderNoteInto` 的 `stripForPreview` 把 ` ```lexis ` 块也删了(本为悬浮卡防重复)。复习背面因此没有近义词/出处/曲线。
+- 修复:`renderNoteInto(el,file,comp,keepLexis)`,复习背面传 `keepLexis=true`(渲染 lexis 块),悬浮卡仍删(它有自己的相关词/出处)。
+- 复习背面的"出现过的地方"**默认展开**(渲染后把 `details.lexis-occ-details` 的 `open` 置真;普通笔记里仍折叠)。
+
 ## 想法暂存(Hz 提出,暂不做)
 - **标签识别为单词**:除了扫文件夹,再支持"带某标签的笔记也算单词来源"。Hz 说暂时不用,先记着。实现上只需在 `rebuildIndex` 里追加一类来源(按 tag 收集文件),与文件夹来源合并即可。
 

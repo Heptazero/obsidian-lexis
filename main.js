@@ -796,9 +796,11 @@ module.exports = class LexisPlugin extends Plugin {
   stripForPreview(content) {
     return content.replace(/^---\n[\s\S]*?\n---\n?/, "").replace(/```dataviewjs[\s\S]*?```/g, "").replace(/```dataview[\s\S]*?```/g, "").replace(/```lexis[\s\S]*?```/g, "").trim();
   }
-  async renderNoteInto(el, file, comp) {
+  async renderNoteInto(el, file, comp, keepLexis) {
     const raw = await this.app.vault.cachedRead(file);
-    const md = this.compactSections(this.stripForPreview(raw)) || "*(空)*";
+    let stripped = raw.replace(/^---\n[\s\S]*?\n---\n?/, "").replace(/```dataviewjs[\s\S]*?```/g, "").replace(/```dataview[\s\S]*?```/g, "");
+    if (!keepLexis) stripped = stripped.replace(/```lexis[\s\S]*?```/g, "");
+    const md = this.compactSections(stripped.trim()) || "*(空)*";
     el.empty();
     if (MarkdownRenderer.render) await MarkdownRenderer.render(this.app, md, el, file.path, comp);
     else await MarkdownRenderer.renderMarkdown(md, el, file.path, comp);
@@ -940,7 +942,9 @@ class LexisReviewView extends ItemView {
     try {
       if (this._comp) this._comp.unload();
       this._comp = new Component(); this._comp.load();
-      await this.plugin.renderNoteInto(this.backEl, this.currentItem.file, this._comp);
+      await this.plugin.renderNoteInto(this.backEl, this.currentItem.file, this._comp, true);
+      const openOcc = () => this.backEl.querySelectorAll("details.lexis-occ-details").forEach((d) => { d.open = true; });
+      openOcc(); window.setTimeout(openOcc, 60);
     } catch (err) {
       this.backEl.setText("内容渲染出错:" + (err?.message || err));
       console.error("[Lexis] reveal error", err);
