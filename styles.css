@@ -1,0 +1,130 @@
+/* Lexis 样式 —— 颜色/线型由插件按设置写成内联样式,这里给基础与布局 */
+
+.lexis-hl {
+  cursor: pointer;
+  text-decoration: underline wavy var(--text-accent);
+  text-underline-offset: 3px;
+}
+
+/* 标签规则:一行多个紧凑卡片 */
+.lexis-rule-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+.lexis-rule {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+}
+.lexis-rule input[type="text"] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.lexis-rule select {
+  max-width: 92px;
+}
+
+/* 悬浮卡 */
+.lexis-popover {
+  position: absolute;
+  z-index: var(--layer-popover, 50);
+  max-width: 460px;
+  max-height: 420px;
+  overflow: auto;
+  padding: 10px 14px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-primary);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+  font-size: var(--font-text-size);
+  line-height: 1.5;
+}
+.lexis-popover-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text-accent);
+}
+.lexis-popover-title:hover { text-decoration: underline; }
+.lexis-popover-alias { font-size: 11px; font-weight: 400; color: var(--text-muted); }
+.lexis-popover-body > :first-child { margin-top: 0; }
+.lexis-popover-body img { max-width: 100%; }
+
+.lexis-divider { height: 1px; background: var(--background-modifier-border); margin: 9px 0; }
+.lexis-section-title { font-weight: 600; font-size: 12px; color: var(--text-muted); margin: 0 0 4px; }
+.lexis-related a { margin-right: 10px; white-space: nowrap; }
+.lexis-occ { margin: 4px 0; font-size: 13px; line-height: 1.45; }
+.lexis-occ b { color: var(--text-normal); }
+.lexis-occ-src { color: var(--text-accent); cursor: pointer; font-size: 11px; margin-left: 6px; }
+.lexis-occ-src:hover { text-decoration: underline; }
+
+/* 背单词复习视图 */
+.lexis-review { padding: 24px; display: flex; flex-direction: column; align-items: center; gap: 16px; max-width: 720px; margin: 0 auto; }
+.lexis-rv-progress { color: var(--text-muted); font-size: 13px; }
+.lexis-rv-card { width: 100%; border: 1px solid var(--background-modifier-border); border-radius: 14px; padding: 24px; background: var(--background-secondary); }
+.lexis-rv-word { font-size: 32px; font-weight: 700; text-align: center; }
+.lexis-rv-back { margin-top: 18px; border-top: 1px dashed var(--background-modifier-border); padding-top: 16px; }
+.lexis-rv-back img { max-width: 100%; }
+.lexis-rv-rate { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.lexis-rv-btn { display: inline-flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important; gap: 4px; height: auto !important; min-height: 64px !important; padding: 12px 20px !important; border-radius: 10px; cursor: pointer; border: 2px solid var(--background-modifier-border); background: var(--background-primary); min-width: 100px; line-height: 1.3 !important; white-space: nowrap; overflow: visible; box-sizing: border-box; }
+.lexis-rv-btn:hover { filter: brightness(1.08); }
+
+.lexis-rv-topbar { width: 100%; display: flex; align-items: center; justify-content: space-between; }
+.lexis-rv-undo { font-size: 12px; padding: 4px 10px; cursor: pointer; }
+.lexis-rv-word { cursor: pointer; }
+.lexis-rv-word:hover { text-decoration: underline; text-decoration-thickness: 1px; }
+.lexis-rv-label { font-weight: 600; font-size: 14px; }
+.lexis-rv-ivl { font-size: 11px; opacity: 0.85; }
+.lexis-rv-g1 { border-color: #d9534f; color: #d9534f; } .lexis-rv-g1:hover { background: #d9534f26; }
+.lexis-rv-g2 { border-color: #e8930c; color: #e8930c; } .lexis-rv-g2:hover { background: #e8930c26; }
+.lexis-rv-g3 { border-color: #41a441; color: #41a441; } .lexis-rv-g3:hover { background: #41a44126; }
+.lexis-rv-g4 { border-color: #2f9bd6; color: #2f9bd6; } .lexis-rv-g4:hover { background: #2f9bd626; }
+.lexis-rv-done { text-align: center; margin-top: 60px; display: flex; flex-direction: column; gap: 12px; align-items: center; }
+.lexis-rv-done-emoji { font-size: 48px; }
+
+/* 例句间距(悬浮卡 & 笔记内代码块通用) */
+.lexis-occ { margin: 8px 0; padding-bottom: 7px; border-bottom: 1px dashed var(--background-modifier-border); }
+.lexis-occ:last-child { border-bottom: none; padding-bottom: 0; }
+
+/* 笔记内 ```lexis 代码块 */
+.lexis-block { border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 10px 12px; }
+.lexis-block .lexis-section-title { margin-top: 12px; }
+.lexis-block .lexis-section-title:first-child { margin-top: 0; }
+.lexis-curve { margin: 2px 0 4px; }
+.lexis-curve svg { width: 100%; height: auto; max-width: 340px; display: block; }
+
+/* 复习热力图 */
+.lexis-hm-grid { display: flex; gap: 3px; overflow-x: auto; padding: 4px 0; }
+.lexis-hm-col { display: flex; flex-direction: column; gap: 3px; }
+.lexis-hm-cell { width: 12px; height: 12px; border-radius: 2px; background: var(--background-modifier-border); }
+.lexis-hm-future { visibility: hidden; }
+.lexis-hm-l1 { background: color-mix(in srgb, var(--interactive-accent) 30%, transparent); }
+.lexis-hm-l2 { background: color-mix(in srgb, var(--interactive-accent) 55%, transparent); }
+.lexis-hm-l3 { background: color-mix(in srgb, var(--interactive-accent) 78%, transparent); }
+.lexis-hm-l4 { background: var(--interactive-accent); }
+.lexis-hm-caption { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
+
+/* 主页 */
+.lexis-home { padding: 12px 14px; }
+.lexis-home-stats { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.lexis-stat { font-size: 13px; padding: 4px 8px; border-radius: 6px; background: var(--background-secondary); }
+
+/* 复习卡标签 pill */
+.lexis-rv-tags { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; margin-top: 10px; }
+.lexis-tag { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: var(--background-modifier-hover); color: var(--text-muted); cursor: pointer; }
+.lexis-tag:hover { background: var(--interactive-accent); color: var(--text-on-accent); }
+
+/* lexis 块出处折叠 */
+.lexis-occ-details summary { cursor: pointer; font-weight: 600; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+.lexis-rv-topbtns { display: flex; gap: 8px; }
+.lexis-occ-add { cursor: pointer; margin-left: 6px; opacity: 0.7; }
+.lexis-occ-add:hover { opacity: 1; }
+.lexis-rv-cloze { font-size: 22px !important; font-weight: 600; line-height: 1.5; text-align: center; }
