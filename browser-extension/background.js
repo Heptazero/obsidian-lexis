@@ -15,6 +15,21 @@ async function api(cfg, path, params) {
   return r.json();
 }
 
+async function flushPending(cfg) {
+  const { pendingAdds } = await chrome.storage.local.get("pendingAdds");
+  if (!pendingAdds || !pendingAdds.length) return 0;
+  const remaining = [];
+  for (const p of pendingAdds) {
+    try {
+      const u = new URL(base(cfg) + "/add");
+      if (cfg.token) u.searchParams.set("token", cfg.token);
+      await fetch(u.toString(), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) });
+    } catch (e) { remaining.push(p); }
+  }
+  await chrome.storage.local.set({ pendingAdds: remaining });
+  return remaining.length;
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
     let cfg;
@@ -31,6 +46,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           const words = (data.words || []).map((x) => ({ k: x.key, w: x.word, t: x.tags || [] }));
           const meta = { count: words.length, syncedAt: Date.now(), version: data.version };
           await chrome.storage.local.set({ words, meta });
+          // 同步成功后重放离线队列
+          meta.pending = await flushPending(cfg);
           sendResponse({ ok: true, meta });
         } else sendResponse(data || { ok: false, error: "no-data" });
         return;
@@ -42,12 +59,20 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       if (msg.type === "add") {
         const u = new URL(base(cfg) + "/add");
         if (cfg.token) u.searchParams.set("token", cfg.token);
-        const r = await fetch(u.toString(), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(msg.payload || {}) });
-        sendResponse(await r.json());
+        try {
+          const r = await fetch(u.toString(), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(msg.payload || {}) });
+          sendResponse(await r.json());
+        } catch (e) {
+          // 网络不通(Obsidian 没开):排队,下次同步时自动重放
+          const { pendingAdds } = await chrome.storage.local.get("pendingAdds");
+          const queue = pendingAdds || [];
+          queue.push(msg.payload || {});
+          await chrome.storage.local.set({ pendingAdds: queue });
+          sendResponse({ ok: true, queued: true, pending: queue.length });
+        }
         return;
       }
     } catch (e) {
-      // 连不上多半是 Obsidian 没开 / 桥接没启用
       sendResponse({ ok: false, error: String((e && e.message) || e), offline: true });
     }
   })();

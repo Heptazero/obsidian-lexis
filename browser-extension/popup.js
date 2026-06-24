@@ -5,7 +5,7 @@ const $ = (id) => document.getElementById(id);
 let cfg = DEFAULT_CFG;
 
 async function load() {
-  const { cfg: c, meta } = await chrome.storage.local.get(["cfg", "meta"]);
+  const { cfg: c, meta, pendingAdds } = await chrome.storage.local.get(["cfg", "meta", "pendingAdds"]);
   cfg = Object.assign({}, DEFAULT_CFG, c || {});
   $("host").value = cfg.host;
   $("port").value = cfg.port;
@@ -13,16 +13,37 @@ async function load() {
   $("highlight").checked = !!cfg.highlight;
   $("style").value = cfg.style;
   $("color").value = cfg.color;
-  renderMeta(meta);
+  renderMeta(meta, pendingAdds);
+  // 打开 popup 时自动检测桥接版本:变了就静默同步(不用手动点)
+  autoSyncIfStale(meta);
 }
 
-function renderMeta(meta) {
+async function autoSyncIfStale(meta) {
+  if (!cfg.token) return;
+  let ping;
+  try { ping = await chrome.runtime.sendMessage({ type: "ping" }); } catch (e) { return; }
+  if (!ping || !ping.ok) return;
+  if (meta && meta.version === ping.version && meta.count != null) return;
+  // 版本变了或还没同步过 → 自动拉
+  const r = await chrome.runtime.sendMessage({ type: "sync" }).catch(() => null);
+  if (r && r.ok) {
+    const data = await chrome.storage.local.get(["meta", "pendingAdds"]);
+    renderMeta(r.meta, data.pendingAdds);
+  }
+}
+
+function renderMeta(meta, pendingAdds) {
+  const parts = [];
   if (meta && meta.count != null) {
     const t = meta.syncedAt ? new Date(meta.syncedAt).toLocaleString() : "?";
-    $("meta").textContent = `已缓存 ${meta.count} 个词 · 上次同步 ${t}`;
+    parts.push(`已缓存 ${meta.count} 个词 · 上次 ${t}`);
   } else {
-    $("meta").textContent = "还没同步过词库";
+    parts.push("还没同步过词库");
   }
+  if (pendingAdds && pendingAdds.length) {
+    parts.push(`⏳ ${pendingAdds.length} 条待同步`);
+  }
+  $("meta").textContent = parts.join(" · ");
 }
 
 async function save() {

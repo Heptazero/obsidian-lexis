@@ -59,10 +59,14 @@
     try { r = await chrome.runtime.sendMessage({ type: "add", payload: { word, sentence, url: location.href, title: document.title } }); }
     catch (e) { r = null; }
     if (r && r.ok) {
-      detailCache.delete((word || "").toLowerCase());
-      toast(r.dup ? "这条已经在例句里了" : r.created ? `已新建单词「${r.word}」` : `已给「${r.word}」加例句`, true);
-      // 新建的词:重新同步词库,让它在本页(和别的页)马上能高亮(storage.onChanged 会自动重扫)
-      if (r.created) { try { await chrome.runtime.sendMessage({ type: "sync" }); } catch (e) {} }
+      if (r.queued) {
+        toast(`已加入离线队列(${r.pending}条待同步)`, true);
+      } else {
+        detailCache.delete((word || "").toLowerCase());
+        toast(r.dup ? "这条已经在例句里了" : r.created ? `已新建单词「${r.word}」` : `已给「${r.word}」加例句`, true);
+        // 新建的词:重新同步词库,让它在本页(和别的页)马上能高亮(storage.onChanged 会自动重扫)
+        if (r.created) { try { await chrome.runtime.sendMessage({ type: "sync" }); } catch (e) {} }
+      }
     } else {
       toast(r && r.error === "bad-token" ? "令牌不对" : "添加失败(Obsidian 开着且桥接启用?)", false);
     }
