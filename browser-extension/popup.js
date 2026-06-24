@@ -1,5 +1,5 @@
 // Lexis Web —— popup:读写配置、测试连接、同步词库
-const DEFAULT_CFG = { host: "127.0.0.1", port: 45945, token: "", highlight: true, color: "#7c5cff", style: "wavy", useObsidianStyle: true };
+const DEFAULT_CFG = { host: "127.0.0.1", port: 45945, token: "", highlight: true, color: "#7c5cff", style: "wavy", useObsidianStyle: true, opacity: 100, maxHeight: 52 };
 const $ = (id) => document.getElementById(id);
 
 let cfg = DEFAULT_CFG;
@@ -15,6 +15,9 @@ async function load() {
   $("highlight").checked = !!cfg.highlight;
   $("style").value = cfg.style;
   $("color").value = cfg.color;
+  $("opacity").value = cfg.opacity || 100;
+  $("opacityVal").textContent = (cfg.opacity || 100) + "%";
+  $("maxHeight").value = cfg.maxHeight || 52;
   $("useObsidianStyle").checked = !!(cfg.useObsidianStyle !== false && hasStyleConfig);
   toggleObsidianStyle();
   renderMeta(meta, pendingAdds);
@@ -63,6 +66,8 @@ async function save() {
     highlight: $("highlight").checked,
     color: $("color").value,
     style: $("style").value,
+    opacity: parseInt($("opacity").value, 10) || 100,
+    maxHeight: parseInt($("maxHeight").value, 10) || 52,
     useObsidianStyle: $("useObsidianStyle").checked,
   };
   await chrome.storage.local.set({ cfg });
@@ -95,6 +100,8 @@ $("sync").addEventListener("click", async () => {
 
 for (const id of ["highlight", "style", "color"]) $(id).addEventListener("change", save);
 for (const id of ["host", "port", "token"]) $(id).addEventListener("input", save);
+for (const id of ["opacity", "maxHeight"]) $(id).addEventListener("input", save);
+$("opacity").addEventListener("input", () => { $("opacityVal").textContent = $("opacity").value + "%"; });
 $("useObsidianStyle").addEventListener("change", () => { toggleObsidianStyle(); save(); });
 
 load();

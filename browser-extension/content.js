@@ -2,7 +2,7 @@
 (() => {
   const HL = "lexis-web-hl";
   const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "INPUT", "CODE", "PRE", "SELECT", "OPTION", "KBD", "SAMP"]);
-  const DEFAULT_CFG = { highlight: true, color: "#7c5cff", style: "wavy", useObsidianStyle: true };
+  const DEFAULT_CFG = { highlight: true, color: "#7c5cff", style: "wavy", useObsidianStyle: true, opacity: 100, maxHeight: 52 };
 
   let cfg = null;
   let keySet = null;
@@ -103,8 +103,10 @@
   function inlineStyleFor(key) {
     // 用户关了「使用 Obsidian 标签着色」→ 只用全局色
     if (cfg.useObsidianStyle === false || !styleCfg) {
-      const c = cfg.color || "#7c5cff";
+      let c = cfg.color || "#7c5cff";
       const s = cfg.style || "wavy";
+      const a = (cfg.opacity != null ? cfg.opacity : 100) / 100;
+      if (a < 1) c = `color-mix(in srgb, ${c} ${Math.round(a * 100)}%, transparent)`;
       if (s === "background") return `background-color:${c};border-radius:3px;padding:0 1px;text-decoration:none`;
       const line = s === "underline" ? "solid" : "wavy";
       return `text-decoration:underline ${line} ${c};text-underline-offset:2px`;
@@ -211,6 +213,11 @@
     pop.addEventListener("mouseenter", () => clearTimeout(hideTimer));
     pop.addEventListener("mouseleave", scheduleHide);
     document.body.appendChild(pop);
+    // 应用用户自定义的卡片最大高度
+    if (cfg && cfg.maxHeight) {
+      const body = pop.querySelector(".lexis-web-pop-body");
+      if (body) body.style.maxHeight = cfg.maxHeight + "vh";
+    }
     position(pop, span);
 
     let data = detailCache.get(key);
@@ -324,8 +331,17 @@
     selBtn.className = "lexis-web-selbtn";
     selBtn.textContent = "➕ Lexis";
     selBtn.title = "加到单词库(已有则加例句)";
-    selBtn.style.left = (rect.right + window.scrollX + 6) + "px";
-    selBtn.style.top = (rect.top + window.scrollY - 4) + "px";
+    // 智能定位:优先选区下方中间,超出视口则放上方
+    const btnW = 64, btnH = 26, gap = 6;
+    let left = rect.left + (rect.width - btnW) / 2 + window.scrollX;
+    let top = rect.bottom + window.scrollY + gap;
+    if (top + btnH > window.scrollY + document.documentElement.clientHeight - 8)
+      top = rect.top + window.scrollY - btnH - gap;
+    if (left < 8) left = 8;
+    if (left + btnW > window.scrollX + document.documentElement.clientWidth - 8)
+      left = window.scrollX + document.documentElement.clientWidth - btnW - 8;
+    selBtn.style.left = Math.max(8, left) + "px";
+    selBtn.style.top = Math.max(8, top) + "px";
     selBtn.addEventListener("mousedown", (e) => e.preventDefault()); // 别让按钮抢走选区
     selBtn.addEventListener("click", async () => {
       const s = window.getSelection();

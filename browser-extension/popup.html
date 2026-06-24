@@ -48,7 +48,9 @@
     <select id="style"><option value="wavy">波浪下划线</option><option value="underline">实线下划线</option><option value="background">背景色</option></select>
   </div>
   <div class="row"><label>颜色</label><input type="color" id="color" style="flex:0 0 40px;height:28px;padding:0;border:none;background:none;cursor:pointer"></div>
+  <div class="row"><label>透明度</label><input type="range" id="opacity" min="10" max="100" step="5" style="flex:1;height:24px"><span id="opacityVal" style="font-size:11px;min-width:32px;text-align:right"></span></div>
   </div>
+  <div class="row"><label>卡片最大高度</label><input type="number" id="maxHeight" min="20" max="90" placeholder="52" style="width:54px"> vh</div>
 
   <div class="hint">高亮用的是上次同步的本地缓存,所以 Obsidian 没开也能高亮;悬停看释义、同步词库才需要 Obsidian 开着且桥接已启用。改了设置后刷新网页生效。</div>
 
