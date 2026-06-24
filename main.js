@@ -35,6 +35,8 @@ const DEFAULT_SETTINGS = {
   newWordTemplate: "template/单词模板.md",
   // 卡片正面:note=单词→整篇;cloze=例句填空
   cardFront: "note",
+  // 浏览器扩展排除标签:打上此标签的单词不在网页高亮
+  excludeTag: "",
   // 浏览器桥接(本地 HTTP,只听 127.0.0.1,供 Chrome 扩展拉词库/划词添加)
   bridgeEnabled: false,
   bridgePort: 45945,
@@ -280,7 +282,16 @@ module.exports = class LexisPlugin extends Plugin {
   bridgeWordList() {
     const words = [];
     for (const [key, e] of this.index) words.push({ key, word: e.display, alias: !!e.isAlias, tags: [...(e.tags || [])], file: e.file && e.file.path });
-    return { ok: true, version: this.manifest.version, count: words.length, words };
+    return {
+      ok: true, version: this.manifest.version, count: words.length, words,
+      styleConfig: {
+        tagRules: this.settings.tagRules || [],
+        highlightColor: this.settings.highlightColor,
+        highlightOpacity: this.settings.highlightOpacity,
+        highlightStyle: this.settings.highlightStyle,
+        excludeTag: this.settings.excludeTag || "",
+      },
+    };
   }
   extractSection(md, name) {
     const re = new RegExp("^#{2,6}[ \\t].*" + escapeRe(name) + ".*$", "m");
@@ -1410,6 +1421,16 @@ class LexisSettingTab extends PluginSettingTab {
 
     containerEl.createEl("h4", { text: "浏览器扩展(桥接)" });
     containerEl.createEl("p", { cls: "setting-item-description", text: "在本机开一个只监听 127.0.0.1 的小服务,供 Chrome 扩展拉词库高亮、划词加词。数据不出本机。Obsidian 关掉后服务也停。" });
+    // 排除标签:选择后,带这个标签的单词不会在网页高亮
+    new Setting(containerEl).setName("排除标签").setDesc("打上此标签的单词不在网页高亮(在 Obsidian 里不受影响)。留空=不排除。")
+      .addDropdown((dd) => {
+        dd.addOption("", "(不排除)");
+        for (const t of this.plugin.collectVocabTags()) dd.addOption(t, "#" + t);
+        if (this.plugin.settings.excludeTag && !this.plugin.collectVocabTags().includes(this.plugin.settings.excludeTag))
+          dd.addOption(this.plugin.settings.excludeTag, "#" + this.plugin.settings.excludeTag + "(当前)");
+        dd.setValue(this.plugin.settings.excludeTag);
+        dd.onChange(async (v) => { this.plugin.settings.excludeTag = v; await save(); });
+      });
     new Setting(containerEl).setName("启用本地桥接").setDesc(`开启后浏览器访问 http://127.0.0.1:${this.plugin.settings.bridgePort}/ping 应返回 ok。`)
       .addToggle((t) => t.setValue(this.plugin.settings.bridgeEnabled).onChange(async (v) => {
         this.plugin.settings.bridgeEnabled = v;

@@ -1,21 +1,29 @@
 // Lexis Web —— popup:读写配置、测试连接、同步词库
-const DEFAULT_CFG = { host: "127.0.0.1", port: 45945, token: "", highlight: true, color: "#7c5cff", style: "wavy" };
+const DEFAULT_CFG = { host: "127.0.0.1", port: 45945, token: "", highlight: true, color: "#7c5cff", style: "wavy", useObsidianStyle: true };
 const $ = (id) => document.getElementById(id);
 
 let cfg = DEFAULT_CFG;
+let hasStyleConfig = false;
 
 async function load() {
-  const { cfg: c, meta, pendingAdds } = await chrome.storage.local.get(["cfg", "meta", "pendingAdds"]);
+  const { cfg: c, meta, pendingAdds, styleConfig } = await chrome.storage.local.get(["cfg", "meta", "pendingAdds", "styleConfig"]);
   cfg = Object.assign({}, DEFAULT_CFG, c || {});
+  hasStyleConfig = !!styleConfig;
   $("host").value = cfg.host;
   $("port").value = cfg.port;
   $("token").value = cfg.token;
   $("highlight").checked = !!cfg.highlight;
   $("style").value = cfg.style;
   $("color").value = cfg.color;
+  $("useObsidianStyle").checked = !!(cfg.useObsidianStyle !== false && hasStyleConfig);
+  toggleObsidianStyle();
   renderMeta(meta, pendingAdds);
-  // 打开 popup 时自动检测桥接版本:变了就静默同步(不用手动点)
   autoSyncIfStale(meta);
+}
+
+function toggleObsidianStyle() {
+  const on = $("useObsidianStyle").checked && hasStyleConfig;
+  $("customStyle").style.display = on ? "none" : "";
 }
 
 async function autoSyncIfStale(meta) {
@@ -24,11 +32,12 @@ async function autoSyncIfStale(meta) {
   try { ping = await chrome.runtime.sendMessage({ type: "ping" }); } catch (e) { return; }
   if (!ping || !ping.ok) return;
   if (meta && meta.version === ping.version && meta.count != null) return;
-  // 版本变了或还没同步过 → 自动拉
   const r = await chrome.runtime.sendMessage({ type: "sync" }).catch(() => null);
   if (r && r.ok) {
     const data = await chrome.storage.local.get(["meta", "pendingAdds"]);
     renderMeta(r.meta, data.pendingAdds);
+    hasStyleConfig = true;
+    toggleObsidianStyle();
   }
 }
 
@@ -54,6 +63,7 @@ async function save() {
     highlight: $("highlight").checked,
     color: $("color").value,
     style: $("style").value,
+    useObsidianStyle: $("useObsidianStyle").checked,
   };
   await chrome.storage.local.set({ cfg });
 }
@@ -85,5 +95,6 @@ $("sync").addEventListener("click", async () => {
 
 for (const id of ["highlight", "style", "color"]) $(id).addEventListener("change", save);
 for (const id of ["host", "port", "token"]) $(id).addEventListener("input", save);
+$("useObsidianStyle").addEventListener("change", () => { toggleObsidianStyle(); save(); });
 
 load();

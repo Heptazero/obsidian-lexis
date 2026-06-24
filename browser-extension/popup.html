@@ -42,10 +42,13 @@
   <hr>
 
   <div class="toggle"><input type="checkbox" id="highlight"><label for="highlight" style="flex:1">在网页上高亮</label></div>
+  <div class="toggle"><input type="checkbox" id="useObsidianStyle"><label for="useObsidianStyle" style="flex:1">使用 Obsidian 标签着色</label></div>
+  <div id="customStyle">
   <div class="row"><label>线型</label>
     <select id="style"><option value="wavy">波浪下划线</option><option value="underline">实线下划线</option><option value="background">背景色</option></select>
   </div>
   <div class="row"><label>颜色</label><input type="color" id="color" style="flex:0 0 40px;height:28px;padding:0;border:none;background:none;cursor:pointer"></div>
+  </div>
 
   <div class="hint">高亮用的是上次同步的本地缓存,所以 Obsidian 没开也能高亮;悬停看释义、同步词库才需要 Obsidian 开着且桥接已启用。改了设置后刷新网页生效。</div>
 

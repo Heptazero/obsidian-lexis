@@ -2,13 +2,15 @@
 (() => {
   const HL = "lexis-web-hl";
   const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "INPUT", "CODE", "PRE", "SELECT", "OPTION", "KBD", "SAMP"]);
-  const DEFAULT_CFG = { highlight: true, color: "#7c5cff", style: "wavy" };
+  const DEFAULT_CFG = { highlight: true, color: "#7c5cff", style: "wavy", useObsidianStyle: true };
 
   let cfg = null;
   let keySet = null;
+  let keyTags = null;
   let regex = null;
   let observer = null;
   let scanTimer = null;
+  let styleCfg = null;
   const detailCache = new Map();
   let pop = null, hideTimer = null, currentSpan = null;
 
@@ -81,13 +83,45 @@
 
   function build(words) {
     keySet = new Set();
+    keyTags = new Map();
+    const excludeTag = (styleCfg && styleCfg.excludeTag || "").toLowerCase();
     const keys = [];
     for (const x of words || []) {
       const k = (x.k || "").toLowerCase();
-      if (k.length >= 2) { keySet.add(k); keys.push(k); }
+      if (k.length < 2) continue;
+      const tags = (x.t || []).map((t) => String(t).toLowerCase());
+      if (excludeTag && tags.includes(excludeTag)) continue;
+      keySet.add(k);
+      keyTags.set(k, tags);
+      keys.push(k);
     }
     keys.sort((a, b) => b.length - a.length);
     regex = keys.length ? new RegExp("\\b(?:" + keys.map(esc).join("|") + ")\\b", "gi") : null;
+  }
+
+  // 对标 Obsidian 的 inlineStyleForEntry:标签规则 → 颜色/线型,带透明度
+  function inlineStyleFor(key) {
+    // 用户关了「使用 Obsidian 标签着色」→ 只用全局色
+    if (cfg.useObsidianStyle === false || !styleCfg) {
+      const c = cfg.color || "#7c5cff";
+      const s = cfg.style || "wavy";
+      if (s === "background") return `background-color:${c};border-radius:3px;padding:0 1px;text-decoration:none`;
+      const line = s === "underline" ? "solid" : "wavy";
+      return `text-decoration:underline ${line} ${c};text-underline-offset:2px`;
+    }
+    const tags = keyTags.get(key) || [];
+    let color = styleCfg.highlightColor || cfg.color || "#7c5cff";
+    let styleKind = styleCfg.highlightStyle || cfg.style || "wavy";
+    const rules = styleCfg.tagRules || [];
+    if (tags.length && rules.length) {
+      const rule = rules.find((r) => r.tag && tags.includes(r.tag.toLowerCase()));
+      if (rule) { if (rule.color) color = rule.color; if (rule.style) styleKind = rule.style; }
+    }
+    const alpha = styleCfg.highlightOpacity != null ? styleCfg.highlightOpacity : 1;
+    if (alpha < 1) color = `color-mix(in srgb, ${color} ${Math.round(alpha * 100)}%, transparent)`;
+    if (styleKind === "background") return `background-color:${color};border-radius:3px;padding:0 1px;text-decoration:none`;
+    const line = styleKind === "underline" ? "solid" : "wavy";
+    return `text-decoration:underline ${line} ${color};text-underline-offset:2px`;
   }
 
   function skip(node) {
@@ -115,6 +149,7 @@
       span.className = HL;
       span.dataset.k = key;
       span.textContent = m[0];
+      span.setAttribute("style", inlineStyleFor(key));
       frag.appendChild(span);
       last = m.index + m[0].length;
     }
@@ -307,8 +342,9 @@
 
   // ---- 启动 / 配置变化 ----
   async function init() {
-    const { cfg: c, words } = await chrome.storage.local.get(["cfg", "words"]);
+    const { cfg: c, words, styleConfig } = await chrome.storage.local.get(["cfg", "words", "styleConfig"]);
     cfg = Object.assign({}, DEFAULT_CFG, c || {});
+    styleCfg = styleConfig || null;
     applyTheme();
     build(words || []);
     if (cfg.highlight) { scan(document.body); startObserver(); }
@@ -317,14 +353,17 @@
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
     (async () => {
+      const oldCfg = cfg ? Object.assign({}, cfg) : null;
       if (changes.cfg) {
         cfg = Object.assign({}, DEFAULT_CFG, changes.cfg.newValue || {});
         applyTheme();
         if (!cfg.highlight) { unwrapAll(); removePop(); }
       }
+      if (changes.styleConfig) styleCfg = changes.styleConfig.newValue || null;
       if (changes.words) build(changes.words.newValue || []);
+      const styleChanged = oldCfg && cfg && oldCfg.useObsidianStyle !== cfg.useObsidianStyle;
       if (cfg && cfg.highlight) {
-        if (changes.words || (changes.cfg && changes.cfg.newValue && changes.cfg.newValue.highlight && !(changes.cfg.oldValue || {}).highlight)) {
+        if (changes.words || changes.styleConfig || styleChanged || (changes.cfg && changes.cfg.newValue && changes.cfg.newValue.highlight && !(changes.cfg.oldValue || {}).highlight)) {
           unwrapAll();
           scan(document.body);
           startObserver();

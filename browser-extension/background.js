@@ -45,7 +45,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         if (data && data.ok) {
           const words = (data.words || []).map((x) => ({ k: x.key, w: x.word, t: x.tags || [] }));
           const meta = { count: words.length, syncedAt: Date.now(), version: data.version };
-          await chrome.storage.local.set({ words, meta });
+          const styleConfig = data.styleConfig || null;
+          await chrome.storage.local.set({ words, meta, styleConfig });
           // 同步成功后重放离线队列
           meta.pending = await flushPending(cfg);
           sendResponse({ ok: true, meta });
