@@ -16,6 +16,7 @@ const LEXIS_HOME_VIEW = "lexis-home-view";
 const DEFAULT_SETTINGS = {
   vocabFolder: "01-word",
   includeAliases: true,
+  aliasSources: "", // 额外的别名来源属性名,逗号分隔(如 past,forms,variants)。留空只读 aliases/alias。
   enableHighlight: true,
   enableLivePreview: true,
   highlightStyle: "wavy",
@@ -469,10 +470,23 @@ module.exports = class LexisPlugin extends Plugin {
   extractAliases(file) {
     const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
     if (!fm) return [];
-    let raw = fm.aliases ?? fm.alias ?? [];
-    if (typeof raw === "string") raw = raw.split(/[,，;；]/);
-    if (!Array.isArray(raw)) raw = [raw];
-    return raw.map((x) => String(x).trim()).filter((x) => x && x.toLowerCase() !== "null");
+    // 始终包含 Obsidian 标准属性,外加用户配置的自定义属性(并集)
+    const extra = (this.settings.aliasSources || "").split(/[,，\s]+/).map((s) => s.trim()).filter(Boolean);
+    const sources = [...new Set(["aliases", "alias", ...extra])];
+    const seen = new Set();
+    const results = [];
+    for (const src of sources) {
+      let raw = fm[src];
+      if (raw == null || raw === "") continue;
+      if (typeof raw === "string") raw = raw.split(/[,，;；]/);
+      if (!Array.isArray(raw)) raw = [raw];
+      for (const x of raw) {
+        const s = String(x).trim();
+        if (!s || s.toLowerCase() === "null") continue;
+        if (!seen.has(s)) { seen.add(s); results.push(s); }
+      }
+    }
+    return results;
   }
   getTags(file) {
     const cache = this.app.metadataCache.getFileCache(file);
@@ -1366,8 +1380,10 @@ class LexisSettingTab extends PluginSettingTab {
         dd.setValue(this.plugin.settings.vocabFolder);
         dd.onChange(async (v) => { this.plugin.settings.vocabFolder = v; await save(); this.plugin.rebuildIndex(true); this.renderStats(); });
       });
-    new Setting(containerEl).setName("别名也算单词").setDesc("把单词笔记 frontmatter 里的 aliases 也加入识别与高亮。")
+    new Setting(containerEl).setName("别名也算单词").setDesc("启用后,单词笔记 frontmatter 里的别名也会被识别与高亮。")
       .addToggle((t) => t.setValue(this.plugin.settings.includeAliases).onChange(async (v) => { this.plugin.settings.includeAliases = v; await save(); this.plugin.rebuildIndex(false); this.renderStats(); }));
+    new Setting(containerEl).setName("别名属性名").setDesc("除 aliases/alias 外,还从哪些 frontmatter 属性读取别名(逗号分隔)。例:past,forms,variants· 适合存过去式、复数等变形。")
+      .addText((t) => t.setPlaceholder("past,forms,variants").setValue(this.plugin.settings.aliasSources).onChange(async (v) => { this.plugin.settings.aliasSources = v.trim(); await save(); if (this.plugin.settings.includeAliases) { this.plugin.rebuildIndex(false); this.renderStats(); } }));
 
     containerEl.createEl("h4", { text: "高亮" });
     new Setting(containerEl).setName("启用高亮").addToggle((t) => t.setValue(this.plugin.settings.enableHighlight).onChange(async (v) => { this.plugin.settings.enableHighlight = v; await save(); refresh(); }));
