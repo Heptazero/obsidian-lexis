@@ -1,7 +1,7 @@
 {
   "id": "lexis",
   "name": "Lexis",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "minAppVersion": "1.4.0",
   "description": "把指定文件夹里的笔记标题当作单词库:全文高亮、悬浮释义、间隔重复背诵、出处自动聚合与热力图。",
   "author": "Hz & Claude",

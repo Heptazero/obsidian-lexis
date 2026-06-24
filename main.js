@@ -308,47 +308,26 @@ module.exports = class LexisPlugin extends Plugin {
     const e = this.index.get(key);
     if (!e || !e.file) return { ok: false, error: "not-found" };
     try {
-      const cur = await this.app.vault.cachedRead(e.file);
-      const re = /^---\r?\n([\s\S]*?)\r?\n---/;
-      const fm = re.exec(cur);
-      if (!fm) return { ok: false, error: "no-frontmatter" };
-      let body = fm[1];
-      let tags = [];
-      const tagMatch = /^tags:\s*$/m.exec(body);
-      if (tagMatch) {
-        const after = body.slice(tagMatch.index + tagMatch[0].length);
-        const listEnd = after.search(/^[^ \t-]/m);
-        const list = (listEnd >= 0 ? after.slice(0, listEnd) : after).trim();
-        tags = list.split("\n").map((s) => s.replace(/^\s*-\s*/, "").trim()).filter(Boolean);
-      }
-      if (action === "remove") {
-        tags = tags.filter((t) => t.toLowerCase() !== tag);
-      } else {
-        if (!tags.includes(tag)) tags.push(tag);
-      }
-      let newBody;
-      if (tags.length) {
-        const tagBlock = "tags:\n" + tags.map((t) => `  - ${t}`).join("\n");
-        if (tagMatch) {
-          const after = body.slice(tagMatch.index + tagMatch[0].length);
-          const listEnd = after.search(/^[^ \t-]/m);
-          const prefix = body.slice(0, tagMatch.index);
-          const suffix = listEnd >= 0 ? after.slice(listEnd) : "";
-          newBody = prefix + tagBlock + suffix;
-        } else {
-          const sep = body.trim() ? "\n" : "";
-          newBody = body + sep + tagBlock;
-        }
-      } else {
-        newBody = body.replace(/\n*tags:\s*\n(?:[ \t]*-[^\n]*\n?)*/g, "").trim();
-      }
-      const newContent = `---\n${newBody}\n---` + cur.slice(fm.index + fm[0].length);
-      await this.app.vault.modify(e.file, newContent);
+      let resultTags = [];
+      // 用 Obsidian 官方 API 改 frontmatter:正确处理 null/字符串/数组/各种缩进,自动规范序列化
+      await this.app.fileManager.processFrontMatter(e.file, (fm) => {
+        let arr = fm.tags ?? fm.tag ?? [];
+        if (typeof arr === "string") arr = arr.split(/[,，;；\s]+/);
+        if (!Array.isArray(arr)) arr = [arr];
+        arr = arr.map((s) => String(s).trim().replace(/^#/, "").toLowerCase()).filter((t) => t && t !== "null");
+        if (action === "remove") arr = arr.filter((t) => t !== tag);
+        else if (!arr.includes(tag)) arr.push(tag);
+        arr = [...new Set(arr)];
+        if (arr.length) fm.tags = arr; else delete fm.tags;
+        // 用过 tag(单数)的笔记顺手清掉,避免两个键并存
+        if (fm.tag != null) delete fm.tag;
+        resultTags = arr;
+      });
       this.rebuildIndex(false);
-      // metadataCache 延迟兜底:手动更新索引中此词的 tags
-      const ie = this.index.get(key);
-      if (ie) ie.tags = new Set(tags.map((t) => t.toLowerCase()));
-      return { ok: true, key, tag, action: action === "remove" ? "removed" : "added", tags };
+      // metadataCache 延迟兜底:手动更新索引中此词(及同文件别名)的 tags,让 /words 高亮配色即时刷新
+      const tagSet = new Set(resultTags);
+      for (const [k, v] of this.index) { if (v.file === e.file) v.tags = tagSet; }
+      return { ok: true, key, tag, action: action === "remove" ? "removed" : "added", tags: resultTags };
     } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
   }
   // 把一条例句插到「#### 例句」段的末尾(已有例句之后、```lexis occ``` 代码块之前);没有该段就在文末新建
