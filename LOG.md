@@ -257,6 +257,15 @@
 - 修复:`renderNoteInto(el,file,comp,keepLexis)`,复习背面传 `keepLexis=true`(渲染 lexis 块),悬浮卡仍删(它有自己的相关词/出处)。
 - 复习背面的"出现过的地方"**默认展开**(渲染后把 `details.lexis-occ-details` 的 `open` 置真;普通笔记里仍折叠)。
 
+## 浏览器扩展 · 阶段 0:本地桥接(v0.6.0)
+- 目标:做个 Chrome 扩展,在任意网页高亮词库里的词、划词加进 vault(像剪藏但双向)。浏览器碰不到本地文件,所以 Lexis 在 Obsidian 里开一个**只听 127.0.0.1 的小 HTTP 服务**当传话筒,数据始终在 `.md` 文件里、不出本机。
+- 阶段划分:**0 通信地基**(本节)→ 1 拉词库+网页高亮 → 2 划词添加(带来源 URL+句子)→ 3 手动同步+离线排队 → 4 打磨(标签上色/待复习数)。
+- 端口默认 **45945**;首次启用生成随机 16 字节 **token**,除 `/ping` 外所有接口校验(防别的网页乱连)。CORS 全开但 token 把门。
+- 新增方法:`genToken / startBridge / stopBridge / restartBridge / handleBridge / bridgeWordList`。`onload` 里按开关启动,`onunload` 关闭。状态栏开着时显示 ` · 🌐`。
+- 接口:`GET /ping`(无需 token,探测连通)、`GET /words`(token,返回 `{key,word,alias,tags,file}` 列表供高亮)。
+- 设置面板新增「浏览器扩展(桥接)」:启用开关 / 端口 / 令牌(复制·重生成·重启)。
+- **验收**:启用后浏览器开 `http://127.0.0.1:45945/ping` → `{"ok":true,"app":"lexis","version":"0.6.0"}`。带 token 访问 `/words` 返回词库。
+
 ## 想法暂存(Hz 提出,暂不做)
 - **标签识别为单词**:除了扫文件夹,再支持"带某标签的笔记也算单词来源"。Hz 说暂时不用,先记着。实现上只需在 `rebuildIndex` 里追加一类来源(按 tag 收集文件),与文件夹来源合并即可。
 

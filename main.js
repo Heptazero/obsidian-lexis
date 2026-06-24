@@ -35,6 +35,10 @@ const DEFAULT_SETTINGS = {
   newWordTemplate: "template/单词模板.md",
   // 卡片正面:note=单词→整篇;cloze=例句填空
   cardFront: "note",
+  // 浏览器桥接(本地 HTTP,只听 127.0.0.1,供 Chrome 扩展拉词库/划词添加)
+  bridgeEnabled: false,
+  bridgePort: 45945,
+  bridgeToken: "",
 };
 
 // ---------- 小工具 ----------
@@ -129,12 +133,20 @@ module.exports = class LexisPlugin extends Plugin {
         .setIcon("book-plus")
         .onClick(() => this.addWordFromSelection(sel, editor, view)));
     }));
+
+    // 浏览器桥接(Stage 0):本地 HTTP 服务,供 Chrome 扩展通信
+    this._server = null;
+    if (this.settings.bridgeEnabled) {
+      if (!this.settings.bridgeToken) { this.settings.bridgeToken = this.genToken(); await this.saveSettings(); }
+      this.startBridge();
+    }
   }
 
   onunload() {
     window.clearTimeout(this._rebuildTimer);
     window.clearTimeout(this._hideTimer);
     this.removePopover();
+    this.stopBridge();
   }
 
   async loadSettings() {
@@ -155,6 +167,56 @@ module.exports = class LexisPlugin extends Plugin {
       if (m) rules.push({ tag: m[1].trim(), color: m[2].trim(), style: m[3] || "" });
     }
     return rules;
+  }
+
+  // ---------- 浏览器桥接(本地 HTTP) ----------
+  genToken() {
+    const a = new Uint8Array(16);
+    (window.crypto || crypto).getRandomValues(a);
+    return Array.from(a).map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  startBridge() {
+    if (this._server) return;
+    let http;
+    try { http = require("http"); } catch (_e) { new Notice("Lexis:此平台不支持本地服务(需桌面端)"); return; }
+    const port = Number(this.settings.bridgePort) || 45945;
+    const server = http.createServer((req, res) => { this.handleBridge(req, res).catch((err) => { try { res.writeHead(500); res.end(String(err && err.message || err)); } catch (_e) {} }); });
+    server.on("error", (err) => {
+      this._server = null;
+      new Notice("Lexis 桥接启动失败:" + (err.code === "EADDRINUSE" ? `端口 ${port} 被占用` : (err.code || err.message)));
+    });
+    server.listen(port, "127.0.0.1", () => { this.updateStatusBar(); });
+    this._server = server;
+  }
+  stopBridge() {
+    if (this._server) { try { this._server.close(); } catch (_e) {} this._server = null; if (this.statusBarEl) this.updateStatusBar(); }
+  }
+  restartBridge() { this.stopBridge(); if (this.settings.bridgeEnabled) this.startBridge(); }
+  bridgeCors() {
+    return {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Headers": "X-Lexis-Token, Content-Type",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    };
+  }
+  async handleBridge(req, res) {
+    const cors = this.bridgeCors();
+    const send = (code, obj) => { res.writeHead(code, Object.assign({ "Content-Type": "application/json; charset=utf-8" }, cors)); res.end(JSON.stringify(obj)); };
+    if (req.method === "OPTIONS") { res.writeHead(204, cors); res.end(); return; }
+    const url = new URL(req.url, "http://127.0.0.1");
+    const path = url.pathname.replace(/\/+$/, "") || "/";
+    // /ping 不需要 token,供扩展探测连通性
+    if (path === "/ping" || path === "/") return send(200, { ok: true, app: "lexis", version: this.manifest.version });
+    // 其余接口都要 token
+    const token = req.headers["x-lexis-token"] || url.searchParams.get("token") || "";
+    if (!this.settings.bridgeToken || token !== this.settings.bridgeToken) return send(401, { ok: false, error: "bad-token" });
+    if (path === "/words" && req.method === "GET") return send(200, this.bridgeWordList());
+    return send(404, { ok: false, error: "not-found" });
+  }
+  bridgeWordList() {
+    const words = [];
+    for (const [key, e] of this.index) words.push({ key, word: e.display, alias: !!e.isAlias, tags: [...(e.tags || [])], file: e.file && e.file.path });
+    return { ok: true, version: this.manifest.version, count: words.length, words };
   }
 
   // ---------- 索引 ----------
@@ -237,7 +299,8 @@ module.exports = class LexisPlugin extends Plugin {
     if (!this.statusBarEl) return;
     const aliasPart = this.settings.includeAliases && this.stats.aliases ? ` +${this.stats.aliases}别名` : "";
     const duePart = this.stats.due ? ` · ⏰${this.stats.due}` : "";
-    this.statusBarEl.setText(`📕 ${this.stats.words} 词${aliasPart}${duePart}`);
+    const bridgePart = this._server ? " · 🌐" : "";
+    this.statusBarEl.setText(`📕 ${this.stats.words} 词${aliasPart}${duePart}${bridgePart}`);
   }
 
   // ---------- 着色 ----------
@@ -1124,6 +1187,24 @@ class LexisSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("卡片正面").setDesc("整篇=正面单词、背面笔记;填空=正面例句挖空、背面笔记(需先收藏例句,没有则退回显示单词)。")
       .addDropdown((dd) => dd.addOption("note", "单词 → 整篇").addOption("cloze", "例句填空").setValue(this.plugin.settings.cardFront).onChange(async (v) => { this.plugin.settings.cardFront = v; await save(); }));
     new Setting(containerEl).setName("开始背单词").addButton((b) => b.setButtonText("打开复习").setCta().onClick(() => this.plugin.openReview()));
+
+    containerEl.createEl("h4", { text: "浏览器扩展(桥接)" });
+    containerEl.createEl("p", { cls: "setting-item-description", text: "在本机开一个只监听 127.0.0.1 的小服务,供 Chrome 扩展拉词库高亮、划词加词。数据不出本机。Obsidian 关掉后服务也停。" });
+    new Setting(containerEl).setName("启用本地桥接").setDesc(`开启后浏览器访问 http://127.0.0.1:${this.plugin.settings.bridgePort}/ping 应返回 ok。`)
+      .addToggle((t) => t.setValue(this.plugin.settings.bridgeEnabled).onChange(async (v) => {
+        this.plugin.settings.bridgeEnabled = v;
+        if (v && !this.plugin.settings.bridgeToken) this.plugin.settings.bridgeToken = this.plugin.genToken();
+        await save();
+        this.plugin.restartBridge();
+        this.display();
+      }));
+    new Setting(containerEl).setName("端口").setDesc("改完需要重新开关一次桥接生效。")
+      .addText((t) => t.setValue(String(this.plugin.settings.bridgePort)).onChange(async (v) => { const n = parseInt(v, 10); if (n >= 1024 && n <= 65535) { this.plugin.settings.bridgePort = n; await save(); } }))
+      .addExtraButton((b) => b.setIcon("rotate-ccw").setTooltip("重启桥接").onClick(() => { this.plugin.restartBridge(); new Notice("Lexis:桥接已重启"); }));
+    new Setting(containerEl).setName("访问令牌").setDesc("扩展用它连接,防止别的网页乱连。点复制粘到扩展里。")
+      .addText((t) => { t.setValue(this.plugin.settings.bridgeToken || "(启用后生成)").setDisabled(true); t.inputEl.style.width = "260px"; })
+      .addExtraButton((b) => b.setIcon("copy").setTooltip("复制令牌").onClick(async () => { if (this.plugin.settings.bridgeToken) { await navigator.clipboard.writeText(this.plugin.settings.bridgeToken); new Notice("Lexis:令牌已复制"); } }))
+      .addExtraButton((b) => b.setIcon("refresh-cw").setTooltip("重新生成(旧扩展需重填)").onClick(async () => { this.plugin.settings.bridgeToken = this.plugin.genToken(); await save(); this.plugin.restartBridge(); this.display(); }));
 
     new Setting(containerEl).setName("重建索引").addButton((b) => b.setButtonText("立即重建").onClick(() => { this.plugin.rebuildIndex(true); this.renderStats(); }));
     this.statsEl = containerEl.createEl("p", { cls: "lexis-stats" });
