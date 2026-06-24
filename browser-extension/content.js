@@ -351,7 +351,9 @@
         addTag.textContent = "+";
         addTag.addEventListener("click", async (ev) => {
           ev.stopPropagation();
-          // 收集已知标签
+          // 如果已经打开了就关掉
+          const old = tagWrap.querySelector(".lexis-web-tag-list");
+          if (old) { old.remove(); return; }
           const { words: cached } = await chrome.storage.local.get("words");
           const known = new Set();
           if (cached) for (const w of cached) for (const t of (w.t || [])) known.add(t);
@@ -373,7 +375,8 @@
             });
             bucket.appendChild(p);
           }
-          bucket.addEventListener("mouseleave", () => bucket.remove());
+          const closer = (e) => { if (!bucket.contains(e.target)) { bucket.remove(); document.removeEventListener("click", closer); } };
+          setTimeout(() => document.addEventListener("click", closer), 0);
           addTag.appendChild(bucket);
         });
         tagWrap.appendChild(addTag);
@@ -388,6 +391,8 @@
       addTag.textContent = "+ 标签";
       addTag.addEventListener("click", async (ev) => {
         ev.stopPropagation();
+        const old = tagWrap.querySelector(".lexis-web-tag-list");
+        if (old) { old.remove(); return; }
         const { words: cached } = await chrome.storage.local.get("words");
         const known = new Set();
         if (cached) for (const w of cached) for (const t of (w.t || [])) known.add(t);
@@ -403,17 +408,18 @@
               data.tags = r.tags;
               detailCache.delete((data.word || data.base || "").toLowerCase());
               await chrome.runtime.sendMessage({ type: "sync" });
-              tagWrap.remove();
               // 重新加载整个标签区域
               try {
                 const fresh = await chrome.runtime.sendMessage({ type: "detail", key: data.word || data.base });
                 if (fresh && fresh.ok) detailCache.set((data.word || data.base || "").toLowerCase(), fresh);
               } catch (e) {}
+              tagWrap.remove();
             }
           });
           bucket.appendChild(p);
         }
-        bucket.addEventListener("mouseleave", () => bucket.remove());
+        const closer = (e) => { if (!bucket.contains(e.target)) { bucket.remove(); document.removeEventListener("click", closer); } };
+        setTimeout(() => document.addEventListener("click", closer), 0);
         addTag.appendChild(bucket);
       });
       tagWrap.appendChild(addTag);

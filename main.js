@@ -265,6 +265,7 @@ module.exports = class LexisPlugin extends Plugin {
           if (this.app.vault.process) await this.app.vault.process(existing, injectAlias);
           else await this.app.vault.modify(existing, injectAlias(await this.app.vault.cachedRead(existing)));
           this.rebuildIndex(false);
+          if (alias) { const ak = alias.toLowerCase(); if (!this.index.has(ak)) this.index.set(ak, { display: alias, file: existing, isAlias: true, tags: this.getTags(existing) }); }
         }
         if (line) {
           const cur = await this.app.vault.cachedRead(existing);
@@ -284,6 +285,8 @@ module.exports = class LexisPlugin extends Plugin {
       if (alias) content = injectAlias(content);
       const file = await this.app.vault.create(targetPath, content);
       this.rebuildIndex(false);
+      // 保险:metadataCache 偶尔延迟,手动确保别名进索引
+      if (alias) { const ak = alias.toLowerCase(); if (!this.index.has(ak)) this.index.set(ak, { display: alias, file, isAlias: true, tags: new Set() }); }
       return { ok: true, created: true, word, alias: alias || undefined, file: file.path };
     } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
   }
