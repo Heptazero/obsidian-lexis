@@ -266,6 +266,18 @@
 - 设置面板新增「浏览器扩展(桥接)」:启用开关 / 端口 / 令牌(复制·重生成·重启)。
 - **验收**:启用后浏览器开 `http://127.0.0.1:45945/ping` → `{"ok":true,"app":"lexis","version":"0.6.0"}`。带 token 访问 `/words` 返回词库。
 
+## 浏览器扩展 · 阶段 1:拉词库 + 网页高亮 + 悬停释义(v0.6.0)
+- 服务端新增 `GET /word?key=`:返回单词详情(`word/base/file/alias/tags/meaning/markdown`)。`meaning` 用 `extractSection` 抠「意思」段(退「意义」)。
+- 新建 `browser-extension/`(Chrome MV3,无构建):
+  - `manifest.json`:`storage` 权限 + `host_permissions` 指向 127.0.0.1/localhost(让后台 fetch 绕过页面 CORS/混合内容);content script 注入 `<all_urls>`。
+  - `background.js`:**唯一**跟桥接通信的地方。消息 `ping/sync/detail`。`sync` 把 `/words` 存进 `chrome.storage.local`(`words` + `meta`)。
+  - `content.js`:从 storage 直接读 `words`+`cfg`,建大正则(按长度降序、`\b` 边界、`i`),`TreeWalker` 扫文本节点包 `<span.lexis-web-hl>`;跳过 script/code/可编辑等;`MutationObserver` 防抖处理动态加载;悬停 → 向后台要 `detail` → 显示卡片(缓存)。`storage.onChanged` 联动重扫/取消高亮。
+  - `content.css`:波浪线高亮(对齐 Obsidian),`data-lexis-style` 切 wavy/underline/background,`--lexis-web-color` 控色;悬浮卡含深色模式。
+  - `popup`:填主机/端口/令牌,测试连接、同步词库、高亮开关、线型、颜色;显示缓存词数 + 上次同步时间。
+  - `README.md`:装扩展步骤。
+- **离线设计**:高亮吃本地缓存(Obsidian 关着也高亮);悬停释义/同步才需 Obsidian 开 + 桥接启。
+- **验收**:桥接开 → 扩展填令牌 → 测试连接 OK → 同步词库 → 任意英文网页词库词带波浪线、悬停出释义卡。
+
 ## 想法暂存(Hz 提出,暂不做)
 - **标签识别为单词**:除了扫文件夹,再支持"带某标签的笔记也算单词来源"。Hz 说暂时不用,先记着。实现上只需在 `rebuildIndex` 里追加一类来源(按 tag 收集文件),与文件夹来源合并即可。
 

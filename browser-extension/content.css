@@ -1,0 +1,47 @@
+/* Lexis Web —— 高亮与悬浮卡,视觉对齐 Obsidian 里的 Lexis */
+:root { --lexis-web-color: #7c5cff; }
+
+.lexis-web-hl {
+  cursor: help;
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-color: var(--lexis-web-color);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+[data-lexis-style="underline"] .lexis-web-hl { text-decoration-style: solid; }
+[data-lexis-style="background"] .lexis-web-hl {
+  text-decoration: none;
+  background-color: color-mix(in srgb, var(--lexis-web-color) 22%, transparent);
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+.lexis-web-pop {
+  position: absolute;
+  z-index: 2147483647;
+  max-width: 360px;
+  min-width: 160px;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #1f2328;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  font-size: 14px;
+  line-height: 1.5;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  .lexis-web-pop { background: #1f1f23; color: #e6e6e6; border-color: rgba(255, 255, 255, 0.14); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5); }
+}
+.lexis-web-pop-title { font-weight: 700; font-size: 15px; color: var(--lexis-web-color); margin-bottom: 4px; }
+.lexis-web-pop-alias { font-weight: 400; font-size: 12px; opacity: 0.7; }
+.lexis-web-pop-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.lexis-web-tag {
+  font-size: 11px; padding: 1px 6px; border-radius: 999px;
+  background: color-mix(in srgb, var(--lexis-web-color) 16%, transparent);
+  color: var(--lexis-web-color);
+}
+.lexis-web-pop-meaning { white-space: pre-wrap; word-break: break-word; }

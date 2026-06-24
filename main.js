@@ -211,12 +211,38 @@ module.exports = class LexisPlugin extends Plugin {
     const token = req.headers["x-lexis-token"] || url.searchParams.get("token") || "";
     if (!this.settings.bridgeToken || token !== this.settings.bridgeToken) return send(401, { ok: false, error: "bad-token" });
     if (path === "/words" && req.method === "GET") return send(200, this.bridgeWordList());
+    if (path === "/word" && req.method === "GET") return send(200, await this.bridgeWordDetail(url.searchParams.get("key") || url.searchParams.get("w")));
     return send(404, { ok: false, error: "not-found" });
   }
   bridgeWordList() {
     const words = [];
     for (const [key, e] of this.index) words.push({ key, word: e.display, alias: !!e.isAlias, tags: [...(e.tags || [])], file: e.file && e.file.path });
     return { ok: true, version: this.manifest.version, count: words.length, words };
+  }
+  extractSection(md, name) {
+    const re = new RegExp("^#{2,6}[ \\t].*" + escapeRe(name) + ".*$", "m");
+    const m = re.exec(md || "");
+    if (!m) return "";
+    const rest = md.slice(m.index + m[0].length);
+    const next = /^#{1,6}[ \t]/m.exec(rest);
+    return (next ? rest.slice(0, next.index) : rest).trim();
+  }
+  async bridgeWordDetail(key) {
+    const k = String(key || "").toLowerCase();
+    const e = this.index.get(k);
+    if (!e) return { ok: false, error: "not-found" };
+    let body = "";
+    try {
+      const raw = await this.app.vault.cachedRead(e.file);
+      body = raw.replace(/^---\n[\s\S]*?\n---\n?/, "").replace(/```dataviewjs[\s\S]*?```/g, "").replace(/```dataview[\s\S]*?```/g, "").replace(/```lexis[\s\S]*?```/g, "");
+      body = this.compactSections(body.trim());
+    } catch (_e) {}
+    return {
+      ok: true, word: e.display, base: e.file && e.file.basename, file: e.file && e.file.path,
+      alias: !!e.isAlias, tags: [...(e.tags || [])],
+      meaning: this.extractSection(body, "意思") || this.extractSection(body, "意义") || "",
+      markdown: body,
+    };
   }
 
   // ---------- 索引 ----------

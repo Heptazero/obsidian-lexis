@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <style>
+    :root { --accent: #7c5cff; }
+    body { width: 280px; margin: 0; padding: 14px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 13px; color: #1f2328; background: #fff; }
+    @media (prefers-color-scheme: dark) { body { background: #1f1f23; color: #e6e6e6; } input, select { background: #2a2a30; color: #e6e6e6; border-color: #444; } }
+    h1 { font-size: 15px; margin: 0 0 10px; color: var(--accent); }
+    .row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .row label { flex: 0 0 64px; opacity: 0.8; }
+    input[type=text], input[type=number], select { flex: 1; min-width: 0; padding: 4px 6px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; }
+    input[type=number] { max-width: 80px; }
+    .btns { display: flex; gap: 8px; margin: 10px 0 6px; }
+    button { flex: 1; padding: 7px; border: none; border-radius: 7px; cursor: pointer; font-size: 13px; font-weight: 600; }
+    #test { background: #e9e9ef; color: #333; }
+    #sync { background: var(--accent); color: #fff; }
+    @media (prefers-color-scheme: dark) { #test { background: #34343c; color: #ddd; } }
+    button:disabled { opacity: 0.5; cursor: default; }
+    .status { margin-top: 8px; font-size: 12px; min-height: 16px; }
+    .ok { color: #2ea043; } .err { color: #e5534b; }
+    .meta { margin-top: 6px; font-size: 12px; opacity: 0.75; }
+    .toggle { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; }
+    hr { border: none; border-top: 1px solid rgba(128,128,128,.25); margin: 12px 0; }
+    .hint { font-size: 11px; opacity: 0.6; margin-top: 6px; line-height: 1.4; }
+  </style>
+</head>
+<body>
+  <h1>Lexis Web</h1>
+
+  <div class="row"><label>主机</label><input type="text" id="host" placeholder="127.0.0.1"></div>
+  <div class="row"><label>端口</label><input type="number" id="port" placeholder="45945"></div>
+  <div class="row"><label>令牌</label><input type="text" id="token" placeholder="粘贴 Lexis 设置里的令牌"></div>
+
+  <div class="btns">
+    <button id="test">测试连接</button>
+    <button id="sync">同步词库</button>
+  </div>
+  <div class="status" id="status"></div>
+  <div class="meta" id="meta"></div>
+
+  <hr>
+
+  <div class="toggle"><input type="checkbox" id="highlight"><label for="highlight" style="flex:1">在网页上高亮</label></div>
+  <div class="row"><label>线型</label>
+    <select id="style"><option value="wavy">波浪下划线</option><option value="underline">实线下划线</option><option value="background">背景色</option></select>
+  </div>
+  <div class="row"><label>颜色</label><input type="color" id="color" style="flex:0 0 40px;height:28px;padding:0;border:none;background:none;cursor:pointer"></div>
+
+  <div class="hint">高亮用的是上次同步的本地缓存,所以 Obsidian 没开也能高亮;悬停看释义、同步词库才需要 Obsidian 开着且桥接已启用。改了设置后刷新网页生效。</div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
