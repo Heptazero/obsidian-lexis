@@ -216,6 +216,7 @@ module.exports = class LexisPlugin extends Plugin {
     if (!this.settings.bridgeToken || token !== this.settings.bridgeToken) return send(401, { ok: false, error: "bad-token" });
     if (path === "/words" && req.method === "GET") return send(200, this.bridgeWordList());
     if (path === "/word" && req.method === "GET") return send(200, await this.bridgeWordDetail(url.searchParams.get("key") || url.searchParams.get("w")));
+    if (path === "/word" && req.method === "DELETE") return send(200, await this.bridgeDeleteWord(url.searchParams.get("key") || ""));
     if (path === "/add" && req.method === "POST") return send(200, await this.bridgeAddWord(await this.readBody(req)));
     return send(404, { ok: false, error: "not-found" });
   }
@@ -239,24 +240,29 @@ module.exports = class LexisPlugin extends Plugin {
     const title = String((payload && payload.title) || url || "").trim().replace(/[\[\]]/g, "");
     const link = url ? ` —— [${title || url}](${url})` : "";
     const line = (sentence || url) ? `> ${sentence}${link}` : "";
-    const dupKey = sentence || url; // 按句子判重(同网站不同句子是不同例句)
-    const addAlias = async (file) => {
-      if (!alias || alias === word) return;
-      await this.app.fileManager.processFrontMatter(file, (fm) => {
-        let arr = fm.aliases || fm.alias || [];
-        if (!Array.isArray(arr)) arr = typeof arr === "string" ? arr.split(/[,，]/).map((s) => s.trim()) : [arr];
-        if (!arr.includes(alias)) arr.push(alias);
-        fm.aliases = arr;
-        delete fm.alias;
-      });
-    };
+    const dupKey = sentence || url;
     const folder = this.normalizeFolder(this.settings.vocabFolder);
     const targetPath = (folder ? folder + "/" : "") + name + ".md";
     const existing = this.app.vault.getAbstractFileByPath(targetPath);
     try {
       if (existing instanceof TFile) {
         if (alias) {
-          await addAlias(existing);
+          // 给已有词追加别名:直接改文件内容,然后同步重建
+          const applyAlias = (data) => {
+            const re = /^---\n([\s\S]*?)\n---/;
+            const fmMatch = re.exec(data);
+            if (!fmMatch) {
+              return `---\naliases:\n  - "${alias}"\n---\n` + data;
+            }
+            const fmBody = fmMatch[1];
+            if (fmBody.includes(alias)) return data;
+            if (/^aliases:/m.test(fmBody)) {
+              return data.slice(0, fmMatch[0].length) + fmBody.replace(/^(aliases:.*)$/m, `$1\n  - "${alias}"`) + data.slice(fmMatch[0].length + fmMatch[0].length);
+            }
+            return `---\n${fmBody}\naliases:\n  - "${alias}"\n---` + data.slice(fmMatch[0].length);
+          };
+          if (this.app.vault.process) await this.app.vault.process(existing, applyAlias);
+          else await this.app.vault.modify(existing, applyAlias(await this.app.vault.cachedRead(existing)));
           this.rebuildIndex(false);
         }
         if (line) {
@@ -267,16 +273,35 @@ module.exports = class LexisPlugin extends Plugin {
           else await this.app.vault.modify(existing, apply(cur));
         }
         if (!alias) this.scheduleRebuild();
-        return { ok: true, created: false, word, file: existing.path };
+        return { ok: true, created: false, word, alias: alias || undefined, file: existing.path };
       }
       await this.ensureFolder(folder);
       const tpl = await this.readTemplate();
       let content = (tpl != null ? tpl : this.minimalSkeleton()).replace(/\{\{word\}\}/g, word).replace(/\{\{date\}\}/g, todayStr());
       if (line) content = this.insertExampleLine(content, line);
+      // 别名注入到 frontmatter 再建文件,保证 metadataCache 第一时间就包含别名
+      if (alias) {
+        const re = /^---\n([\s\S]*?)\n---/;
+        const fmMatch = re.exec(content);
+        if (fmMatch) {
+          content = `---\n${fmMatch[1]}\naliases:\n  - "${alias}"\n---` + content.slice(fmMatch[0].length);
+        } else {
+          content = `---\naliases:\n  - "${alias}"\n---\n` + content;
+        }
+      }
       const file = await this.app.vault.create(targetPath, content);
-      if (alias) await addAlias(file);
       this.rebuildIndex(false);
-      return { ok: true, created: true, word, file: file.path };
+      return { ok: true, created: true, word, alias: alias || undefined, file: file.path };
+    } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
+  }
+  async bridgeDeleteWord(key) {
+    const k = String(key || "").toLowerCase();
+    const e = this.index.get(k);
+    if (!e || !e.file) return { ok: false, error: "not-found" };
+    try {
+      await this.app.vault.trash(e.file, true);
+      this.rebuildIndex(false);
+      return { ok: true, deleted: e.display, file: e.file.path };
     } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
   }
   // 把一条例句插到「#### 例句」段的末尾(已有例句之后、```lexis occ``` 代码块之前);没有该段就在文末新建

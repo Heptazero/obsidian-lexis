@@ -69,7 +69,7 @@
         detailCache.delete((word || "").toLowerCase());
         if (alias) detailCache.delete(alias.toLowerCase());
         toast(r.dup ? "这条已经在例句里了" : r.created ? alias ? `已将「${alias}」归入「${r.word}」` : `已新建单词「${r.word}」` : `已给「${r.word}」加例句`, true);
-        if (r.created) { try { await chrome.runtime.sendMessage({ type: "sync" }); } catch (e) {} }
+        if (r.created || alias) { try { await chrome.runtime.sendMessage({ type: "sync" }); } catch (e) {} }
       }
     } else {
       toast(r && r.error === "bad-token" ? "令牌不对" : "添加失败(Obsidian 开着且桥接启用?)", false);
@@ -278,6 +278,26 @@
       removePop();
     });
     titleEl.appendChild(addBtn);
+    // ✕ 删除按钮
+    const delBtn = document.createElement("button");
+    delBtn.className = "lexis-web-addbtn";
+    delBtn.textContent = "✕";
+    delBtn.title = "从词库中删除这个词";
+    delBtn.addEventListener("click", async (ev) => {
+      ev.preventDefault();
+      if (!confirm(`删除「${data.word}」?`)) return;
+      delBtn.disabled = true; delBtn.textContent = "…";
+      try {
+        const r = await chrome.runtime.sendMessage({ type: "delete", key: data.word || data.base });
+        if (r && r.ok) {
+          detailCache.delete((data.word || data.base || "").toLowerCase());
+          await chrome.runtime.sendMessage({ type: "sync" });
+          toast(`已删除「${r.deleted}」`, true);
+        } else toast("删除失败", false);
+      } catch (e) { toast("删除失败(连不上?)", false); }
+      removePop();
+    });
+    titleEl.appendChild(delBtn);
     if (data.tags && data.tags.length) {
       const tagWrap = document.createElement("div");
       tagWrap.className = "lexis-web-pop-tags";

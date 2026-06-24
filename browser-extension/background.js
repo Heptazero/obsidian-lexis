@@ -57,6 +57,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         sendResponse(await api(cfg, "/word", { key: msg.key }));
         return;
       }
+      if (msg.type === "delete") {
+        const u = new URL(base(cfg) + "/word");
+        u.searchParams.set("key", msg.key || "");
+        if (cfg.token) u.searchParams.set("token", cfg.token);
+        const r = await fetch(u.toString(), { method: "DELETE" });
+        sendResponse(await r.json());
+        return;
+      }
       if (msg.type === "add") {
         const u = new URL(base(cfg) + "/add");
         if (cfg.token) u.searchParams.set("token", cfg.token);
