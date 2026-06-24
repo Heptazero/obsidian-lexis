@@ -302,6 +302,12 @@
 - **例句插入位置 + 重复标题**:`insertExampleLine` 把例句插到「#### 例句」段末尾、`​```lexis occ​```` 之前;新建词时模板已有该段就插进去,不再在文末又加一个标题。Node 三用例验证(空段/已有例句/无段)。
 - **悬浮卡按文档顺序**:重写为 `bridgeFullHtml` —— 把每个 ```lexis 块换占位符、整篇渲染保留标题与顺序,再用 `lexisBlockHtml` 回填各块(curve/rel按类型反向/occ/derived,带 obsidian:// 链接);空块连同空标题去掉。替代旧的「正文 + extraHtml 堆末尾」。`bridgePostProcess` 抽出内链改写/去 app:// 图。
 
+## ⚠️ 待修(v0.9.0 后,见 HANDOFF.md 详细根因+修法)
+1. 悬浮卡标题没变大(CSS 试两次无效,疑似 ext CSS 没重载/页面更强 important;改法:内联 important 字号)。
+2. 新词加完不立即高亮——**根因确定**:`bridgeAddWord` 创建后用了 debounce 的 `scheduleRebuild`,`/words` 拿到旧索引。改法:换成同步 `rebuildIndex(false)`。
+3. 空段标题改回不显示:`bridgeFullHtml` 没压缩纯空 md 段标题(只删了空 lexis 块)。改法:渲染后遍历 h1~h6 删空段标题(等价 compactSections)。
+4. 出处样式:`.lexis-web-occ-src` 字号调小、`.lexis-web-occ` 间距加大(纯 CSS)。
+
 ## 想法暂存(Hz 提出,暂不做)
 - **标签识别为单词**:除了扫文件夹,再支持"带某标签的笔记也算单词来源"。Hz 说暂时不用,先记着。实现上只需在 `rebuildIndex` 里追加一类来源(按 tag 收集文件),与文件夹来源合并即可。
 
