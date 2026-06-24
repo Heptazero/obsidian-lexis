@@ -36,9 +36,13 @@
 @media (prefers-color-scheme: dark) {
   .lexis-web-pop { background: #1f1f23; color: #e6e6e6; border-color: rgba(255, 255, 255, 0.14); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5); }
 }
-.lexis-web-pop-title { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+/* 锁死字号:网页的 p/div/li 等元素样式会污染 ob 渲染出来的正文,把它压回 14px(类选择器特异性高于页面的元素选择器) */
+.lexis-web-pop, .lexis-web-pop * { font-size: 14px; line-height: 1.5; }
+.lexis-web-pop-title { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.lexis-web-pop .lexis-web-pop-title, .lexis-web-pop .lexis-web-open {
+  font-size: 17px !important; font-weight: 700 !important; line-height: 1.3 !important;
+}
 .lexis-web-pop .lexis-web-open {
-  font-size: 16px !important; font-weight: 700 !important; line-height: 1.3 !important;
   color: var(--lexis-web-color); text-decoration: none; cursor: pointer; flex: 1; min-width: 0;
 }
 .lexis-web-pop .lexis-web-open:hover { text-decoration: underline; }

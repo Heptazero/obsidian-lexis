@@ -235,15 +235,16 @@ module.exports = class LexisPlugin extends Plugin {
     const title = String((payload && payload.title) || url || "").trim().replace(/[\[\]]/g, "");
     const link = url ? ` —— [${title || url}](${url})` : "";
     const line = (sentence || url) ? `> ${sentence}${link}` : "";
+    const dupKey = sentence || url; // 按句子判重(同网站不同句子是不同例句)
     const folder = this.normalizeFolder(this.settings.vocabFolder);
     const targetPath = (folder ? folder + "/" : "") + name + ".md";
     const existing = this.app.vault.getAbstractFileByPath(targetPath);
-    const apply = (data) => /####\s*例句/.test(data) ? data.replace(/(####\s*例句[^\n]*\n)/, `$1${line}\n`) : data.replace(/\s*$/, "") + `\n\n#### 例句\n${line}\n`;
     try {
       if (existing instanceof TFile) {
         if (line) {
           const cur = await this.app.vault.cachedRead(existing);
-          if (url && cur.includes(url)) return { ok: true, created: false, dup: true, word, file: existing.path };
+          if (dupKey && cur.includes(dupKey)) return { ok: true, created: false, dup: true, word, file: existing.path };
+          const apply = (data) => this.insertExampleLine(data, line);
           if (this.app.vault.process) await this.app.vault.process(existing, apply);
           else await this.app.vault.modify(existing, apply(cur));
         }
@@ -253,11 +254,28 @@ module.exports = class LexisPlugin extends Plugin {
       await this.ensureFolder(folder);
       const tpl = await this.readTemplate();
       let content = (tpl != null ? tpl : this.minimalSkeleton()).replace(/\{\{word\}\}/g, word).replace(/\{\{date\}\}/g, todayStr());
-      if (line) content = content.replace(/\s*$/, "") + `\n\n#### 例句\n${line}\n`;
+      // 模板里通常已有「#### 例句」(后面跟 ```lexis occ```),插进去而不是又加一个标题
+      if (line) content = this.insertExampleLine(content, line);
       const file = await this.app.vault.create(targetPath, content);
       this.scheduleRebuild();
       return { ok: true, created: true, word, file: file.path };
     } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
+  }
+  // 把一条例句插到「#### 例句」段的末尾(已有例句之后、```lexis occ``` 代码块之前);没有该段就在文末新建
+  insertExampleLine(data, line) {
+    const re = /(^|\n)#{2,6}[ \t]*例句[^\n]*\n/;
+    const m = re.exec(data);
+    if (!m) return data.replace(/\s*$/, "") + `\n\n#### 例句\n${line}\n`;
+    const headEnd = m.index + m[0].length;
+    const after = data.slice(headEnd);
+    let stop = after.search(/\n#{1,6}[ \t]|\n```/);
+    if (stop < 0) stop = after.length;
+    let section = after.slice(0, stop).replace(/[ \t]*\n+$/, "");
+    const tail = after.slice(stop);
+    const sep = section ? "\n" : "";
+    const newSection = section + sep + line + "\n";
+    const tailFixed = /^\n*```/.test(tail) ? "\n" + tail.replace(/^\n+/, "") : tail;
+    return data.slice(0, headEnd) + newSection + tailFixed;
   }
   bridgeWordList() {
     const words = [];
@@ -282,81 +300,125 @@ module.exports = class LexisPlugin extends Plugin {
       body = raw.replace(/^---\n[\s\S]*?\n---\n?/, "").replace(/```dataviewjs[\s\S]*?```/g, "").replace(/```dataview[\s\S]*?```/g, "").replace(/```lexis[\s\S]*?```/g, "");
       body = this.compactSections(body.trim());
     } catch (_e) {}
-    const html = await this.bridgeRenderHtml(body, e.file && e.file.path);
-    const extraHtml = await this.bridgeExtraHtml(e.file, e.display);
+    const html = await this.bridgeFullHtml(e.file, e.display);
     return {
       ok: true, word: e.display, base: e.file && e.file.basename, file: e.file && e.file.path,
       vault: this.app.vault.getName(),
       alias: !!e.isAlias, tags: [...(e.tags || [])],
       meaning: this.extractSection(body, "意思") || this.extractSection(body, "意义") || "",
-      markdown: body, html, extraHtml,
+      markdown: body, html,
     };
   }
-  // 关系(近义词/同根词…)+ 出现过的地方,渲成带 obsidian:// 链接的 HTML(这些原本是 ```lexis 块算的,扩展那边没有,所以在这边算好)
-  async bridgeExtraHtml(file, display) {
+  bridgeOlink(path, base) {
     const vault = encodeURIComponent(this.app.vault.getName());
-    const olink = (path, base) => `<a class="lexis-web-ilink" href="obsidian://open?vault=${vault}&file=${encodeURIComponent(path)}">${escHtml(base)}</a>`;
-    const boldWord = (sentence) => {
-      const re = new RegExp("(" + escapeRe(display) + ")", "ig");
-      let out = "", last = 0, m; re.lastIndex = 0;
-      while ((m = re.exec(sentence))) {
-        if (m.index > last) out += escHtml(sentence.slice(last, m.index));
-        out += "<b>" + escHtml(m[0]) + "</b>";
-        last = m.index + m[0].length;
-        if (m[0].length === 0) re.lastIndex++;
-      }
-      return out + escHtml(sentence.slice(last));
-    };
-    let html = "";
-    // 关系
-    if (this.settings.showRelated) {
-      try {
-        const { out, inc } = await this.findTypedRelations(file);
-        const order = ["近义词", "同根词", "形近词", "辨析", "相关"];
-        for (const t of order) {
-          const map = new Map();
-          for (const r of (out[t] || [])) map.set(r.path, r.basename);
-          for (const r of (inc[t] || [])) map.set(r.path, r.basename);
-          if (!map.size) continue;
-          html += `<div class="lexis-web-sec">🔗 ${escHtml(t)}</div><div class="lexis-web-rel">` + [...map].map(([p, b]) => olink(p, b)).join("") + `</div>`;
-        }
-      } catch (_e) {}
-    }
-    // 出现过的地方(去掉已收藏的)
-    if (this.settings.showOccurrences) {
-      try {
-        const raw = await this.findOccurrences(display);
-        const curated = await this.getCuratedSourcePaths(file);
-        const list = raw.filter((o) => !curated.has(o.file.basename.toLowerCase()));
-        html += `<div class="lexis-web-sec">📍 出现过的地方 (${list.length})</div>`;
-        if (!list.length) html += `<div class="lexis-web-occ lexis-web-dim">(没有未收藏的新出处)</div>`;
-        else for (const o of list) html += `<div class="lexis-web-occ">${boldWord(o.sentence)} <span class="lexis-web-occ-src">— ${olink(o.file.path, o.file.basename)}</span></div>`;
-      } catch (_e) {}
-    }
-    return html;
+    return `<a class="lexis-web-ilink" href="obsidian://open?vault=${vault}&file=${encodeURIComponent(path)}">${escHtml(base)}</a>`;
   }
-  // 用 Obsidian 自己的渲染器把 md 渲成 HTML(扩展那边没法复用渲染器,所以在这边渲好再发过去)
-  async bridgeRenderHtml(md, sourcePath) {
-    if (!md) return "";
-    const div = document.createElement("div");
-    const comp = new Component(); comp.load();
-    try {
-      if (MarkdownRenderer.render) await MarkdownRenderer.render(this.app, md, div, sourcePath || "", comp);
-      else await MarkdownRenderer.renderMarkdown(md, div, sourcePath || "", comp);
-    } catch (_e) {}
+  bridgePostProcess(div) {
     const vault = encodeURIComponent(this.app.vault.getName());
-    // 内部双链改写成 obsidian:// ,点了能在 Obsidian 里打开
     div.querySelectorAll("a.internal-link").forEach((a) => {
       const lp = a.getAttribute("data-href") || a.getAttribute("href") || a.textContent || "";
       a.setAttribute("href", `obsidian://open?vault=${vault}&file=${encodeURIComponent(lp)}`);
       a.removeAttribute("data-href");
       a.classList.add("lexis-web-ilink");
     });
-    // app:// 本地图片/嵌入在浏览器打不开,去掉;保留 http(s) 图片
     div.querySelectorAll("img").forEach((img) => { if (!/^https?:/i.test(img.getAttribute("src") || "")) img.remove(); });
     div.querySelectorAll(".internal-embed, iframe").forEach((x) => x.remove());
-    const html = div.innerHTML;
+  }
+  // 整篇笔记渲成 HTML,且 ```lexis 块在原位渲染(保持文档顺序),供浏览器扩展悬浮卡用
+  async bridgeFullHtml(file, display) {
+    let raw = "";
+    try { raw = await this.app.vault.cachedRead(file); } catch (_e) { return ""; }
+    raw = raw.replace(/^---\n[\s\S]*?\n---\n?/, "").replace(/```dataviewjs[\s\S]*?```/g, "").replace(/```dataview[\s\S]*?```/g, "");
+    // 把每个 lexis 块换成占位符,先整体渲染(保留标题与顺序),再回填各块算好的 HTML
+    const blocks = [];
+    raw = raw.replace(/```lexis\s*([\s\S]*?)```/g, (_w, inner) => { const i = blocks.length; blocks.push((inner || "").trim()); return `\n\n@@LEXIS${i}@@\n\n`; });
+    const div = document.createElement("div");
+    const comp = new Component(); comp.load();
+    try {
+      if (MarkdownRenderer.render) await MarkdownRenderer.render(this.app, raw, div, file.path || "", comp);
+      else await MarkdownRenderer.renderMarkdown(raw, div, file.path || "", comp);
+    } catch (_e) {}
+    for (let i = 0; i < blocks.length; i++) {
+      const marker = `@@LEXIS${i}@@`;
+      const host = Array.from(div.querySelectorAll("p, div, li")).find((el) => el.textContent.trim() === marker);
+      const html = await this.lexisBlockHtml(file, display, blocks[i]);
+      if (!host) continue;
+      if (!html || !html.trim()) {
+        // 块为空 → 连同它紧挨着的空标题一起去掉(等价于 compactSections 丢空段)
+        const prev = host.previousElementSibling;
+        host.remove();
+        if (prev && /^H[1-6]$/.test(prev.tagName)) { const nx = prev.nextElementSibling; if (!nx || /^H[1-6]$/.test(nx.tagName)) prev.remove(); }
+      } else {
+        const wrap = document.createElement("div");
+        wrap.innerHTML = html;
+        host.replaceWith(...Array.from(wrap.childNodes));
+      }
+    }
+    this.bridgePostProcess(div);
+    const out = div.innerHTML;
     comp.unload();
+    return out;
+  }
+  // 单个 ```lexis 块 → HTML(对应 renderLexisBlock 的各模式,带 obsidian:// 链接)
+  async lexisBlockHtml(file, display, src) {
+    const parts = (src || "").trim().split(/\s+/).filter(Boolean);
+    const m = (parts[0] || "").toLowerCase();
+    const typeArg = parts.slice(1).join(" ");
+    const olink = (p, b) => this.bridgeOlink(p, b);
+    const relMap = (bags, types) => { const map = new Map(); for (const t of types) for (const r of (bags[t] || [])) map.set(r.path, r.basename); return map; };
+    const boldWord = (sentence) => {
+      const re = new RegExp("(" + escapeRe(display) + ")", "ig");
+      let out = "", last = 0, mm; re.lastIndex = 0;
+      while ((mm = re.exec(sentence))) { if (mm.index > last) out += escHtml(sentence.slice(last, mm.index)); out += "<b>" + escHtml(mm[0]) + "</b>"; last = mm.index + mm[0].length; if (mm[0].length === 0) re.lastIndex++; }
+      return out + escHtml(sentence.slice(last));
+    };
+    // 派生词
+    if (m === "derived" || m === "派生") {
+      const resolved = this.app.metadataCache.resolvedLinks || {};
+      const map = new Map();
+      for (const s in resolved) if (this.inVocabFolder(s) && resolved[s] && resolved[s][file.path]) { const sf = this.app.vault.getAbstractFileByPath(s); if (sf) map.set(s, sf.basename); }
+      let h = `<div class="lexis-web-sec">🌱 派生词 (${map.size})</div>`;
+      if (!map.size) return h + `<div class="lexis-web-occ lexis-web-dim">(还没有单词链到这个词根)</div>`;
+      return h + `<div class="lexis-web-rel">` + [...map].map(([p, b]) => olink(p, b)).join("") + `</div>`;
+    }
+    const showCurve = m === "" || m === "curve" || m === "all";
+    const showRelated = m === "" || m === "refs" || m === "ref" || m === "rel" || m === "related" || m === "all";
+    const showOcc = (m === "" || m === "refs" || m === "ref" || m === "occ" || m === "all") && this.settings.showOccurrences;
+    let html = "";
+    if (showCurve) {
+      const card = this.readCard(file);
+      const svg = this.buildCurveSVG(card);
+      if (svg) { const due = card.due ? ` · 下次 ${String(card.due).slice(0, 10)}` : ""; html += `<div class="lexis-web-sec">🧠 记忆曲线(稳定度 ${round2(Number(card.s))} 天${due})</div><div class="lexis-web-curve">${svg}</div>`; }
+    }
+    if (showRelated && this.settings.showRelated) {
+      try {
+        const { out, inc } = await this.findTypedRelations(file);
+        if ((m === "rel" || m === "related") && typeArg) {
+          // 某标题下的块:只显示「反向未回链」的(正向手写链接已在正文里渲染了)
+          const types = typeArg === "辨析" ? ["辨析", "相关"] : [typeArg];
+          const outPaths = new Set(); for (const t of types) for (const r of (out[t] || [])) outPaths.add(r.path);
+          const map = new Map(); for (const t of types) for (const r of (inc[t] || [])) if (!outPaths.has(r.path)) map.set(r.path, r.basename);
+          if (map.size) html += `<div class="lexis-web-rel">` + [...map].map(([p, b]) => olink(p, b)).join("") + `</div>`;
+        } else {
+          // 不带类型(如悬浮卡空块):全部分类,各自带标题
+          for (const t of ["近义词", "同根词", "形近词", "辨析", "相关"]) {
+            const map = relMap(out, [t]); for (const [p, b] of relMap(inc, [t])) map.set(p, b);
+            if (!map.size) continue;
+            html += `<div class="lexis-web-sec">🔗 ${escHtml(t)}</div><div class="lexis-web-rel">` + [...map].map(([p, b]) => olink(p, b)).join("") + `</div>`;
+          }
+        }
+      } catch (_e) {}
+    }
+    if (showOcc) {
+      try {
+        const list = (await this.findOccurrences(display)).filter((o) => true);
+        const curated = await this.getCuratedSourcePaths(file);
+        const fresh = list.filter((o) => !curated.has(o.file.basename.toLowerCase()));
+        html += `<div class="lexis-web-sec">📍 出现过的地方 (${fresh.length})</div>`;
+        if (!fresh.length) html += `<div class="lexis-web-occ lexis-web-dim">(没有未收藏的新出处)</div>`;
+        else for (const o of fresh) html += `<div class="lexis-web-occ">${boldWord(o.sentence)} <span class="lexis-web-occ-src">— ${olink(o.file.path, o.file.basename)}</span></div>`;
+      } catch (_e) {}
+    }
     return html;
   }
 
