@@ -70,6 +70,16 @@
         detailCache.delete((word || "").toLowerCase());
         if (alias) detailCache.delete(alias.toLowerCase());
         toast(r.dup ? "这条已经在例句里了" : r.created ? alias ? `已将「${alias}」归入「${r.word}」` : `已新建单词「${r.word}」` : `已给「${r.word}」加例句`, true);
+        if (r.created && alias) {
+          // 本地即刻高亮别名,不等 sync 来回
+          const ak = alias.toLowerCase();
+          if (!keySet.has(ak)) {
+            keySet.add(ak);
+            const keys = [...keySet].sort((a, b) => b.length - a.length);
+            regex = keys.length ? new RegExp("\\b(?:" + keys.map(esc).join("|") + ")\\b", "gi") : null;
+            if (cfg && cfg.highlight) { scan(document.body); startObserver(); }
+          }
+        }
         if (r.created || alias) { try { await chrome.runtime.sendMessage({ type: "sync" }); } catch (e) {} }
       }
     } else {
@@ -291,7 +301,7 @@
     titleEl.appendChild(addBtn);
     // ✕ 删除按钮
     const delBtn = document.createElement("button");
-    delBtn.className = "lexis-web-addbtn";
+    delBtn.className = "lexis-web-addbtn lexis-web-addbtn-del";
     delBtn.textContent = "🗑";
     delBtn.title = "从词库中删除这个词";
     delBtn.addEventListener("click", async (ev) => {
@@ -314,14 +324,14 @@
       tagWrap.className = "lexis-web-pop-tags";
       const excludeTag = (styleCfg && styleCfg.excludeTag || "").toLowerCase();
       const fill = async () => {
-        tagWrap.querySelectorAll(".lexis-web-tag-del").forEach((b) => b.remove());
+        tagWrap.querySelectorAll(".lexis-web-tag").forEach((b) => b.remove());
         for (const t of data.tags) {
           const s = document.createElement("span");
           s.className = "lexis-web-tag" + (excludeTag && t.toLowerCase() === excludeTag ? " lexis-web-tag-excl" : "");
           s.textContent = "#" + t;
           if (s.classList.contains("lexis-web-tag-excl")) s.title = "排除高亮";
           const x = document.createElement("span");
-          x.className = "lexis-web-tag-del"; x.textContent = " ×"; x.style.cursor = "pointer";
+          x.className = "lexis-web-tag-del"; x.textContent = " ×";
           x.addEventListener("click", async (ev) => {
             ev.stopPropagation();
             const r = await chrome.runtime.sendMessage({ type: "tag", payload: { key: data.word || data.base, tag: t, action: "remove" } });
@@ -335,71 +345,76 @@
           s.appendChild(x);
           tagWrap.appendChild(s);
         }
+        // + 永远在末尾,点开弹出可选标签列表
         const addTag = document.createElement("span");
         addTag.className = "lexis-web-tag lexis-web-tag-add";
         addTag.textContent = "+";
-        addTag.title = "添加标签";
-        addTag.style.cursor = "pointer";
         addTag.addEventListener("click", async (ev) => {
           ev.stopPropagation();
-          const input = document.createElement("input");
-          input.type = "text"; input.placeholder = "标签"; input.style.cssText = "font-size:11px;width:48px;padding:1px 4px;border:1px solid color-mix(in srgb,currentColor 30%,transparent);border-radius:4px;background:transparent;color:inherit";
-          input.addEventListener("keydown", async (e) => {
-            if (e.key === "Enter") {
-              const v = input.value.trim().replace(/^#/, "");
-              if (!v) return;
-              const r = await chrome.runtime.sendMessage({ type: "tag", payload: { key: data.word || data.base, tag: v, action: "add" } });
+          // 收集已知标签
+          const { words: cached } = await chrome.storage.local.get("words");
+          const known = new Set();
+          if (cached) for (const w of cached) for (const t of (w.t || [])) known.add(t);
+          const bucket = document.createElement("div");
+          bucket.className = "lexis-web-tag-list";
+          for (const t of [...known].sort()) {
+            if (data.tags.includes(t)) continue;
+            const p = document.createElement("span");
+            p.className = "lexis-web-tag";
+            p.textContent = "#" + t;
+            p.addEventListener("click", async () => {
+              const r = await chrome.runtime.sendMessage({ type: "tag", payload: { key: data.word || data.base, tag: t, action: "add" } });
               if (r && r.ok) {
                 data.tags = r.tags;
                 detailCache.delete((data.word || data.base || "").toLowerCase());
                 await chrome.runtime.sendMessage({ type: "sync" });
                 fill();
               }
-            }
-          });
-          input.addEventListener("blur", () => fill());
-          addTag.replaceWith(input);
-          input.focus();
+            });
+            bucket.appendChild(p);
+          }
+          bucket.addEventListener("mouseleave", () => bucket.remove());
+          addTag.appendChild(bucket);
         });
         tagWrap.appendChild(addTag);
       };
       fill();
       body.appendChild(tagWrap);
     } else {
-      // 没有标签:也显示 + 来添加
       const tagWrap = document.createElement("div");
       tagWrap.className = "lexis-web-pop-tags";
       const addTag = document.createElement("span");
       addTag.className = "lexis-web-tag lexis-web-tag-add";
       addTag.textContent = "+ 标签";
-      addTag.style.cursor = "pointer";
       addTag.addEventListener("click", async (ev) => {
         ev.stopPropagation();
-        const input = document.createElement("input");
-        input.type = "text"; input.placeholder = "标签"; input.style.cssText = "font-size:11px;width:48px;padding:1px 4px;border:1px solid color-mix(in srgb,currentColor 30%,transparent);border-radius:4px;background:transparent;color:inherit";
-        const fill = async () => {
-          // 触发 reload data
-          try {
-            const fresh = await chrome.runtime.sendMessage({ type: "detail", key: data.word || data.base });
-            if (fresh && fresh.ok) {
-              data.tags = fresh.tags;
-              detailCache.set((data.word || data.base || "").toLowerCase(), fresh);
+        const { words: cached } = await chrome.storage.local.get("words");
+        const known = new Set();
+        if (cached) for (const w of cached) for (const t of (w.t || [])) known.add(t);
+        const bucket = document.createElement("div");
+        bucket.className = "lexis-web-tag-list";
+        for (const t of [...known].sort()) {
+          const p = document.createElement("span");
+          p.className = "lexis-web-tag";
+          p.textContent = "#" + t;
+          p.addEventListener("click", async () => {
+            const r = await chrome.runtime.sendMessage({ type: "tag", payload: { key: data.word || data.base, tag: t, action: "add" } });
+            if (r && r.ok) {
+              data.tags = r.tags;
+              detailCache.delete((data.word || data.base || "").toLowerCase());
+              await chrome.runtime.sendMessage({ type: "sync" });
+              tagWrap.remove();
+              // 重新加载整个标签区域
+              try {
+                const fresh = await chrome.runtime.sendMessage({ type: "detail", key: data.word || data.base });
+                if (fresh && fresh.ok) detailCache.set((data.word || data.base || "").toLowerCase(), fresh);
+              } catch (e) {}
             }
-          } catch (e) {}
-          input.replaceWith(addTag);
-        };
-        input.addEventListener("keydown", async (e) => {
-          if (e.key === "Enter") {
-            const v = input.value.trim().replace(/^#/, "");
-            if (!v) { fill(); return; }
-            const r = await chrome.runtime.sendMessage({ type: "tag", payload: { key: data.word || data.base, tag: v, action: "add" } });
-            if (r && r.ok) { detailCache.delete((data.word || data.base || "").toLowerCase()); await chrome.runtime.sendMessage({ type: "sync" }); }
-            fill();
-          }
-        });
-        input.addEventListener("blur", fill);
-        addTag.replaceWith(input);
-        input.focus();
+          });
+          bucket.appendChild(p);
+        }
+        bucket.addEventListener("mouseleave", () => bucket.remove());
+        addTag.appendChild(bucket);
       });
       tagWrap.appendChild(addTag);
       body.appendChild(tagWrap);

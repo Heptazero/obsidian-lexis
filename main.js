@@ -248,7 +248,7 @@ module.exports = class LexisPlugin extends Plugin {
     const injectAlias = (data) => {
       const re = /^---\r?\n([\s\S]*?)\r?\n---/;
       const fm = re.exec(data);
-      const line = `  - "${alias}"\n`;
+      const line = `  - ${alias}\n`;
       if (!fm) return `---\naliases:\n${line}---\n` + data;
       const body = fm[1];
       if (body.includes(alias)) return data; // 已有,不重复加

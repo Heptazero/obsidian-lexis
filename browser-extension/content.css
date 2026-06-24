@@ -53,6 +53,8 @@
 }
 .lexis-web-addbtn:hover { background: color-mix(in srgb, var(--lexis-web-color) 30%, transparent); }
 .lexis-web-addbtn:disabled { opacity: 0.5; cursor: default; }
+.lexis-web-addbtn-del { color: #e5534b; background: color-mix(in srgb, #e5534b 16%, transparent); }
+.lexis-web-addbtn-del:hover { background: color-mix(in srgb, #e5534b 28%, transparent); }
 
 /* 关系 / 出现过的地方 */
 .lexis-web-pop-extra { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(128,128,128,.22); }
@@ -103,7 +105,7 @@
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
 }
 .lexis-web-toast.err { background: #e5534b; }
-.lexis-web-pop-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.lexis-web-pop-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; position: relative; }
 .lexis-web-tag {
   font-size: 11px; padding: 1px 6px; border-radius: 999px;
   background: color-mix(in srgb, var(--lexis-web-color) 16%, transparent);
@@ -116,6 +118,15 @@
 .lexis-web-tag-add { opacity: 0.55; }
 .lexis-web-tag-del { opacity: 0.5; }
 .lexis-web-tag-del:hover { opacity: 1; }
+.lexis-web-tag-list {
+  position: absolute; z-index: 1;
+  display: flex; flex-wrap: wrap; gap: 3px;
+  max-width: 220px; padding: 5px 7px;
+  background: inherit; border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0,0,0,.25);
+}
+.lexis-web-tag-list .lexis-web-tag { cursor: pointer; }
+.lexis-web-tag-list .lexis-web-tag:hover { filter: brightness(1.15); }
 
 /* 可滚动正文 */
 .lexis-web-pop-body { max-height: 52vh; overflow-y: auto; overscroll-behavior: contain; }
