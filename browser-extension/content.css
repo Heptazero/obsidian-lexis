@@ -109,6 +109,13 @@
   background: color-mix(in srgb, var(--lexis-web-color) 16%, transparent);
   color: var(--lexis-web-color);
 }
+.lexis-web-tag-excl {
+  background: color-mix(in srgb, #e5534b 16%, transparent);
+  color: #e5534b;
+}
+.lexis-web-tag-add { opacity: 0.55; }
+.lexis-web-tag-del { opacity: 0.5; }
+.lexis-web-tag-del:hover { opacity: 1; }
 
 /* 可滚动正文 */
 .lexis-web-pop-body { max-height: 52vh; overflow-y: auto; overscroll-behavior: contain; }

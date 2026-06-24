@@ -218,6 +218,7 @@ module.exports = class LexisPlugin extends Plugin {
     if (path === "/word" && req.method === "GET") return send(200, await this.bridgeWordDetail(url.searchParams.get("key") || url.searchParams.get("w")));
     if (path === "/word" && req.method === "DELETE") return send(200, await this.bridgeDeleteWord(url.searchParams.get("key") || ""));
     if (path === "/add" && req.method === "POST") return send(200, await this.bridgeAddWord(await this.readBody(req)));
+    if (path === "/tag" && req.method === "POST") return send(200, await this.bridgeTagWord(await this.readBody(req)));
     return send(404, { ok: false, error: "not-found" });
   }
   readBody(req) {
@@ -294,6 +295,54 @@ module.exports = class LexisPlugin extends Plugin {
       await this.app.vault.trash(e.file, true);
       this.rebuildIndex(false);
       return { ok: true, deleted: e.display, file: e.file.path };
+    } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
+  }
+  async bridgeTagWord(payload) {
+    const key = String((payload && payload.key) || "").toLowerCase();
+    const tag = String((payload && payload.tag) || "").toLowerCase().replace(/^#/, "");
+    const action = String((payload && payload.action) || "add");
+    if (!tag) return { ok: false, error: "empty-tag" };
+    const e = this.index.get(key);
+    if (!e || !e.file) return { ok: false, error: "not-found" };
+    try {
+      const cur = await this.app.vault.cachedRead(e.file);
+      const re = /^---\r?\n([\s\S]*?)\r?\n---/;
+      const fm = re.exec(cur);
+      if (!fm) return { ok: false, error: "no-frontmatter" };
+      let body = fm[1];
+      let tags = [];
+      const tagMatch = /^tags:\s*$/m.exec(body);
+      if (tagMatch) {
+        const after = body.slice(tagMatch.index + tagMatch[0].length);
+        const listEnd = after.search(/^[^ \t-]/m);
+        const list = (listEnd >= 0 ? after.slice(0, listEnd) : after).trim();
+        tags = list.split("\n").map((s) => s.replace(/^\s*-\s*/, "").trim()).filter(Boolean);
+      }
+      if (action === "remove") {
+        tags = tags.filter((t) => t.toLowerCase() !== tag);
+      } else {
+        if (!tags.includes(tag)) tags.push(tag);
+      }
+      let newBody;
+      if (tags.length) {
+        const tagBlock = "tags:\n" + tags.map((t) => `  - ${t}`).join("\n");
+        if (tagMatch) {
+          const after = body.slice(tagMatch.index + tagMatch[0].length);
+          const listEnd = after.search(/^[^ \t-]/m);
+          const prefix = body.slice(0, tagMatch.index);
+          const suffix = listEnd >= 0 ? after.slice(listEnd) : "";
+          newBody = prefix + tagBlock + suffix;
+        } else {
+          const sep = body.trim() ? "\n" : "";
+          newBody = body + sep + tagBlock;
+        }
+      } else {
+        newBody = body.replace(/\n*tags:\s*\n(?:[ \t]*-[^\n]*\n?)*/g, "").trim();
+      }
+      const newContent = `---\n${newBody}\n---` + cur.slice(fm.index + fm[0].length);
+      await this.app.vault.modify(e.file, newContent);
+      this.rebuildIndex(false);
+      return { ok: true, key, tag, action: action === "remove" ? "removed" : "added", tags };
     } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
   }
   // 把一条例句插到「#### 例句」段的末尾(已有例句之后、```lexis occ``` 代码块之前);没有该段就在文末新建
