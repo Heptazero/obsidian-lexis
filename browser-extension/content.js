@@ -83,6 +83,15 @@
     root.setAttribute("data-lexis-style", cfg.style || "wavy");
   }
 
+  // 根据颜色亮度返回黑/白文字色
+  function textColorFor(bg) {
+    let hex = bg;
+    if (hex.startsWith("color-mix")) { const m = /#([0-9a-fA-F]{6})/.exec(hex); hex = m ? "#" + m[1] : "#7c5cff"; }
+    if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return "#fff";
+    const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+    return (r * 0.299 + g * 0.587 + b * 0.114) > 160 ? "#1f2328" : "#fff";
+  }
+
   function build(words) {
     keySet = new Set();
     keyTags = new Map();
@@ -267,7 +276,7 @@
     // ➕ 给这个词加例句(抓页面上它所在的那句)
     const addBtn = document.createElement("button");
     addBtn.className = "lexis-web-addbtn";
-    addBtn.textContent = "➕ 例句";
+    addBtn.textContent = "+ 例句";
     addBtn.title = "把这个词在本页所在的句子加进它的例句";
     const targetWord = data.base || data.word;
     addBtn.addEventListener("click", async (ev) => {
@@ -281,7 +290,7 @@
     // ✕ 删除按钮
     const delBtn = document.createElement("button");
     delBtn.className = "lexis-web-addbtn";
-    delBtn.textContent = "✕";
+    delBtn.textContent = "🗑";
     delBtn.title = "从词库中删除这个词";
     delBtn.addEventListener("click", async (ev) => {
       ev.preventDefault();
@@ -358,7 +367,7 @@
 
     const addBtn = document.createElement("button");
     addBtn.className = "lexis-web-selbtn-pill";
-    addBtn.textContent = "➕ 添加";
+    addBtn.textContent = "+ 添加";
     addBtn.title = "直接以选中词为标题建新词";
     addBtn.addEventListener("mousedown", (e) => e.preventDefault());
     addBtn.addEventListener("click", async () => {
@@ -408,6 +417,8 @@
     pill.style.top = Math.max(8, top) + "px";
 
     document.body.appendChild(pill);
+    const tc = textColorFor(getComputedStyle(pill).backgroundColor);
+    pill.style.color = tc;
     selBtn = pill;
   }
   document.addEventListener("mouseup", () => setTimeout(onSelect, 10));
@@ -435,7 +446,8 @@
       }
       if (changes.styleConfig) styleCfg = changes.styleConfig.newValue || null;
       if (changes.words) build(changes.words.newValue || []);
-      const styleChanged = oldCfg && cfg && oldCfg.useObsidianStyle !== cfg.useObsidianStyle;
+      const styleChanged = oldCfg && cfg && (oldCfg.useObsidianStyle !== cfg.useObsidianStyle
+        || oldCfg.color !== cfg.color || oldCfg.style !== cfg.style || oldCfg.opacity !== cfg.opacity);
       if (cfg && cfg.highlight) {
         if (changes.words || changes.styleConfig || styleChanged || (changes.cfg && changes.cfg.newValue && changes.cfg.newValue.highlight && !(changes.cfg.oldValue || {}).highlight)) {
           unwrapAll();

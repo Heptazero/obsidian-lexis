@@ -244,25 +244,25 @@ module.exports = class LexisPlugin extends Plugin {
     const folder = this.normalizeFolder(this.settings.vocabFolder);
     const targetPath = (folder ? folder + "/" : "") + name + ".md";
     const existing = this.app.vault.getAbstractFileByPath(targetPath);
+    const injectAlias = (data) => {
+      const re = /^---\r?\n([\s\S]*?)\r?\n---/;
+      const fm = re.exec(data);
+      const line = `  - "${alias}"\n`;
+      if (!fm) return `---\naliases:\n${line}---\n` + data;
+      const body = fm[1];
+      if (body.includes(alias)) return data; // 已有,不重复加
+      if (/^aliases:/m.test(body)) {
+        // 已有 aliases 键 → 追加到末尾
+        return data.slice(0, fm.index) + `---\n` + body.replace(/^(aliases:.*)$/m, `$1\n${line}`) + `\n---` + data.slice(fm.index + fm[0].length);
+      }
+      // 没有 aliases 键 → 新增
+      return data.slice(0, fm.index) + `---\n${body}\naliases:\n${line}---` + data.slice(fm.index + fm[0].length);
+    };
     try {
       if (existing instanceof TFile) {
         if (alias) {
-          // 给已有词追加别名:直接改文件内容,然后同步重建
-          const applyAlias = (data) => {
-            const re = /^---\n([\s\S]*?)\n---/;
-            const fmMatch = re.exec(data);
-            if (!fmMatch) {
-              return `---\naliases:\n  - "${alias}"\n---\n` + data;
-            }
-            const fmBody = fmMatch[1];
-            if (fmBody.includes(alias)) return data;
-            if (/^aliases:/m.test(fmBody)) {
-              return data.slice(0, fmMatch[0].length) + fmBody.replace(/^(aliases:.*)$/m, `$1\n  - "${alias}"`) + data.slice(fmMatch[0].length + fmMatch[0].length);
-            }
-            return `---\n${fmBody}\naliases:\n  - "${alias}"\n---` + data.slice(fmMatch[0].length);
-          };
-          if (this.app.vault.process) await this.app.vault.process(existing, applyAlias);
-          else await this.app.vault.modify(existing, applyAlias(await this.app.vault.cachedRead(existing)));
+          if (this.app.vault.process) await this.app.vault.process(existing, injectAlias);
+          else await this.app.vault.modify(existing, injectAlias(await this.app.vault.cachedRead(existing)));
           this.rebuildIndex(false);
         }
         if (line) {
@@ -280,15 +280,7 @@ module.exports = class LexisPlugin extends Plugin {
       let content = (tpl != null ? tpl : this.minimalSkeleton()).replace(/\{\{word\}\}/g, word).replace(/\{\{date\}\}/g, todayStr());
       if (line) content = this.insertExampleLine(content, line);
       // 别名注入到 frontmatter 再建文件,保证 metadataCache 第一时间就包含别名
-      if (alias) {
-        const re = /^---\n([\s\S]*?)\n---/;
-        const fmMatch = re.exec(content);
-        if (fmMatch) {
-          content = `---\n${fmMatch[1]}\naliases:\n  - "${alias}"\n---` + content.slice(fmMatch[0].length);
-        } else {
-          content = `---\naliases:\n  - "${alias}"\n---\n` + content;
-        }
-      }
+      if (alias) content = injectAlias(content);
       const file = await this.app.vault.create(targetPath, content);
       this.rebuildIndex(false);
       return { ok: true, created: true, word, alias: alias || undefined, file: file.path };
