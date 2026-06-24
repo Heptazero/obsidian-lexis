@@ -365,6 +365,10 @@
 - 根因(node 复现):`bridgeTagWord` 手写 YAML 解析两个 bug——① 读已有 tags 用 `after.search(/^[^ \t-]/m)`,字符类 `[^ \t-]` **会匹配 `\n`**,开头换行被当成列表结束 → 永远读到 0 个旧标签(→只剩一个 / 不同步);② remove 分支给 `const newContent` 重新赋值 → `TypeError` 被 catch 吞掉(→删不掉)。
 - 修法:删掉整段手写解析,改用 `app.fileManager.processFrontMatter`(仓库已有先例 937/1383):规范化读 `fm.tags`(null/字符串/数组都处理)→ 加/删/去重 → 写回(空则 `delete fm.tags`,并 `delete fm.tag` 清单数键)。返回真实结果 tags + 即时刷新 index 配色。默认不再动正文行内 `#tag`。
 
+## 修复:YouTube 字幕上滑词不弹按钮 + 高亮不稳定(扩展 v1.0.2)
+- **滑词不弹按钮**:只靠 `mouseup` 触发,但 YouTube player 会吞掉内部 mouseup → onSelect 不跑。改为 `mouseup` + `selectionchange` 双触发(共用 200ms 防抖的 `scheduleSel`),selectionchange 不受 stopPropagation 影响。加守卫:焦点在自己的别名 input 里时跳过(防 input 聚焦的 selectionchange 误触发关掉浮窗)。注意:字幕播放中节点会被替换致选区丢失,暂停后选最稳。
+- **高亮不稳定**:MutationObserver 原来任何变动就整页 `scan(document.body)`(400ms 防抖),YouTube 字幕高频重渲染下:整页扫慢 + 重渲染把高亮 span 冲掉要等到下次扫才回来 → 闪。改为**只扫变动的子树**(收集 addedNodes/characterData 的 root,120ms 防抖后逐个 scan),并忽略自己插入的 `.lexis-web-hl`(防自触发),observe 加 `characterData:true`。近乎即时重新高亮且不卡。
+
 ## 想法暂存(Hz 提出,暂不做)
 - **标签识别为单词**:除了扫文件夹,再支持"带某标签的笔记也算单词来源"。Hz 说暂时不用,先记着。实现上只需在 `rebuildIndex` 里追加一类来源(按 tag 收集文件),与文件夹来源合并即可。
 

@@ -11,6 +11,8 @@
   let regex = null;
   let observer = null;
   let scanTimer = null;
+  let selTimer = null;
+  let pendingRoots = new Set();
   let styleCfg = null;
   const detailCache = new Map();
   let pop = null, hideTimer = null, currentSpan = null;
@@ -210,15 +212,39 @@
 
   function scheduleScan() {
     clearTimeout(scanTimer);
-    scanTimer = setTimeout(() => scan(document.body), 400);
+    scanTimer = setTimeout(flushScan, 120);
+  }
+  function flushScan() {
+    if (!regex || !(cfg && cfg.highlight)) { pendingRoots.clear(); return; }
+    const roots = [...pendingRoots];
+    pendingRoots.clear();
+    if (!roots.length) return;
+    // 只扫变动的子树(而非整页),YouTube 字幕这种频繁重渲染的也能近乎即时重新高亮、且不卡
+    for (const r of roots) { if (r && r.isConnected) scan(r); }
   }
 
   function startObserver() {
     if (observer) return;
     observer = new MutationObserver((muts) => {
-      for (const mu of muts) if (mu.addedNodes && mu.addedNodes.length) { scheduleScan(); break; }
+      let any = false;
+      for (const mu of muts) {
+        if (mu.type === "characterData") {
+          const p = mu.target && mu.target.parentElement;
+          if (p && !(p.classList && p.classList.contains(HL))) { pendingRoots.add(p); any = true; }
+          continue;
+        }
+        for (const node of mu.addedNodes) {
+          if (node.nodeType === 1) {
+            if (node.classList && node.classList.contains(HL)) continue; // 自己插的高亮,别再触发
+            pendingRoots.add(node); any = true;
+          } else if (node.nodeType === 3 && node.parentElement && !(node.parentElement.classList && node.parentElement.classList.contains(HL))) {
+            pendingRoots.add(node.parentElement); any = true;
+          }
+        }
+      }
+      if (any) scheduleScan();
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
   }
 
   // ---- 悬停卡 ----
@@ -448,6 +474,8 @@
   let selBtn = null;
   function hideSelBtn() { if (selBtn) { selBtn.remove(); selBtn = null; } }
   function onSelect() {
+    // 正在用我们自己的别名输入框时别打扰(selectionchange 会因 input 聚焦误触发)
+    if (selBtn && document.activeElement && selBtn.contains(document.activeElement)) return;
     const sel = window.getSelection();
     const text = sel ? sel.toString().trim() : "";
     if (!text || text.length > 60 || text.split(/\s+/).length > 6 || !/[A-Za-z]/.test(text)) { hideSelBtn(); return; }
@@ -542,7 +570,10 @@
     pill.style.color = tc;
     selBtn = pill;
   }
-  document.addEventListener("mouseup", () => setTimeout(onSelect, 10));
+  // mouseup + selectionchange 双触发:YouTube 等会吞掉 player 内的 mouseup,selectionchange 兜底
+  function scheduleSel() { clearTimeout(selTimer); selTimer = setTimeout(onSelect, 200); }
+  document.addEventListener("mouseup", scheduleSel);
+  document.addEventListener("selectionchange", scheduleSel);
   document.addEventListener("mousedown", (e) => { if (selBtn && !selBtn.contains(e.target)) hideSelBtn(); });
   document.addEventListener("scroll", hideSelBtn, { passive: true });
 
