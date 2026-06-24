@@ -111,13 +111,14 @@
   background: color-mix(in srgb, var(--lexis-web-color) 16%, transparent);
   color: var(--lexis-web-color);
 }
+.lexis-web-tag { cursor: default; }
 .lexis-web-tag-excl {
   background: color-mix(in srgb, #e5534b 16%, transparent);
   color: #e5534b;
 }
-.lexis-web-tag-add { opacity: 0.55; }
+.lexis-web-tag-add { opacity: 0.55; cursor: pointer; }
 .lexis-web-tag-off { opacity: 0.35; filter: grayscale(0.5); }
-.lexis-web-tag-del { opacity: 0.5; }
+.lexis-web-tag-del { opacity: 0.5; cursor: pointer; }
 .lexis-web-tag-del:hover { opacity: 1; }
 .lexis-web-tag-pick { position: relative; }
 .lexis-web-tag-list {
@@ -134,6 +135,7 @@
   cursor: pointer; border-radius: 4px; padding: 3px 6px;
   background: transparent; color: inherit;
 }
+.lexis-web-tag-list .lexis-web-tag.lexis-web-tag-off { cursor: default; }
 .lexis-web-tag-list .lexis-web-tag:not(.lexis-web-tag-off):hover {
   background: color-mix(in srgb, var(--lexis-web-color) 14%, transparent);
 }

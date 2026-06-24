@@ -345,6 +345,9 @@ module.exports = class LexisPlugin extends Plugin {
       const newContent = `---\n${newBody}\n---` + cur.slice(fm.index + fm[0].length);
       await this.app.vault.modify(e.file, newContent);
       this.rebuildIndex(false);
+      // metadataCache 延迟兜底:手动更新索引中此词的 tags
+      const ie = this.index.get(key);
+      if (ie) ie.tags = new Set(tags.map((t) => t.toLowerCase()));
       return { ok: true, key, tag, action: action === "remove" ? "removed" : "added", tags };
     } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
   }

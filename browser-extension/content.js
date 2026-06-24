@@ -323,12 +323,6 @@
       const tagWrap = document.createElement("div");
       tagWrap.className = "lexis-web-pop-tags";
       const excludeTag = (styleCfg && styleCfg.excludeTag || "").toLowerCase();
-      const refreshData = async () => {
-        try {
-          const fresh = await chrome.runtime.sendMessage({ type: "detail", key: data.word || data.base });
-          if (fresh && fresh.ok) { Object.assign(data, { tags: fresh.tags }); detailCache.set((data.word || data.base || "").toLowerCase(), fresh); }
-        } catch (e) {}
-      };
       const fill = async () => {
         tagWrap.querySelectorAll(".lexis-web-tag,.lexis-web-tag-pick").forEach((b) => b.remove());
         for (const t of data.tags) {
@@ -344,7 +338,8 @@
             const r = await chrome.runtime.sendMessage({ type: "tag", payload: { key: data.word || data.base, tag: t, action: "remove" } });
             if (r && r.ok) {
               data.tags = r.tags; detailCache.delete((data.word || data.base || "").toLowerCase());
-              await chrome.runtime.sendMessage({ type: "sync" }); await refreshData(); fill();
+              await chrome.runtime.sendMessage({ type: "sync" });
+              fill();
             }
           });
           s.appendChild(x);
@@ -376,7 +371,7 @@
                 const r = await chrome.runtime.sendMessage({ type: "tag", payload: { key: data.word || data.base, tag: t, action: "add" } });
                 if (r && r.ok) {
                   data.tags = r.tags; detailCache.delete((data.word || data.base || "").toLowerCase());
-                  await chrome.runtime.sendMessage({ type: "sync" }); await refreshData(); fill();
+                  await chrome.runtime.sendMessage({ type: "sync" }); fill();
                 }
               });
             }
