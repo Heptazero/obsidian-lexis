@@ -90,8 +90,9 @@
 
   function applyTheme() {
     const root = document.documentElement;
-    root.style.setProperty("--lexis-web-color", cfg.color || "#7c5cff");
-    root.setAttribute("data-lexis-style", cfg.style || "wavy");
+    const color = (styleCfg && styleCfg.highlightColor) || cfg.color || "#7c5cff";
+    root.style.setProperty("--lexis-web-color", color);
+    root.setAttribute("data-lexis-style", (styleCfg && styleCfg.highlightStyle) || cfg.style || "wavy");
   }
 
   // 根据颜色亮度返回黑/白文字色
@@ -319,118 +320,96 @@
       removePop();
     });
     titleEl.appendChild(delBtn);
-    if (data.tags && data.tags.length) {
-      const tagWrap = document.createElement("div");
-      tagWrap.className = "lexis-web-pop-tags";
-      const excludeTag = (styleCfg && styleCfg.excludeTag || "").toLowerCase();
-      const fill = async () => {
-        tagWrap.querySelectorAll(".lexis-web-tag,.lexis-web-tag-pick").forEach((b) => b.remove());
-        for (const t of data.tags) {
-          const s = document.createElement("span");
-          s.className = "lexis-web-tag" + (excludeTag && t.toLowerCase() === excludeTag ? " lexis-web-tag-excl" : "");
-          s.textContent = "#" + t;
-          if (s.classList.contains("lexis-web-tag-excl")) s.title = "排除高亮";
-          const x = document.createElement("span");
-          x.className = "lexis-web-tag-del"; x.textContent = " ×";
-          x.addEventListener("mousedown", (ev) => { ev.preventDefault(); ev.stopPropagation(); });
-          x.addEventListener("click", async (ev) => {
-            ev.stopPropagation();
+    // ---- 标签管理 ----
+    const tagWrap = document.createElement("div");
+    tagWrap.className = "lexis-web-pop-tags";
+    body.appendChild(tagWrap);
+    const excludeTag = (styleCfg && styleCfg.excludeTag || "").toLowerCase();
+    let bucketEl = null;
+
+    const syncTags = async () => { await chrome.runtime.sendMessage({ type: "sync" }).catch(() => {}); };
+
+    const updateBucket = () => {
+      if (!bucketEl) return;
+      bucketEl.querySelectorAll(".lexis-web-tag").forEach((p) => {
+        const t = p.textContent.replace(/^#/, "");
+        p.classList.toggle("lexis-web-tag-off", (data.tags || []).includes(t));
+      });
+    };
+
+    const addTagPill = (tag) => {
+      const s = document.createElement("span");
+      s.className = "lexis-web-tag" + (excludeTag && tag.toLowerCase() === excludeTag ? " lexis-web-tag-excl" : "");
+      s.textContent = "#" + tag;
+      s.dataset.tag = tag;
+      const x = document.createElement("span");
+      x.className = "lexis-web-tag-del"; x.textContent = " ×";
+      x.addEventListener("mousedown", (ev) => { ev.preventDefault(); ev.stopPropagation(); });
+      x.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        const r = await chrome.runtime.sendMessage({ type: "tag", payload: { key: data.word || data.base, tag: tag, action: "remove" } });
+        if (r && r.ok) {
+          data.tags = r.tags; detailCache.delete((data.word || data.base || "").toLowerCase());
+          syncTags();
+          s.remove();
+          updateBucket();
+        }
+      });
+      s.appendChild(x);
+      tagWrap.insertBefore(s, tagWrap.querySelector(".lexis-web-tag-pick"));
+    };
+
+    // 现有标签
+    if (data.tags) for (const t of data.tags) addTagPill(t);
+
+    // + 选择器(始终在末尾)
+    const pick = document.createElement("div");
+    pick.className = "lexis-web-tag-pick";
+    const header = document.createElement("span");
+    header.className = "lexis-web-tag lexis-web-tag-add";
+    header.textContent = (data.tags && data.tags.length > 0) ? "+" : "+ 标签";
+    header.addEventListener("mousedown", (ev) => { ev.preventDefault(); ev.stopPropagation(); });
+    header.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      if (bucketEl) { bucketEl.remove(); bucketEl = null; return; }
+      const { words: cached } = await chrome.storage.local.get("words");
+      const known = new Set(); if (cached) for (const w of cached) for (const t of (w.t || [])) known.add(t);
+      bucketEl = document.createElement("div");
+      bucketEl.className = "lexis-web-tag-list";
+      for (const t of [...known].sort()) {
+        const p = document.createElement("span");
+        p.className = "lexis-web-tag" + ((data.tags || []).includes(t) ? " lexis-web-tag-off" : "");
+        p.textContent = "#" + t;
+        p.addEventListener("mousedown", (ev) => { ev.preventDefault(); ev.stopPropagation(); });
+        p.addEventListener("click", async (ev) => {
+          ev.stopPropagation();
+          if ((data.tags || []).includes(t)) {
             const r = await chrome.runtime.sendMessage({ type: "tag", payload: { key: data.word || data.base, tag: t, action: "remove" } });
             if (r && r.ok) {
               data.tags = r.tags; detailCache.delete((data.word || data.base || "").toLowerCase());
-              await chrome.runtime.sendMessage({ type: "sync" });
-              fill();
+              syncTags();
+              const pill = tagWrap.querySelector('[data-tag="'+t+'"]');
+              if (pill) pill.remove();
+              updateBucket();
             }
-          });
-          s.appendChild(x);
-          tagWrap.appendChild(s);
-        }
-        const pick = document.createElement("div");
-        pick.className = "lexis-web-tag-pick";
-        const header = document.createElement("span");
-        header.className = "lexis-web-tag lexis-web-tag-add";
-        header.textContent = "+";
-        header.addEventListener("mousedown", (ev) => { ev.preventDefault(); ev.stopPropagation(); });
-        header.addEventListener("click", async (ev) => {
-          ev.stopPropagation();
-          const list = pick.querySelector(".lexis-web-tag-list");
-          if (list) { list.remove(); return; }
-          const { words: cached } = await chrome.storage.local.get("words");
-          const known = new Set(); if (cached) for (const w of cached) for (const t of (w.t || [])) known.add(t);
-          const bucket = document.createElement("div");
-          bucket.className = "lexis-web-tag-list";
-          for (const t of [...known].sort()) {
-            const sel = data.tags.includes(t);
-            const p = document.createElement("span");
-            p.className = "lexis-web-tag" + (sel ? " lexis-web-tag-off" : "");
-            p.textContent = "#" + t;
-            if (!sel) {
-              p.addEventListener("mousedown", (ev) => { ev.preventDefault(); ev.stopPropagation(); });
-              p.addEventListener("click", async (ev) => {
-                ev.stopPropagation();
-                const r = await chrome.runtime.sendMessage({ type: "tag", payload: { key: data.word || data.base, tag: t, action: "add" } });
-                if (r && r.ok) {
-                  data.tags = r.tags; detailCache.delete((data.word || data.base || "").toLowerCase());
-                  await chrome.runtime.sendMessage({ type: "sync" }); fill();
-                }
-              });
-            }
-            bucket.appendChild(p);
-          }
-          const closer = (e) => { if (!bucket.contains(e.target) && e.target !== header) { bucket.remove(); document.removeEventListener("mousedown", closer); } };
-          document.addEventListener("mousedown", closer);
-          pick.appendChild(bucket);
-        });
-        pick.appendChild(header);
-        tagWrap.appendChild(pick);
-      };
-      fill();
-      body.appendChild(tagWrap);
-    } else {
-      const tagWrap = document.createElement("div");
-      tagWrap.className = "lexis-web-pop-tags";
-      const pick = document.createElement("div");
-      pick.className = "lexis-web-tag-pick";
-      const header = document.createElement("span");
-      header.className = "lexis-web-tag lexis-web-tag-add";
-      header.textContent = "+ 标签";
-      header.addEventListener("mousedown", (ev) => { ev.preventDefault(); ev.stopPropagation(); });
-      header.addEventListener("click", async (ev) => {
-        ev.stopPropagation();
-        const list = pick.querySelector(".lexis-web-tag-list");
-        if (list) { list.remove(); return; }
-        const { words: cached } = await chrome.storage.local.get("words");
-        const known = new Set(); if (cached) for (const w of cached) for (const t of (w.t || [])) known.add(t);
-        const bucket = document.createElement("div");
-        bucket.className = "lexis-web-tag-list";
-        for (const t of [...known].sort()) {
-          const p = document.createElement("span");
-          p.className = "lexis-web-tag";
-          p.textContent = "#" + t;
-          p.addEventListener("mousedown", (ev) => { ev.preventDefault(); ev.stopPropagation(); });
-          p.addEventListener("click", async (ev) => {
-            ev.stopPropagation();
+          } else {
             const r = await chrome.runtime.sendMessage({ type: "tag", payload: { key: data.word || data.base, tag: t, action: "add" } });
             if (r && r.ok) {
               data.tags = r.tags; detailCache.delete((data.word || data.base || "").toLowerCase());
-              await chrome.runtime.sendMessage({ type: "sync" });
-              try {
-                const fresh = await chrome.runtime.sendMessage({ type: "detail", key: data.word || data.base });
-                if (fresh && fresh.ok) { Object.assign(data, { tags: fresh.tags }); detailCache.set((data.word || data.base || "").toLowerCase(), fresh); }
-              } catch (e) {}
-              tagWrap.remove();
+              syncTags();
+              addTagPill(t);
+              updateBucket();
             }
-          });
-          bucket.appendChild(p);
-        }
-        const closer = (e) => { if (!bucket.contains(e.target) && e.target !== header) { bucket.remove(); document.removeEventListener("mousedown", closer); } };
-        document.addEventListener("mousedown", closer);
-        tagWrap.appendChild(bucket);
-      });
-      pick.appendChild(header);
-      tagWrap.appendChild(pick);
-      body.appendChild(tagWrap);
-    }
+          }
+        });
+        bucketEl.appendChild(p);
+      }
+      const closer = (e) => { if (!bucketEl.contains(e.target) && e.target !== header) { bucketEl.remove(); bucketEl = null; document.removeEventListener("mousedown", closer); } };
+      document.addEventListener("mousedown", closer);
+      pick.appendChild(bucketEl);
+    });
+    pick.appendChild(header);
+    tagWrap.appendChild(pick);
     const content = document.createElement("div");
     content.className = "lexis-web-pop-content";
     if (data.html && data.html.trim()) content.innerHTML = data.html;

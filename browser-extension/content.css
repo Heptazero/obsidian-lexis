@@ -135,7 +135,7 @@
   cursor: pointer; border-radius: 4px; padding: 3px 6px;
   background: transparent; color: inherit;
 }
-.lexis-web-tag-list .lexis-web-tag.lexis-web-tag-off { cursor: default; }
+.lexis-web-tag-list .lexis-web-tag.lexis-web-tag-off { opacity: 0.35; cursor: pointer; }
 .lexis-web-tag-list .lexis-web-tag:not(.lexis-web-tag-off):hover {
   background: color-mix(in srgb, var(--lexis-web-color) 14%, transparent);
 }
