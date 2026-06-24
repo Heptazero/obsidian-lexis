@@ -481,6 +481,10 @@
     if (!text || text.length > 60 || text.split(/\s+/).length > 6 || !/[A-Za-z]/.test(text)) { hideSelBtn(); return; }
     // 选中词已在库中(含别名) → 不弹按钮
     if (keySet && keySet.has(text.toLowerCase())) { hideSelBtn(); return; }
+    // 获取选区矩形(排除词分支和正常 pill 分支共用的定位信息)
+    let rect;
+    try { rect = sel.getRangeAt(0).getBoundingClientRect(); } catch (e) { return; }
+    if (!rect || (!rect.width && !rect.height)) return;
     // 选中词被排除高亮 → 弹 [取消排除]
     if (excludedKeys && excludedKeys.has(text.toLowerCase())) {
       hideSelBtn();
@@ -505,9 +509,6 @@
       document.body.appendChild(selBtn);
       return;
     }
-    let rect;
-    try { rect = sel.getRangeAt(0).getBoundingClientRect(); } catch (e) { return; }
-    if (!rect || (!rect.width && !rect.height)) return;
     hideSelBtn();
     const sentence = sentenceFromSelection(sel);
 
