@@ -74,6 +74,26 @@
 }
 .lexis-web-selbtn:hover { filter: brightness(1.08); }
 .lexis-web-selbtn:disabled { opacity: 0.6; }
+/* 双段 pill: [➕ 添加] [aliases] */
+.lexis-web-selpill {
+  position: absolute; z-index: 2147483647;
+  display: inline-flex; border-radius: 7px; overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0,0,0,.28);
+  background: var(--lexis-web-color);
+}
+.lexis-web-selbtn-pill {
+  font-size: 12px; font-weight: 600; padding: 4px 9px;
+  border: none; cursor: pointer; color: #fff;
+  background: transparent; white-space: nowrap;
+}
+.lexis-web-selbtn-pill:first-child { border-right: 1px solid rgba(255,255,255,.25); }
+.lexis-web-selbtn-pill:hover { background: rgba(255,255,255,.12); }
+.lexis-web-selbtn-pill:disabled { opacity: 0.6; cursor: default; }
+.lexis-web-selinput {
+  font-size: 12px; padding: 4px 6px; border: none; outline: none; min-width: 80px;
+  color: #fff; background: rgba(0,0,0,.18); font-family: inherit; font-weight: 600;
+}
+.lexis-web-selinput::placeholder { color: rgba(255,255,255,.45); }
 
 /* 提示条 */
 .lexis-web-toast {

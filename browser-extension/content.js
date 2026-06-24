@@ -56,17 +56,19 @@
     setTimeout(() => { t.style.opacity = "0"; setTimeout(() => t.remove(), 300); }, 1600);
   }
 
-  async function doAdd(word, sentence) {
+  async function doAdd(word, sentence, alias) {
+    const payload = { word, sentence, url: location.href, title: document.title };
+    if (alias) payload.alias = alias;
     let r;
-    try { r = await chrome.runtime.sendMessage({ type: "add", payload: { word, sentence, url: location.href, title: document.title } }); }
+    try { r = await chrome.runtime.sendMessage({ type: "add", payload }); }
     catch (e) { r = null; }
     if (r && r.ok) {
       if (r.queued) {
         toast(`已加入离线队列(${r.pending}条待同步)`, true);
       } else {
         detailCache.delete((word || "").toLowerCase());
-        toast(r.dup ? "这条已经在例句里了" : r.created ? `已新建单词「${r.word}」` : `已给「${r.word}」加例句`, true);
-        // 新建的词:重新同步词库,让它在本页(和别的页)马上能高亮(storage.onChanged 会自动重扫)
+        if (alias) detailCache.delete(alias.toLowerCase());
+        toast(r.dup ? "这条已经在例句里了" : r.created ? alias ? `已将「${alias}」归入「${r.word}」` : `已新建单词「${r.word}」` : `已给「${r.word}」加例句`, true);
         if (r.created) { try { await chrome.runtime.sendMessage({ type: "sync" }); } catch (e) {} }
       }
     } else {
@@ -316,44 +318,80 @@
     if (t && t.classList && t.classList.contains(HL)) scheduleHide();
   });
 
-  // ---- 划词添加:选中文本 → 浮动 ➕ 按钮(词不在库→新建,在库→加例句,服务端判断) ----
+  // ---- 划词添加:选中文本 → 浮动 pill([➕ 添加] [aliases]) ----
   let selBtn = null;
   function hideSelBtn() { if (selBtn) { selBtn.remove(); selBtn = null; } }
   function onSelect() {
     const sel = window.getSelection();
     const text = sel ? sel.toString().trim() : "";
     if (!text || text.length > 60 || text.split(/\s+/).length > 6 || !/[A-Za-z]/.test(text)) { hideSelBtn(); return; }
+    // 选中词已在库中(含别名) → 不弹按钮
+    if (keySet && keySet.has(text.toLowerCase())) { hideSelBtn(); return; }
     let rect;
     try { rect = sel.getRangeAt(0).getBoundingClientRect(); } catch (e) { return; }
     if (!rect || (!rect.width && !rect.height)) return;
     hideSelBtn();
-    selBtn = document.createElement("button");
-    selBtn.className = "lexis-web-selbtn";
-    selBtn.textContent = "➕ Lexis";
-    selBtn.title = "加到单词库(已有则加例句)";
-    // 智能定位:优先选区下方中间,超出视口则放上方
-    const btnW = 64, btnH = 26, gap = 6;
-    let left = rect.left + (rect.width - btnW) / 2 + window.scrollX;
-    let top = rect.bottom + window.scrollY + gap;
-    if (top + btnH > window.scrollY + document.documentElement.clientHeight - 8)
-      top = rect.top + window.scrollY - btnH - gap;
-    if (left < 8) left = 8;
-    if (left + btnW > window.scrollX + document.documentElement.clientWidth - 8)
-      left = window.scrollX + document.documentElement.clientWidth - btnW - 8;
-    selBtn.style.left = Math.max(8, left) + "px";
-    selBtn.style.top = Math.max(8, top) + "px";
-    selBtn.addEventListener("mousedown", (e) => e.preventDefault()); // 别让按钮抢走选区
-    selBtn.addEventListener("click", async () => {
-      const s = window.getSelection();
-      const sentence = sentenceFromSelection(s);
-      selBtn.disabled = true; selBtn.textContent = "…";
+    const sentence = sentenceFromSelection(sel);
+
+    const pill = document.createElement("div");
+    pill.className = "lexis-web-selpill";
+
+    const addBtn = document.createElement("button");
+    addBtn.className = "lexis-web-selbtn-pill";
+    addBtn.textContent = "➕ 添加";
+    addBtn.title = "直接以选中词为标题建新词";
+    addBtn.addEventListener("mousedown", (e) => e.preventDefault());
+    addBtn.addEventListener("click", async () => {
+      addBtn.disabled = true; addBtn.textContent = "…";
       await doAdd(text, sentence);
       hideSelBtn();
     });
-    document.body.appendChild(selBtn);
+    pill.appendChild(addBtn);
+
+    const aliasBtn = document.createElement("button");
+    aliasBtn.className = "lexis-web-selbtn-pill";
+    aliasBtn.textContent = "aliases";
+    aliasBtn.title = "把选中词作为别名,归入另一个词";
+    aliasBtn.addEventListener("mousedown", (e) => e.preventDefault());
+    aliasBtn.addEventListener("click", () => {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "lexis-web-selinput";
+      input.value = text;
+      input.placeholder = "原形单词";
+      input.addEventListener("mousedown", (e) => e.stopPropagation());
+      const submit = async () => {
+        const real = input.value.trim();
+        if (!real || !/[A-Za-z]/.test(real)) return;
+        input.disabled = true;
+        await doAdd(real, sentence, text);
+        hideSelBtn();
+      };
+      input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } if (e.key === "Escape") hideSelBtn(); });
+      input.addEventListener("blur", () => setTimeout(() => { if (document.body.contains(input)) hideSelBtn(); }, 150));
+      aliasBtn.replaceWith(input);
+      input.focus();
+      input.select();
+    });
+    pill.appendChild(aliasBtn);
+
+    // 智能定位:优先选区下方中间,超出视口则放上方
+    const pillW = 130, pillH = 26, gap = 6;
+    let left = rect.left + (rect.width - pillW) / 2 + window.scrollX;
+    let top = rect.bottom + window.scrollY + gap;
+    if (top + pillH > window.scrollY + document.documentElement.clientHeight - 8)
+      top = rect.top + window.scrollY - pillH - gap;
+    if (left < 8) left = 8;
+    if (left + pillW > window.scrollX + document.documentElement.clientWidth - 8)
+      left = window.scrollX + document.documentElement.clientWidth - pillW - 8;
+    pill.style.left = Math.max(8, left) + "px";
+    pill.style.top = Math.max(8, top) + "px";
+
+    document.body.appendChild(pill);
+    selBtn = pill;
   }
   document.addEventListener("mouseup", () => setTimeout(onSelect, 10));
-  document.addEventListener("mousedown", (e) => { if (selBtn && e.target !== selBtn) hideSelBtn(); });
+  document.addEventListener("mousedown", (e) => { if (selBtn && !selBtn.contains(e.target)) hideSelBtn(); });
   document.addEventListener("scroll", hideSelBtn, { passive: true });
 
   // ---- 启动 / 配置变化 ----

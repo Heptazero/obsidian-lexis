@@ -233,17 +233,32 @@ module.exports = class LexisPlugin extends Plugin {
     if (!word) return { ok: false, error: "empty-word" };
     const name = this.sanitizeName(word);
     if (!name) return { ok: false, error: "bad-name" };
+    const alias = String((payload && payload.alias) || "").trim();
     const sentence = String((payload && payload.sentence) || "").trim();
     const url = String((payload && payload.url) || "").trim();
     const title = String((payload && payload.title) || url || "").trim().replace(/[\[\]]/g, "");
     const link = url ? ` —— [${title || url}](${url})` : "";
     const line = (sentence || url) ? `> ${sentence}${link}` : "";
     const dupKey = sentence || url; // 按句子判重(同网站不同句子是不同例句)
+    const addAlias = async (file) => {
+      if (!alias || alias === word) return;
+      await this.app.fileManager.processFrontMatter(file, (fm) => {
+        let arr = fm.aliases || fm.alias || [];
+        if (!Array.isArray(arr)) arr = typeof arr === "string" ? arr.split(/[,，]/).map((s) => s.trim()) : [arr];
+        if (!arr.includes(alias)) arr.push(alias);
+        fm.aliases = arr;
+        delete fm.alias;
+      });
+    };
     const folder = this.normalizeFolder(this.settings.vocabFolder);
     const targetPath = (folder ? folder + "/" : "") + name + ".md";
     const existing = this.app.vault.getAbstractFileByPath(targetPath);
     try {
       if (existing instanceof TFile) {
+        if (alias) {
+          await addAlias(existing);
+          this.rebuildIndex(false);
+        }
         if (line) {
           const cur = await this.app.vault.cachedRead(existing);
           if (dupKey && cur.includes(dupKey)) return { ok: true, created: false, dup: true, word, file: existing.path };
@@ -251,15 +266,15 @@ module.exports = class LexisPlugin extends Plugin {
           if (this.app.vault.process) await this.app.vault.process(existing, apply);
           else await this.app.vault.modify(existing, apply(cur));
         }
-        this.scheduleRebuild();
+        if (!alias) this.scheduleRebuild();
         return { ok: true, created: false, word, file: existing.path };
       }
       await this.ensureFolder(folder);
       const tpl = await this.readTemplate();
       let content = (tpl != null ? tpl : this.minimalSkeleton()).replace(/\{\{word\}\}/g, word).replace(/\{\{date\}\}/g, todayStr());
-      // 模板里通常已有「#### 例句」(后面跟 ```lexis occ```),插进去而不是又加一个标题
       if (line) content = this.insertExampleLine(content, line);
       const file = await this.app.vault.create(targetPath, content);
+      if (alias) await addAlias(file);
       this.rebuildIndex(false);
       return { ok: true, created: true, word, file: file.path };
     } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
