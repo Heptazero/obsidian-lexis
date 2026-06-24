@@ -36,10 +36,49 @@
 @media (prefers-color-scheme: dark) {
   .lexis-web-pop { background: #1f1f23; color: #e6e6e6; border-color: rgba(255, 255, 255, 0.14); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5); }
 }
-.lexis-web-pop-title { font-weight: 700; font-size: 15px; margin-bottom: 4px; }
-.lexis-web-open { color: var(--lexis-web-color); text-decoration: none; cursor: pointer; }
-.lexis-web-open:hover { text-decoration: underline; }
+.lexis-web-pop-title { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.lexis-web-pop .lexis-web-open {
+  font-size: 16px !important; font-weight: 700 !important; line-height: 1.3 !important;
+  color: var(--lexis-web-color); text-decoration: none; cursor: pointer; flex: 1; min-width: 0;
+}
+.lexis-web-pop .lexis-web-open:hover { text-decoration: underline; }
 .lexis-web-pen { opacity: 0.55; font-weight: 400; font-size: 12px; }
+.lexis-web-addbtn {
+  flex: 0 0 auto; font-size: 12px; padding: 2px 8px; border: none; border-radius: 999px; cursor: pointer;
+  background: color-mix(in srgb, var(--lexis-web-color) 18%, transparent); color: var(--lexis-web-color); white-space: nowrap;
+}
+.lexis-web-addbtn:hover { background: color-mix(in srgb, var(--lexis-web-color) 30%, transparent); }
+.lexis-web-addbtn:disabled { opacity: 0.5; cursor: default; }
+
+/* 关系 / 出现过的地方 */
+.lexis-web-pop-extra { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(128,128,128,.22); }
+.lexis-web-sec { font-size: 12px; font-weight: 700; opacity: 0.65; margin: 8px 0 3px; }
+.lexis-web-sec:first-child { margin-top: 0; }
+.lexis-web-rel { display: flex; flex-wrap: wrap; gap: 6px; }
+.lexis-web-rel a, .lexis-web-occ-src a, .lexis-web-ilink { color: var(--lexis-web-color); text-decoration: none; }
+.lexis-web-rel a:hover { text-decoration: underline; }
+.lexis-web-occ { margin: 3px 0; }
+.lexis-web-occ b { color: var(--lexis-web-color); }
+.lexis-web-occ-src { opacity: 0.6; font-size: 12px; }
+.lexis-web-dim { opacity: 0.55; }
+
+/* 划词浮动按钮 */
+.lexis-web-selbtn {
+  position: absolute; z-index: 2147483647; font-size: 12px; font-weight: 600; padding: 4px 9px;
+  border: none; border-radius: 7px; cursor: pointer; color: #fff; background: var(--lexis-web-color);
+  box-shadow: 0 2px 8px rgba(0,0,0,.28); white-space: nowrap;
+}
+.lexis-web-selbtn:hover { filter: brightness(1.08); }
+.lexis-web-selbtn:disabled { opacity: 0.6; }
+
+/* 提示条 */
+.lexis-web-toast {
+  position: fixed; z-index: 2147483647; left: 50%; bottom: 32px; transform: translateX(-50%);
+  background: #2ea043; color: #fff; padding: 8px 16px; border-radius: 8px; font-size: 13px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.3); transition: opacity .3s; opacity: 1;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+}
+.lexis-web-toast.err { background: #e5534b; }
 .lexis-web-pop-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
 .lexis-web-tag {
   font-size: 11px; padding: 1px 6px; border-radius: 999px;

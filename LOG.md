@@ -285,6 +285,16 @@
 - 扩展 `renderDetail` 注入 `data.html`,补 Obsidian 风格排版 CSS(标题/引用/列表/代码/内链色)。
 - **反驳并推迟**:Hz 提的"网页划词给已有词加例句(来源=网址)"并进**阶段 2**——和新建词共用写入接口,避免重复造轮子。
 
+## 浏览器扩展 · 阶段 1.6 修悬浮卡 + 阶段 2 划词/加例句(v0.8.0)
+- **修:悬浮卡缺关系/出处**。`/word` 之前剥掉 ```lexis 块,导致近义词标题(只来自反向链接的)、出现过的地方都没了。新增 `bridgeExtraHtml(file,display)`:服务端直接算 `findTypedRelations`+`findOccurrences`,渲成带 `obsidian://` 链接的 HTML(出处句子加粗命中词),随 `/word` 的 `extraHtml` 发出。扩展 `renderDetail` 在正文后渲染。
+- **修:标题字号比正文小**。原因:标题做成 `<a>` 后被页面的 `a{}` 样式污染。给 `.lexis-web-open` 上 `font-size:16px !important` 等,标题区改 flex 布局。
+- **阶段 2 写入**:服务端 `POST /add {word,sentence,url,title}` → `bridgeAddWord`:词不在库→套模板新建,在库→插到 `#### 例句`;来源写成 `[标题](url)` 而非 `[[内链]]`;同 url 已存在则跳过(dup)。`readBody` 读 POST JSON。
+- **两个入口**(Hz 拍板:不分两套、不用手选句子):
+  - **悬浮卡 ➕ 例句**:对已有词,抓它在本页所在句子(`sentenceAroundSpan`,按标点切,跟「出现过的地方」一致)。
+  - **划词浮动按钮**:选中文本(≤60 字/≤6 词/含字母)→ 冒出 `➕ Lexis`;点了智能判断:不在库→新建,在库→加例句(`sentenceFromSelection` 抓所在句)。
+  - background 加 `add` 消息走 `POST /add`;加 `toast` 反馈。
+- **验收**:悬停词→出现近义词标题 + 📍出处;点 ➕ 例句→该词笔记多一条带网址链接的例句;网页选个新词→冒 ➕ Lexis→点→`01-word` 多一篇、带来源网址。
+
 ## 想法暂存(Hz 提出,暂不做)
 - **标签识别为单词**:除了扫文件夹,再支持"带某标签的笔记也算单词来源"。Hz 说暂时不用,先记着。实现上只需在 `rebuildIndex` 里追加一类来源(按 tag 收集文件),与文件夹来源合并即可。
 

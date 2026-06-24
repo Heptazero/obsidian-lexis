@@ -10,9 +10,62 @@
   let observer = null;
   let scanTimer = null;
   const detailCache = new Map();
-  let pop = null, hideTimer = null;
+  let pop = null, hideTimer = null, currentSpan = null;
 
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  // ---- 句子抽取(按标点切,跟 Obsidian 端「出现过的地方」一致) ----
+  const SENT_SEP = /[.!?。!?…\n]/;
+  function extractSentence(text, idx) {
+    if (!text) return "";
+    let start = 0, end = text.length;
+    for (let i = Math.min(idx, text.length - 1); i >= 0; i--) if (SENT_SEP.test(text[i])) { start = i + 1; break; }
+    for (let i = idx; i < text.length; i++) if (SENT_SEP.test(text[i])) { end = i + 1; break; }
+    return text.slice(start, end).trim().replace(/\s+/g, " ");
+  }
+  function blockOf(node) {
+    let el = node.nodeType === 3 ? node.parentElement : node;
+    while (el && el.parentElement && !/^(P|LI|TD|TH|BLOCKQUOTE|SECTION|ARTICLE|FIGCAPTION|DD|H[1-6]|DIV)$/.test(el.tagName)) el = el.parentElement;
+    return el;
+  }
+  function sentenceAroundSpan(span) {
+    const block = blockOf(span);
+    const text = (block ? block.textContent : span.textContent) || "";
+    const idx = text.indexOf(span.textContent);
+    return extractSentence(text, idx < 0 ? 0 : idx);
+  }
+  function sentenceFromSelection(sel) {
+    try {
+      const node = sel.anchorNode;
+      const block = blockOf(node);
+      const text = (block ? block.textContent : (node && node.textContent)) || "";
+      const probe = (sel.toString() || "").trim();
+      const idx = probe ? text.indexOf(probe) : (sel.anchorOffset || 0);
+      return extractSentence(text, idx < 0 ? (sel.anchorOffset || 0) : idx);
+    } catch (e) { return (sel.toString() || "").trim(); }
+  }
+
+  // ---- 提示条 ----
+  function toast(text, ok) {
+    const t = document.createElement("div");
+    t.className = "lexis-web-toast" + (ok === false ? " err" : "");
+    t.textContent = text;
+    document.body.appendChild(t);
+    setTimeout(() => { t.style.opacity = "0"; setTimeout(() => t.remove(), 300); }, 1600);
+  }
+
+  async function doAdd(word, sentence) {
+    let r;
+    try { r = await chrome.runtime.sendMessage({ type: "add", payload: { word, sentence, url: location.href, title: document.title } }); }
+    catch (e) { r = null; }
+    if (r && r.ok) {
+      detailCache.delete((word || "").toLowerCase());
+      toast(r.dup ? "这条已经在例句里了" : r.created ? `已新建单词「${r.word}」` : `已给「${r.word}」加例句`, true);
+    } else {
+      toast(r && r.error === "bad-token" ? "令牌不对" : "添加失败(Obsidian 开着且桥接启用?)", false);
+    }
+    return r;
+  }
 
   function applyTheme() {
     const root = document.documentElement;
@@ -107,6 +160,7 @@
 
   async function showPop(span) {
     const key = span.dataset.k;
+    currentSpan = span;
     if (pop && pop.dataset.k === key) { clearTimeout(hideTimer); return; }
     removePop();
     pop = document.createElement("div");
@@ -158,6 +212,20 @@
     } else {
       titleEl.textContent = label;
     }
+    // ➕ 给这个词加例句(抓页面上它所在的那句)
+    const addBtn = document.createElement("button");
+    addBtn.className = "lexis-web-addbtn";
+    addBtn.textContent = "➕ 例句";
+    addBtn.title = "把这个词在本页所在的句子加进它的例句";
+    const targetWord = data.base || data.word;
+    addBtn.addEventListener("click", async (ev) => {
+      ev.preventDefault();
+      const sentence = currentSpan ? sentenceAroundSpan(currentSpan) : "";
+      addBtn.disabled = true; addBtn.textContent = "…";
+      await doAdd(targetWord, sentence);
+      removePop();
+    });
+    titleEl.appendChild(addBtn);
     if (data.tags && data.tags.length) {
       const tagWrap = document.createElement("div");
       tagWrap.className = "lexis-web-pop-tags";
@@ -169,6 +237,13 @@
     if (data.html && data.html.trim()) content.innerHTML = data.html;
     else content.textContent = (data.meaning || data.markdown || "").trim() || "(这个词笔记里还没写内容)";
     body.appendChild(content);
+
+    if (data.extraHtml && data.extraHtml.trim()) {
+      const extra = document.createElement("div");
+      extra.className = "lexis-web-pop-extra";
+      extra.innerHTML = data.extraHtml;
+      body.appendChild(extra);
+    }
   }
 
   function position(box, span) {
@@ -190,6 +265,37 @@
     const t = e.target;
     if (t && t.classList && t.classList.contains(HL)) scheduleHide();
   });
+
+  // ---- 划词添加:选中文本 → 浮动 ➕ 按钮(词不在库→新建,在库→加例句,服务端判断) ----
+  let selBtn = null;
+  function hideSelBtn() { if (selBtn) { selBtn.remove(); selBtn = null; } }
+  function onSelect() {
+    const sel = window.getSelection();
+    const text = sel ? sel.toString().trim() : "";
+    if (!text || text.length > 60 || text.split(/\s+/).length > 6 || !/[A-Za-z]/.test(text)) { hideSelBtn(); return; }
+    let rect;
+    try { rect = sel.getRangeAt(0).getBoundingClientRect(); } catch (e) { return; }
+    if (!rect || (!rect.width && !rect.height)) return;
+    hideSelBtn();
+    selBtn = document.createElement("button");
+    selBtn.className = "lexis-web-selbtn";
+    selBtn.textContent = "➕ Lexis";
+    selBtn.title = "加到单词库(已有则加例句)";
+    selBtn.style.left = (rect.right + window.scrollX + 6) + "px";
+    selBtn.style.top = (rect.top + window.scrollY - 4) + "px";
+    selBtn.addEventListener("mousedown", (e) => e.preventDefault()); // 别让按钮抢走选区
+    selBtn.addEventListener("click", async () => {
+      const s = window.getSelection();
+      const sentence = sentenceFromSelection(s);
+      selBtn.disabled = true; selBtn.textContent = "…";
+      await doAdd(text, sentence);
+      hideSelBtn();
+    });
+    document.body.appendChild(selBtn);
+  }
+  document.addEventListener("mouseup", () => setTimeout(onSelect, 10));
+  document.addEventListener("mousedown", (e) => { if (selBtn && e.target !== selBtn) hideSelBtn(); });
+  document.addEventListener("scroll", hideSelBtn, { passive: true });
 
   // ---- 启动 / 配置变化 ----
   async function init() {
