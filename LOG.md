@@ -302,11 +302,63 @@
 - **例句插入位置 + 重复标题**:`insertExampleLine` 把例句插到「#### 例句」段末尾、`​```lexis occ​```` 之前;新建词时模板已有该段就插进去,不再在文末又加一个标题。Node 三用例验证(空段/已有例句/无段)。
 - **悬浮卡按文档顺序**:重写为 `bridgeFullHtml` —— 把每个 ```lexis 块换占位符、整篇渲染保留标题与顺序,再用 `lexisBlockHtml` 回填各块(curve/rel按类型反向/occ/derived,带 obsidian:// 链接);空块连同空标题去掉。替代旧的「正文 + extraHtml 堆末尾」。`bridgePostProcess` 抽出内链改写/去 app:// 图。
 
-## ⚠️ 待修(v0.9.0 后,见 HANDOFF.md 详细根因+修法)
-1. 悬浮卡标题没变大(CSS 试两次无效,疑似 ext CSS 没重载/页面更强 important;改法:内联 important 字号)。
-2. 新词加完不立即高亮——**根因确定**:`bridgeAddWord` 创建后用了 debounce 的 `scheduleRebuild`,`/words` 拿到旧索引。改法:换成同步 `rebuildIndex(false)`。
-3. 空段标题改回不显示:`bridgeFullHtml` 没压缩纯空 md 段标题(只删了空 lexis 块)。改法:渲染后遍历 h1~h6 删空段标题(等价 compactSections)。
-4. 出处样式:`.lexis-web-occ-src` 字号调小、`.lexis-web-occ` 间距加大(纯 CSS)。
+## v1.0.0 修复 4 个待修问题
+
+1. **悬浮卡标题变大**:根因是 `.lexis-web-pop-content h1~h6` 锁死在 12px(比正文 13px 还小)。改为 15px !important + 词名标题内联 18px !important。CSS `.lexis-web-pop, .lexis-web-pop * { font-size:14px }` 改为 13px,拉开对比。`.lexis-web-sec` 从 12px 提到 13px。
+2. **新词不立即高亮**:`bridgeAddWord` 创建文件后 `scheduleRebuild()`(debounce 800ms) → `rebuildIndex(false)`(同步)。同时扩展端 `doAdd` 创建成功后本地即刻更新 keySet + 重编正则 + rescan,不等待 sync 来回(别名同样处理)。
+3. **空段标题不显示**:`bridgeFullHtml` 渲染后遍历 h1~h6,标题之间无 textContent 且无 `.lexis-web-*` 块则删除。
+4. **出处样式**:`.lexis-web-occ-src` 字号 12px→11px,`.lexis-web-occ` margin 3px→8px。
+
+## v1.1.0 浏览器扩展增强
+
+### popup 自动同步 + 离线排队
+- popup 打开时 ping 版本号,变了就自动 sync(不用手动点)。
+- `doAdd` 发送到 background 时如果网络不通(Obsidian 没开),payload 存入 `chrome.storage.local.pendingAdds` 队列。
+- toast 提示「已加入离线队列(N条待同步)」。
+- 每次 sync 成功后重放队列,失败的留在队列里。
+- popup 底栏显示 `⏳ N 条待同步`。
+
+### 排除标签
+- Obsidian 设置页新增「排除标签」下拉框:从词库收集现有标签,选中后带此标签的单词不在网页高亮(Obsidian 内照常)。留空不排除。
+- `bridgeWordList()` 响应带 `styleConfig.excludeTag`。
+- 扩展 `build()` 中根据 excludeTag 过滤,排除的词存进 `excludedKeys`。
+- 选中被排除的词 → pill `[取消排除]` → 删排除标签 → sync → 立即高亮。
+
+### 标签着色规则同步
+- `bridgeWordList()` 响应带 `styleConfig`:`tagRules`、`highlightColor`、`highlightOpacity`、`highlightStyle`。
+- `content.js` 实现 `inlineStyleFor(key)`:与 Obsidian `inlineStyleForEntry` 完全一致,按标签匹配规则 → 颜色/线型/透明度。
+- popup 新增「使用 Obsidian 标签着色」开关:
+  - 开 → 使用 Obsidian 规则(标签→颜色/线型 + 全局透明度)
+  - 关 → 退回扩展自己的全局颜色/线型(自定义模式可调透明度滑条)。
+- 透明度仅影响高亮,不影响悬浮卡配色。
+
+### 页面直接管理标签(POST /tag + 悬浮卡交互)
+- 新增 `POST /tag {key, action:"add"|"remove", tag}` → 直接改单词 frontmatter 的 tags → `rebuildIndex(false)` + 手动 `index.set()` 兜底(metadataCache 延迟问题)。
+- 悬浮卡标签 pill:排除标签红色 `.lexis-web-tag-excl`,每个标签 `×` 可删,`+` 弹出竖列可选标签列表(白底,已选的灰掉)。
+- bucket 支持多选:点标签后列表不消失,标签上方实时增删 pill,bucket 内已选/未选状态实时切换。
+- 标签增删后自动 sync。
+
+### 别名多源 + aliases 归入
+- `extractAliases` 现在读取 `aliases` + `alias` + 用户配置的自定义属性(逗号分隔,如 `past,forms,variants`),取并集去重。
+- 设置页「别名属性名」文本输入。
+- 划词 pill:选中词不在库 → `[+ 添加] [aliases]`。点 aliases 变内联 input,输原形 → 创建原形文件,选中词写入 aliases → 立即高亮。
+- `injectAlias()` 统一处理新文件与已有文件的别名注入(建文件前注入到 content 字符串,避免 metadataCache 延迟)。
+
+### 别名/标签 metadataCache 延迟兜底
+- 根本问题:`vault.create/modify` 后 `rebuildIndex(false)` 读 metadataCache,有时缓存未更新。
+- 统一兜底:`rebuildIndex` 后手动 `this.index.set()` 保证别名/标签立即进索引。
+
+### 划词按钮 + 悬浮卡 UI
+- pill 双段布局 `[+ 添加] [aliases]`(segmented control 一体样式)。
+- 按钮文字色根据背景亮度自适应(暗底白字,亮底黑字)。emoji 加号改普通 `+`。
+- 选中词已在 keySet → 不弹按钮。选中词在 excludedKeys → 弹 `[取消排除]`。
+- 悬浮卡右上角 `🗑` 删除按钮(红底) → `DELETE /word` 删文件 + sync。
+- 卡片最大高度 popup 可配(vh 数字输入)。
+- popup 改颜色/线型/透明度 → 页面高亮即刻重扫(`storage.onChanged` 检测 style 字段变化)。
+- 标签/高亮词 `cursor:pointer` 统一样式。
+
+### 划词按钮智能定位
+- 从选区右侧改为选区下方居中,超出视口放上方,左右边界裁剪。
 
 ## 想法暂存(Hz 提出,暂不做)
 - **标签识别为单词**:除了扫文件夹,再支持"带某标签的笔记也算单词来源"。Hz 说暂时不用,先记着。实现上只需在 `rebuildIndex` 里追加一类来源(按 tag 收集文件),与文件夹来源合并即可。
