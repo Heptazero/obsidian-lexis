@@ -323,8 +323,14 @@
       const tagWrap = document.createElement("div");
       tagWrap.className = "lexis-web-pop-tags";
       const excludeTag = (styleCfg && styleCfg.excludeTag || "").toLowerCase();
+      const refreshData = async () => {
+        try {
+          const fresh = await chrome.runtime.sendMessage({ type: "detail", key: data.word || data.base });
+          if (fresh && fresh.ok) { Object.assign(data, { tags: fresh.tags }); detailCache.set((data.word || data.base || "").toLowerCase(), fresh); }
+        } catch (e) {}
+      };
       const fill = async () => {
-        tagWrap.querySelectorAll(".lexis-web-tag").forEach((b) => b.remove());
+        tagWrap.querySelectorAll(".lexis-web-tag,.lexis-web-tag-pick").forEach((b) => b.remove());
         for (const t of data.tags) {
           const s = document.createElement("span");
           s.className = "lexis-web-tag" + (excludeTag && t.toLowerCase() === excludeTag ? " lexis-web-tag-excl" : "");
@@ -332,97 +338,102 @@
           if (s.classList.contains("lexis-web-tag-excl")) s.title = "排除高亮";
           const x = document.createElement("span");
           x.className = "lexis-web-tag-del"; x.textContent = " ×";
+          x.addEventListener("mousedown", (ev) => { ev.preventDefault(); ev.stopPropagation(); });
           x.addEventListener("click", async (ev) => {
             ev.stopPropagation();
             const r = await chrome.runtime.sendMessage({ type: "tag", payload: { key: data.word || data.base, tag: t, action: "remove" } });
             if (r && r.ok) {
-              data.tags = r.tags;
-              detailCache.delete((data.word || data.base || "").toLowerCase());
-              await chrome.runtime.sendMessage({ type: "sync" });
-              fill();
+              data.tags = r.tags; detailCache.delete((data.word || data.base || "").toLowerCase());
+              await chrome.runtime.sendMessage({ type: "sync" }); await refreshData(); fill();
             }
           });
           s.appendChild(x);
           tagWrap.appendChild(s);
         }
-        // + 永远在末尾,点开弹出可选标签列表
-        const addTag = document.createElement("span");
-        addTag.className = "lexis-web-tag lexis-web-tag-add";
-        addTag.textContent = "+";
-        addTag.addEventListener("click", async (ev) => {
+        const pick = document.createElement("div");
+        pick.className = "lexis-web-tag-pick";
+        const header = document.createElement("span");
+        header.className = "lexis-web-tag lexis-web-tag-add";
+        header.textContent = "+";
+        header.addEventListener("mousedown", (ev) => { ev.preventDefault(); ev.stopPropagation(); });
+        header.addEventListener("click", async (ev) => {
           ev.stopPropagation();
-          // 如果已经打开了就关掉
-          const old = tagWrap.querySelector(".lexis-web-tag-list");
-          if (old) { old.remove(); return; }
+          const list = pick.querySelector(".lexis-web-tag-list");
+          if (list) { list.remove(); return; }
           const { words: cached } = await chrome.storage.local.get("words");
-          const known = new Set();
-          if (cached) for (const w of cached) for (const t of (w.t || [])) known.add(t);
+          const known = new Set(); if (cached) for (const w of cached) for (const t of (w.t || [])) known.add(t);
           const bucket = document.createElement("div");
           bucket.className = "lexis-web-tag-list";
           for (const t of [...known].sort()) {
-            if (data.tags.includes(t)) continue;
+            const sel = data.tags.includes(t);
             const p = document.createElement("span");
-            p.className = "lexis-web-tag";
+            p.className = "lexis-web-tag" + (sel ? " lexis-web-tag-off" : "");
             p.textContent = "#" + t;
-            p.addEventListener("click", async () => {
-              const r = await chrome.runtime.sendMessage({ type: "tag", payload: { key: data.word || data.base, tag: t, action: "add" } });
-              if (r && r.ok) {
-                data.tags = r.tags;
-                detailCache.delete((data.word || data.base || "").toLowerCase());
-                await chrome.runtime.sendMessage({ type: "sync" });
-                fill();
-              }
-            });
+            if (!sel) {
+              p.addEventListener("mousedown", (ev) => { ev.preventDefault(); ev.stopPropagation(); });
+              p.addEventListener("click", async (ev) => {
+                ev.stopPropagation();
+                const r = await chrome.runtime.sendMessage({ type: "tag", payload: { key: data.word || data.base, tag: t, action: "add" } });
+                if (r && r.ok) {
+                  data.tags = r.tags; detailCache.delete((data.word || data.base || "").toLowerCase());
+                  await chrome.runtime.sendMessage({ type: "sync" }); await refreshData(); fill();
+                }
+              });
+            }
             bucket.appendChild(p);
           }
-          const closer = (e) => { if (!bucket.contains(e.target)) { bucket.remove(); document.removeEventListener("click", closer); } };
-          setTimeout(() => document.addEventListener("click", closer), 0);
-          addTag.appendChild(bucket);
+          const closer = (e) => { if (!bucket.contains(e.target) && e.target !== header) { bucket.remove(); document.removeEventListener("mousedown", closer); } };
+          document.addEventListener("mousedown", closer);
+          pick.appendChild(bucket);
         });
-        tagWrap.appendChild(addTag);
+        pick.appendChild(header);
+        tagWrap.appendChild(pick);
       };
       fill();
       body.appendChild(tagWrap);
     } else {
       const tagWrap = document.createElement("div");
       tagWrap.className = "lexis-web-pop-tags";
-      const addTag = document.createElement("span");
-      addTag.className = "lexis-web-tag lexis-web-tag-add";
-      addTag.textContent = "+ 标签";
-      addTag.addEventListener("click", async (ev) => {
+      const pick = document.createElement("div");
+      pick.className = "lexis-web-tag-pick";
+      const header = document.createElement("span");
+      header.className = "lexis-web-tag lexis-web-tag-add";
+      header.textContent = "+ 标签";
+      header.addEventListener("mousedown", (ev) => { ev.preventDefault(); ev.stopPropagation(); });
+      header.addEventListener("click", async (ev) => {
         ev.stopPropagation();
-        const old = tagWrap.querySelector(".lexis-web-tag-list");
-        if (old) { old.remove(); return; }
+        const list = pick.querySelector(".lexis-web-tag-list");
+        if (list) { list.remove(); return; }
         const { words: cached } = await chrome.storage.local.get("words");
-        const known = new Set();
-        if (cached) for (const w of cached) for (const t of (w.t || [])) known.add(t);
+        const known = new Set(); if (cached) for (const w of cached) for (const t of (w.t || [])) known.add(t);
         const bucket = document.createElement("div");
         bucket.className = "lexis-web-tag-list";
         for (const t of [...known].sort()) {
           const p = document.createElement("span");
           p.className = "lexis-web-tag";
           p.textContent = "#" + t;
-          p.addEventListener("click", async () => {
+          p.addEventListener("mousedown", (ev) => { ev.preventDefault(); ev.stopPropagation(); });
+          p.addEventListener("click", async (ev) => {
+            ev.stopPropagation();
             const r = await chrome.runtime.sendMessage({ type: "tag", payload: { key: data.word || data.base, tag: t, action: "add" } });
             if (r && r.ok) {
-              data.tags = r.tags;
-              detailCache.delete((data.word || data.base || "").toLowerCase());
+              data.tags = r.tags; detailCache.delete((data.word || data.base || "").toLowerCase());
               await chrome.runtime.sendMessage({ type: "sync" });
-              // 重新加载整个标签区域
               try {
                 const fresh = await chrome.runtime.sendMessage({ type: "detail", key: data.word || data.base });
-                if (fresh && fresh.ok) detailCache.set((data.word || data.base || "").toLowerCase(), fresh);
+                if (fresh && fresh.ok) { Object.assign(data, { tags: fresh.tags }); detailCache.set((data.word || data.base || "").toLowerCase(), fresh); }
               } catch (e) {}
               tagWrap.remove();
             }
           });
           bucket.appendChild(p);
         }
-        const closer = (e) => { if (!bucket.contains(e.target)) { bucket.remove(); document.removeEventListener("click", closer); } };
-        setTimeout(() => document.addEventListener("click", closer), 0);
-        addTag.appendChild(bucket);
+        const closer = (e) => { if (!bucket.contains(e.target) && e.target !== header) { bucket.remove(); document.removeEventListener("mousedown", closer); } };
+        document.addEventListener("mousedown", closer);
+        tagWrap.appendChild(bucket);
       });
-      tagWrap.appendChild(addTag);
+      pick.appendChild(header);
+      tagWrap.appendChild(pick);
       body.appendChild(tagWrap);
     }
     const content = document.createElement("div");
