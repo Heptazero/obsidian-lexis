@@ -206,7 +206,7 @@ module.exports = class LexisPlugin extends Plugin {
     const url = new URL(req.url, "http://127.0.0.1");
     const path = url.pathname.replace(/\/+$/, "") || "/";
     // /ping 不需要 token,供扩展探测连通性
-    if (path === "/ping" || path === "/") return send(200, { ok: true, app: "lexis", version: this.manifest.version });
+    if (path === "/ping" || path === "/") return send(200, { ok: true, app: "lexis", version: this.manifest.version, vault: this.app.vault.getName() });
     // 其余接口都要 token
     const token = req.headers["x-lexis-token"] || url.searchParams.get("token") || "";
     if (!this.settings.bridgeToken || token !== this.settings.bridgeToken) return send(401, { ok: false, error: "bad-token" });
@@ -237,12 +237,38 @@ module.exports = class LexisPlugin extends Plugin {
       body = raw.replace(/^---\n[\s\S]*?\n---\n?/, "").replace(/```dataviewjs[\s\S]*?```/g, "").replace(/```dataview[\s\S]*?```/g, "").replace(/```lexis[\s\S]*?```/g, "");
       body = this.compactSections(body.trim());
     } catch (_e) {}
+    const html = await this.bridgeRenderHtml(body, e.file && e.file.path);
     return {
       ok: true, word: e.display, base: e.file && e.file.basename, file: e.file && e.file.path,
+      vault: this.app.vault.getName(),
       alias: !!e.isAlias, tags: [...(e.tags || [])],
       meaning: this.extractSection(body, "意思") || this.extractSection(body, "意义") || "",
-      markdown: body,
+      markdown: body, html,
     };
+  }
+  // 用 Obsidian 自己的渲染器把 md 渲成 HTML(扩展那边没法复用渲染器,所以在这边渲好再发过去)
+  async bridgeRenderHtml(md, sourcePath) {
+    if (!md) return "";
+    const div = document.createElement("div");
+    const comp = new Component(); comp.load();
+    try {
+      if (MarkdownRenderer.render) await MarkdownRenderer.render(this.app, md, div, sourcePath || "", comp);
+      else await MarkdownRenderer.renderMarkdown(md, div, sourcePath || "", comp);
+    } catch (_e) {}
+    const vault = encodeURIComponent(this.app.vault.getName());
+    // 内部双链改写成 obsidian:// ,点了能在 Obsidian 里打开
+    div.querySelectorAll("a.internal-link").forEach((a) => {
+      const lp = a.getAttribute("data-href") || a.getAttribute("href") || a.textContent || "";
+      a.setAttribute("href", `obsidian://open?vault=${vault}&file=${encodeURIComponent(lp)}`);
+      a.removeAttribute("data-href");
+      a.classList.add("lexis-web-ilink");
+    });
+    // app:// 本地图片/嵌入在浏览器打不开,去掉;保留 http(s) 图片
+    div.querySelectorAll("img").forEach((img) => { if (!/^https?:/i.test(img.getAttribute("src") || "")) img.remove(); });
+    div.querySelectorAll(".internal-embed, iframe").forEach((x) => x.remove());
+    const html = div.innerHTML;
+    comp.unload();
+    return html;
   }
 
   // ---------- 索引 ----------

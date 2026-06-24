@@ -129,6 +129,11 @@
     position(pop, span);
   }
 
+  function obsidianUri(data) {
+    if (!data.vault || !data.file) return null;
+    return `obsidian://open?vault=${encodeURIComponent(data.vault)}&file=${encodeURIComponent(data.file)}`;
+  }
+
   function renderDetail(box, data) {
     const titleEl = box.querySelector(".lexis-web-pop-title");
     const body = box.querySelector(".lexis-web-pop-body");
@@ -137,11 +142,21 @@
       body.textContent = data && data.offline ? "Obsidian 未连接(开着且桥接已启用?)" : "未找到这个词";
       return;
     }
-    if (data.base && data.base !== titleEl.textContent) {
-      const alias = document.createElement("span");
-      alias.className = "lexis-web-pop-alias";
-      alias.textContent = " → " + data.base;
-      titleEl.appendChild(alias);
+    // 标题:点击在 Obsidian 中打开该笔记
+    const uri = obsidianUri(data);
+    titleEl.textContent = "";
+    const label = data.word + (data.base && data.base !== data.word ? "  → " + data.base : "");
+    if (uri) {
+      const a = document.createElement("a");
+      a.className = "lexis-web-open";
+      a.href = uri;
+      a.textContent = label;
+      a.title = "在 Obsidian 中打开";
+      const pen = document.createElement("span"); pen.className = "lexis-web-pen"; pen.textContent = " ✎";
+      a.appendChild(pen);
+      titleEl.appendChild(a);
+    } else {
+      titleEl.textContent = label;
     }
     if (data.tags && data.tags.length) {
       const tagWrap = document.createElement("div");
@@ -149,11 +164,11 @@
       for (const t of data.tags) { const s = document.createElement("span"); s.className = "lexis-web-tag"; s.textContent = "#" + t; tagWrap.appendChild(s); }
       body.appendChild(tagWrap);
     }
-    const meaning = (data.meaning || "").trim() || (data.markdown || "").trim();
-    const m = document.createElement("div");
-    m.className = "lexis-web-pop-meaning";
-    m.textContent = meaning || "(这个词笔记里还没写释义)";
-    body.appendChild(m);
+    const content = document.createElement("div");
+    content.className = "lexis-web-pop-content";
+    if (data.html && data.html.trim()) content.innerHTML = data.html;
+    else content.textContent = (data.meaning || data.markdown || "").trim() || "(这个词笔记里还没写内容)";
+    body.appendChild(content);
   }
 
   function position(box, span) {
