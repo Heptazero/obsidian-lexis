@@ -257,7 +257,7 @@ module.exports = class LexisPlugin extends Plugin {
       // 模板里通常已有「#### 例句」(后面跟 ```lexis occ```),插进去而不是又加一个标题
       if (line) content = this.insertExampleLine(content, line);
       const file = await this.app.vault.create(targetPath, content);
-      this.scheduleRebuild();
+      this.rebuildIndex(false);
       return { ok: true, created: true, word, file: file.path };
     } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
   }
@@ -354,6 +354,23 @@ module.exports = class LexisPlugin extends Plugin {
         host.replaceWith(...Array.from(wrap.childNodes));
       }
     }
+    // 压缩空段标题:遍历 h1~h6,到下一个标题之间无内容且无 .lexis-web-* 块则删除
+    (function compact(container) {
+      const hs = container.querySelectorAll("h1, h2, h3, h4, h5, h6");
+      const rm = [];
+      for (let i = 0; i < hs.length; i++) {
+        const h = hs[i], next = hs[i + 1] || null;
+        let sib = h.nextElementSibling, ok = false;
+        while (sib && sib !== next) {
+          const nextSib = sib.nextElementSibling;
+          if ((sib.textContent || "").trim()) { ok = true; break; }
+          if (sib.querySelector && sib.querySelector(".lexis-web-sec,.lexis-web-rel,.lexis-web-occ,.lexis-web-curve,.lexis-web-dim")) { ok = true; break; }
+          sib = nextSib;
+        }
+        if (!ok) rm.push(h);
+      }
+      for (const h of rm) h.remove();
+    })(div);
     this.bridgePostProcess(div);
     const out = div.innerHTML;
     comp.unload();

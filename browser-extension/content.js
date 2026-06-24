@@ -208,6 +208,8 @@
       a.href = uri;
       a.textContent = label;
       a.title = "在 Obsidian 中打开";
+      a.style.setProperty("font-size", "18px", "important");
+      a.style.setProperty("font-weight", "700", "important");
       const pen = document.createElement("span"); pen.className = "lexis-web-pen"; pen.textContent = " ✎";
       a.appendChild(pen);
       titleEl.appendChild(a);
