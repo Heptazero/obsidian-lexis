@@ -189,7 +189,8 @@ module.exports = class LexisPlugin extends Plugin {
   startBridge() {
     if (this._server) return;
     let http;
-    try { http = require("http"); } catch (_e) { new Notice("Lexis:此平台不支持本地服务(需桌面端)"); return; }
+    try { http = require("http"); } catch (_e) {}
+    if (!http) { new Notice("Lexis:此平台不支持本地浏览器桥接(需桌面端)"); return; }
     const port = Number(this.settings.bridgePort) || 45945;
     const server = http.createServer((req, res) => { this.handleBridge(req, res).catch((err) => { try { res.writeHead(500); res.end(String(err && err.message || err)); } catch (_e) {} }); });
     server.on("error", (err) => {
