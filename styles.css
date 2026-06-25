@@ -131,13 +131,13 @@
 
 /* 移动端适配 */
 @media (max-width: 500px) {
+  .workspace-leaf-content[data-type="lexis-review-view"] .view-content {
+    padding-bottom: 100px;
+  }
   .lexis-review {
     padding: 12px 8px;
-    padding-bottom: calc(16px + env(safe-area-inset-bottom, 90px));
     max-width: none;
     gap: 12px;
-    min-height: 100%;
-    box-sizing: border-box;
   }
   .lexis-rv-topbar {
     flex-direction: column;
@@ -164,7 +164,6 @@
     grid-template-columns: 1fr 1fr;
     gap: 8px;
     width: 100%;
-    padding-bottom: calc(20px + env(safe-area-inset-bottom, 90px));
   }
   .lexis-rv-btn {
     min-width: 0;
@@ -174,6 +173,6 @@
   .lexis-rv-label { font-size: 16px; }
   .lexis-rv-ivl { font-size: 12px; }
   .lexis-rv-back { margin-top: 14px; padding-top: 12px; }
-  .lexis-rv-done { margin-top: 40px; padding-bottom: calc(20px + env(safe-area-inset-bottom, 90px)); }
+  .lexis-rv-done { margin-top: 40px; }
   .lexis-rv-done-emoji { font-size: 40px; }
 }
