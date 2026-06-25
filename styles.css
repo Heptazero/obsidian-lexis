@@ -110,6 +110,8 @@
     gap: 16px;
     max-width: 720px;
     margin: 0 auto;
+    min-height: 100%;
+    box-sizing: border-box;
 }
 .lexis-rv-progress {
     color: var(--text-muted);
@@ -134,7 +136,8 @@
     margin-top: 18px;
     border-top: 1px dashed var(--background-modifier-border);
     padding-top: 16px;
-    max-height: 40vh;
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
 }
 .lexis-rv-back img {
@@ -433,7 +436,6 @@ body.is-phone
         font-size: 20px !important;
     }
     .lexis-rv-back {
-        max-height: 30vh;
         margin-top: 14px;
         padding-top: 12px;
     }

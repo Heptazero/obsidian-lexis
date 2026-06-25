@@ -36,6 +36,8 @@ const DEFAULT_SETTINGS = {
   newWordTemplate: "template/单词模板.md",
   // 卡片正面:note=单词→整篇;cloze=例句填空
   cardFront: "note",
+  // 移动端/桌面端 评分按钮底部间距(px)
+  reviewBottomSpace: 70,
   // 浏览器扩展排除标签:打上此标签的单词不在网页高亮
   excludeTag: "",
   // 浏览器桥接(本地 HTTP,只听 127.0.0.1,供 Chrome 扩展拉词库/划词添加)
@@ -1069,7 +1071,7 @@ module.exports = class LexisPlugin extends Plugin {
     const m = (parts[0] || "").toLowerCase();
     const typeArg = parts.slice(1).join(" ");
     const countBefore = el.children.length;
-    if (m === "derived" || m === "派生") { await this.renderDerivedWords(el, file); if (el.children.length === countBefore) el.style.display = "none"; return; }
+    if (m === "derived" || m === "派生") { await this.renderDerivedWords(el, file); if (el.children.length === countBefore) el.remove(); return; }
     const showCurve = m === "" || m === "curve" || m === "all";
     const showRelated = m === "" || m === "refs" || m === "ref" || m === "rel" || m === "related" || m === "all";
     const showOcc = (m === "" || m === "refs" || m === "ref" || m === "occ" || m === "all") && this.settings.showOccurrences;
@@ -1110,7 +1112,7 @@ module.exports = class LexisPlugin extends Plugin {
         s2.addEventListener("click", () => this.openOccurrence(o.file, word));
       }
     }
-    if (el.children.length === countBefore) el.style.display = "none";
+    if (el.children.length === countBefore) el.remove();
   }
 
   // ---------- 悬浮卡 ----------
@@ -1324,8 +1326,14 @@ class LexisReviewView extends ItemView {
     this.showBtn.addEventListener("click", () => this.reveal());
     this.rateBar = c.createDiv({ cls: "lexis-rv-rate" });
     this.rateBar.style.display = "none";
-    // 手机端底部工具栏会遮挡,JS 直接加 margin(最可靠)
-    if (document.body.classList.contains("is-phone")) this.rateBar.style.marginBottom = "70px";
+    // 评分栏置底:空余空间推到底部 + 可配置的底部间距
+    const bs = this.plugin.settings.reviewBottomSpace || 70;
+    if (document.body.classList.contains("is-phone")) {
+      const spacer = document.createElement("div");
+      spacer.style.flex = "1";
+      c.insertBefore(spacer, this.rateBar);
+    }
+    this.rateBar.style.marginBottom = bs + "px";
     const grades = [[1, "重来"], [2, "较难"], [3, "记得"], [4, "简单"]];
     for (const [g, label] of grades) {
       const ivl = this.plugin.scheduleCard(item.card, g).interval;
@@ -1334,7 +1342,6 @@ class LexisReviewView extends ItemView {
       b.createSpan({ cls: "lexis-rv-ivl", text: this.plugin.humanInterval(ivl) });
       b.addEventListener("click", () => this.grade(g));
     }
-    if (document.body.classList.contains("is-phone")) c.style.paddingBottom = "70px";
   }
   async reveal() {
     if (this.revealed) return;
@@ -1424,7 +1431,7 @@ class LexisReviewView extends ItemView {
     const b = d.createEl("button", { cls: "mod-cta", text: "再查一遍" });
     b.onclick = () => { this.plugin.rebuildIndex(false); this.refresh(); };
     this.plugin.renderHeatmap(d.createDiv({ cls: "lexis-hm-wrap" }));
-    if (document.body.classList.contains("is-phone")) c.style.paddingBottom = "70px";
+    c.style.paddingBottom = (this.plugin.settings.reviewBottomSpace || 70) + "px";
   }
 }
 
@@ -1529,6 +1536,8 @@ class LexisSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("每轮最多复习").addSlider((s) => s.setLimits(10, 500, 10).setValue(this.plugin.settings.maxReviewsPerSession).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.maxReviewsPerSession = v; await save(); }));
     new Setting(containerEl).setName("卡片正面").setDesc("整篇=正面单词、背面笔记;填空=正面例句挖空、背面笔记(需先收藏例句,没有则退回显示单词)。")
       .addDropdown((dd) => dd.addOption("note", "单词 → 整篇").addOption("cloze", "例句填空").setValue(this.plugin.settings.cardFront).onChange(async (v) => { this.plugin.settings.cardFront = v; await save(); }));
+    new Setting(containerEl).setName("评分按钮底部间距").setDesc("答案区下方评分按钮与底部的距离(px)。移动端需留出导航栏空间,默认 70。")
+      .addSlider((s) => s.setLimits(0, 200, 5).setValue(this.plugin.settings.reviewBottomSpace).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.reviewBottomSpace = v; await save(); }));
     new Setting(containerEl).setName("开始背单词").addButton((b) => b.setButtonText("打开复习").setCta().onClick(() => this.plugin.openReview()));
 
     containerEl.createEl("h4", { text: "浏览器扩展(桥接)" });
