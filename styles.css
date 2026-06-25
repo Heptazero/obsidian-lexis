@@ -132,7 +132,7 @@
 /* 移动端适配 */
 @media (max-width: 500px) {
   .workspace-leaf-content[data-type="lexis-review-view"] .view-content {
-    padding-bottom: 100px;
+    padding-bottom: 60px;
   }
   .lexis-review {
     padding: 12px 8px;

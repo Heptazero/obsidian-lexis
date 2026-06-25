@@ -1185,6 +1185,23 @@ module.exports = class LexisPlugin extends Plugin {
     el.empty();
     if (MarkdownRenderer.render) await MarkdownRenderer.render(this.app, md, el, file.path, comp);
     else await MarkdownRenderer.renderMarkdown(md, el, file.path, comp);
+    // 渲染后清理:两标题之间无实际内容(文本/lexis 块)则删除前一个标题
+    (function compact(container) {
+      const hs = container.querySelectorAll("h1, h2, h3, h4, h5, h6");
+      const rm = [];
+      for (let i = 0; i < hs.length; i++) {
+        const h = hs[i], next = hs[i + 1] || null;
+        let sib = h.nextElementSibling, ok = false;
+        while (sib && sib !== next) {
+          const ns = sib.nextElementSibling;
+          if ((sib.textContent || "").trim()) { ok = true; break; }
+          if (sib.querySelector && sib.querySelector(".lexis-section-title,.lexis-curve,.lexis-related,.lexis-occ,.lexis-occ-details")) { ok = true; break; }
+          sib = ns;
+        }
+        if (!ok) rm.push(h);
+      }
+      for (const h of rm) h.remove();
+    })(el);
   }
   async showPopover(spanEl) {
     const key = spanEl.dataset.lexisKey;
