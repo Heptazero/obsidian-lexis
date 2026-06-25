@@ -84,6 +84,7 @@ const FSRS = {
 
 module.exports = class LexisPlugin extends Plugin {
   async onload() {
+    try {
     await this.loadSettings();
 
     this.index = new Map();
@@ -145,6 +146,10 @@ module.exports = class LexisPlugin extends Plugin {
     if (this.settings.bridgeEnabled) {
       if (!this.settings.bridgeToken) { this.settings.bridgeToken = this.genToken(); await this.saveSettings(); }
       this.startBridge();
+    }
+    } catch (err) {
+      console.error("[Lexis] onload 失败:", err?.stack || err);
+      if (typeof Notice !== "undefined") new Notice("Lexis 加载失败:" + (err?.message || err));
     }
   }
 
