@@ -128,3 +128,48 @@
 .lexis-occ-add { cursor: pointer; margin-left: 6px; opacity: 0.7; }
 .lexis-occ-add:hover { opacity: 1; }
 .lexis-rv-cloze { font-size: 22px !important; font-weight: 600; line-height: 1.5; text-align: center; }
+
+/* 移动端适配 */
+@media (max-width: 500px) {
+  .lexis-review {
+    padding: 12px 8px;
+    max-width: none;
+    gap: 12px;
+  }
+  .lexis-rv-topbar {
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+  .lexis-rv-progress { font-size: 14px; }
+  .lexis-rv-undo { font-size: 13px; padding: 6px 14px; }
+  .lexis-rv-card {
+    padding: 20px 16px;
+    border-radius: 12px;
+  }
+  .lexis-rv-word { font-size: 38px; }
+  .lexis-rv-cloze { font-size: 24px !important; }
+  .lexis-rv-tags { gap: 4px; margin-top: 8px; }
+  .lexis-tag { font-size: 13px; padding: 3px 10px; }
+  .lexis-rv-show {
+    width: 100%;
+    height: 48px;
+    font-size: 16px;
+  }
+  .lexis-rv-rate {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    width: 100%;
+  }
+  .lexis-rv-btn {
+    min-width: 0;
+    min-height: 56px;
+    padding: 10px 12px !important;
+  }
+  .lexis-rv-label { font-size: 16px; }
+  .lexis-rv-ivl { font-size: 12px; }
+  .lexis-rv-back { margin-top: 14px; padding-top: 12px; }
+  .lexis-rv-done { margin-top: 40px; }
+  .lexis-rv-done-emoji { font-size: 40px; }
+}
