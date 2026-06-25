@@ -97,9 +97,11 @@ module.exports = class LexisPlugin extends Plugin {
     this.liveAvailable = false;
 
     this.statusBarEl = this.addStatusBarItem();
-    this.statusBarEl.style.cursor = "pointer";
-    this.statusBarEl.setAttribute("aria-label", "Lexis:点击重建索引(图标右键可开始背单词)");
-    this.registerDomEvent(this.statusBarEl, "click", () => this.rebuildIndex(true));
+    if (this.statusBarEl) {
+      this.statusBarEl.style.cursor = "pointer";
+      this.statusBarEl.setAttribute("aria-label", "Lexis:点击重建索引(图标右键可开始背单词)");
+      this.registerDomEvent(this.statusBarEl, "click", () => this.rebuildIndex(true));
+    }
 
     this.addCommand({ id: "rebuild-index", name: "重建单词索引", callback: () => this.rebuildIndex(true) });
     this.addCommand({ id: "open-review", name: "开始背单词", callback: () => this.openReview() });
