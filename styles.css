@@ -129,11 +129,31 @@
 .lexis-occ-add:hover { opacity: 1; }
 .lexis-rv-cloze { font-size: 22px !important; font-weight: 600; line-height: 1.5; text-align: center; }
 
+/* 笔记内/悬浮卡 表格 */
+.lexis-rv-back table, .lexis-popover-body table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0;
+}
+.lexis-rv-back th, .lexis-rv-back td,
+.lexis-popover-body th, .lexis-popover-body td {
+  border: 1px solid var(--background-modifier-border);
+  padding: 6px 10px;
+  text-align: left;
+}
+.lexis-rv-back th, .lexis-popover-body th {
+  background: var(--background-secondary);
+  font-weight: 600;
+}
+
+/* 手机端底部安全区 */
+body.is-phone .workspace-leaf-content[data-type="lexis-review-view"] .view-content,
+body.is-phone .workspace-leaf-content[data-type="lexis-home-view"] .view-content {
+  padding-bottom: 80px !important;
+}
+
 /* 移动端适配 */
 @media (max-width: 500px) {
-  .workspace-leaf-content[data-type="lexis-review-view"] .view-content {
-    padding-bottom: 60px;
-  }
   .lexis-review {
     padding: 12px 8px;
     max-width: none;

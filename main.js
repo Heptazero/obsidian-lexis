@@ -1068,7 +1068,8 @@ module.exports = class LexisPlugin extends Plugin {
     const parts = (src || "").trim().split(/\s+/).filter(Boolean);
     const m = (parts[0] || "").toLowerCase();
     const typeArg = parts.slice(1).join(" ");
-    if (m === "derived" || m === "派生") { await this.renderDerivedWords(el, file); return; }
+    const countBefore = el.children.length;
+    if (m === "derived" || m === "派生") { await this.renderDerivedWords(el, file); if (el.children.length === countBefore) el.style.display = "none"; return; }
     const showCurve = m === "" || m === "curve" || m === "all";
     const showRelated = m === "" || m === "refs" || m === "ref" || m === "rel" || m === "related" || m === "all";
     const showOcc = (m === "" || m === "refs" || m === "ref" || m === "occ" || m === "all") && this.settings.showOccurrences;
@@ -1109,6 +1110,7 @@ module.exports = class LexisPlugin extends Plugin {
         s2.addEventListener("click", () => this.openOccurrence(o.file, word));
       }
     }
+    if (el.children.length === countBefore) el.style.display = "none";
   }
 
   // ---------- 悬浮卡 ----------
@@ -1195,7 +1197,7 @@ module.exports = class LexisPlugin extends Plugin {
         while (sib && sib !== next) {
           const ns = sib.nextElementSibling;
           if ((sib.textContent || "").trim()) { ok = true; break; }
-          if (sib.querySelector && sib.querySelector(".lexis-section-title,.lexis-curve,.lexis-related,.lexis-occ,.lexis-occ-details")) { ok = true; break; }
+          if (sib.querySelector && sib.querySelector(".lexis-section-title,.lexis-curve,.lexis-related,.lexis-occ,.lexis-occ-details,img,svg,video,iframe")) { ok = true; break; }
           sib = ns;
         }
         if (!ok) rm.push(h);
