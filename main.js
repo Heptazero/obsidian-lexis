@@ -1324,6 +1324,8 @@ class LexisReviewView extends ItemView {
     this.showBtn.addEventListener("click", () => this.reveal());
     this.rateBar = c.createDiv({ cls: "lexis-rv-rate" });
     this.rateBar.style.display = "none";
+    // 手机端底部工具栏会遮挡,JS 直接加 margin(最可靠)
+    if (document.body.classList.contains("is-phone")) this.rateBar.style.marginBottom = "70px";
     const grades = [[1, "重来"], [2, "较难"], [3, "记得"], [4, "简单"]];
     for (const [g, label] of grades) {
       const ivl = this.plugin.scheduleCard(item.card, g).interval;
@@ -1332,6 +1334,7 @@ class LexisReviewView extends ItemView {
       b.createSpan({ cls: "lexis-rv-ivl", text: this.plugin.humanInterval(ivl) });
       b.addEventListener("click", () => this.grade(g));
     }
+    if (document.body.classList.contains("is-phone")) c.style.paddingBottom = "70px";
   }
   async reveal() {
     if (this.revealed) return;
@@ -1421,6 +1424,7 @@ class LexisReviewView extends ItemView {
     const b = d.createEl("button", { cls: "mod-cta", text: "再查一遍" });
     b.onclick = () => { this.plugin.rebuildIndex(false); this.refresh(); };
     this.plugin.renderHeatmap(d.createDiv({ cls: "lexis-hm-wrap" }));
+    if (document.body.classList.contains("is-phone")) c.style.paddingBottom = "70px";
   }
 }
 
