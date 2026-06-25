@@ -822,8 +822,8 @@ module.exports = class LexisPlugin extends Plugin {
         if (sf) map.set(src, sf.basename);
       }
     }
+    if (!map.size) return;
     container.createDiv({ cls: "lexis-section-title", text: `🌱 派生词 (${map.size})` });
-    if (!map.size) { container.createDiv({ cls: "lexis-occ", text: "(还没有单词链到这个词根)" }); return; }
     const w = container.createDiv({ cls: "lexis-related" });
     for (const [path, basename] of map) this.relLink(w, path, basename);
   }
@@ -1080,7 +1080,7 @@ module.exports = class LexisPlugin extends Plugin {
         const due = card.due ? ` · 下次 ${String(card.due).slice(0, 10)}` : "";
         el.createDiv({ cls: "lexis-section-title", text: `🧠 记忆曲线(稳定度 ${round2(Number(card.s))} 天${due})` });
         el.createDiv({ cls: "lexis-curve" }).innerHTML = svg;
-      } else el.createDiv({ cls: "lexis-section-title", text: "🧠 记忆曲线(还没复习过)" });
+      }
     }
 
     if (showRelated) {
@@ -1089,14 +1089,13 @@ module.exports = class LexisPlugin extends Plugin {
     }
 
     if (showOcc) {
-      const det = el.createEl("details", { cls: "lexis-occ-details" });
-      const sum = det.createEl("summary", { text: "📍 出现过的地方 …" });
-      const occWrap = det.createDiv();
       const curated = await this.getCuratedSourcePaths(file);
       const list = (await this.findOccurrences(word)).filter((o) => !curated.has(o.file.basename.toLowerCase()));
-      sum.setText(`📍 出现过的地方 (${list.length})`);
-      if (!list.length) occWrap.createDiv({ cls: "lexis-occ", text: "(没有未收藏的新出处)" });
-      else for (const o of list) {
+      if (!list.length) return;
+      const det = el.createEl("details", { cls: "lexis-occ-details" });
+      const sum = det.createEl("summary", { text: `📍 出现过的地方 (${list.length})` });
+      const occWrap = det.createDiv();
+      for (const o of list) {
         const dd = occWrap.createDiv({ cls: "lexis-occ" });
         this.renderSentence(dd, o.sentence, word);
         const add = dd.createSpan({ cls: "lexis-occ-add", text: " ➕" });
