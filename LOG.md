@@ -432,6 +432,11 @@
 - **着色**:`content.js` 新增 `dictColorFor(key)`(支持子文件夹归父词典、取最长匹配);`inlineStyleFor` 优先级 **标签规则 > 词典色 > 全局色**。
 - **范围/注意**:目前只作用于**网页高亮**(Obsidian 内高亮暂沿用标签着色);改完色需**重新 sync**(扩展弹窗同步)才生效;若关了「使用 Obsidian 标签着色」则只剩全局色、词典色不生效(那条路径本就是"纯单色")。Obsidian 内同款着色可作下一轮。
 
+## 统一:Obsidian 内高亮也用词典色(插件 v1.0.10)
+- Hz 质疑"内部和网页搞两套不累吗"——其实**不是两套配置,是同一份设置(highlightColor/tagRules/dicts)、两个渲染器**(ob 的 CodeMirror/阅读模式 vs 浏览器 content script,跑在不同运行时,代码没法直接共用)。上一版只给网页接了词典色,ob 内还没接,所以看着像两套。
+- 本版:`inlineStyleForEntry`(ob 内)也调 `dictColorForFile(entry.file)`,**优先级与网页端 `inlineStyleFor` 完全一致:标签规则 > 词典色 > 全局色**。`dictColorForFile` 与网页 `dictColorFor` 同逻辑(子文件夹归父词典、最长匹配)。
+- 设置里改色后 `refresh()`(`refreshAllViews`)即时重绘库内高亮;网页端仍需 sync。色块 tooltip 改为"库内+网页"。
+
 ## 想法暂存(Hz 提出,暂不做)
 - (已实现 ↑)~~**标签识别为单词**:除了扫文件夹,再支持"带某标签的笔记也算单词来源"。~~ → 本轮已做,见上"地基"。
 

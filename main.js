@@ -740,9 +740,27 @@ module.exports = class LexisPlugin extends Plugin {
     const pct = Math.max(0, Math.min(100, Math.round(alpha * 100)));
     return `color-mix(in srgb, ${color} ${pct}%, transparent)`;
   }
+  // 某文件所属词典(文件夹)的专属色;子文件夹归父词典,取最长匹配。网页和 ob 内共用同一份 dictColorMap
+  dictColorForFile(file) {
+    const path = file && file.path;
+    if (!path) return null;
+    const i = path.lastIndexOf("/");
+    const wf = i > 0 ? path.slice(0, i) : "";
+    if (!wf) return null;
+    const map = this.dictColorMap();
+    if (map[wf]) return map[wf];
+    let best = null, bestLen = -1;
+    for (const df in map) {
+      if (df && (wf === df || wf.startsWith(df + "/")) && df.length > bestLen) { best = map[df]; bestLen = df.length; }
+    }
+    return best;
+  }
   inlineStyleForEntry(entry) {
     let color = this.settings.highlightColor || "var(--text-accent)";
     let styleKind = this.settings.highlightStyle || "wavy";
+    // 优先级:标签规则 > 词典色 > 全局色(和网页端 inlineStyleFor 完全一致)
+    const dc = this.dictColorForFile(entry && entry.file);
+    if (dc) color = dc;
     if (entry?.tags && this.settings.tagRules?.length) {
       const rule = this.settings.tagRules.find((r) => r.tag && entry.tags.has(r.tag.toLowerCase()));
       if (rule) { if (rule.color) color = rule.color; if (rule.style) styleKind = rule.style; }
@@ -1706,9 +1724,9 @@ class LexisSettingTab extends PluginSettingTab {
         cIn.style.width = "30px"; cIn.style.height = "24px"; cIn.style.padding = "0"; cIn.style.border = "none"; cIn.style.background = "none"; cIn.style.cursor = "pointer"; cIn.style.flex = "0 0 auto";
         cIn.value = d.color || globalColor;
         cIn.style.opacity = d.color ? "1" : "0.35";
-        cIn.title = d.color ? "这个词典的高亮色(网页)" : "未设置,跟随全局色;点选即设为专属色";
-        cIn.addEventListener("input", async () => { d.color = cIn.value; cIn.style.opacity = "1"; cIn.title = "这个词典的高亮色(网页)"; await save(); });
-        new obsidian.ExtraButtonComponent(row).setIcon("rotate-ccw").setTooltip("恢复跟随全局色").onClick(async () => { d.color = ""; cIn.value = globalColor; cIn.style.opacity = "0.35"; cIn.title = "未设置,跟随全局色"; await save(); });
+        cIn.title = d.color ? "这个词典的高亮色(库内+网页)" : "未设置,跟随全局色;点选即设为专属色";
+        cIn.addEventListener("input", async () => { d.color = cIn.value; cIn.style.opacity = "1"; cIn.title = "这个词典的高亮色(库内+网页)"; await save(); refresh(); });
+        new obsidian.ExtraButtonComponent(row).setIcon("rotate-ccw").setTooltip("恢复跟随全局色").onClick(async () => { d.color = ""; cIn.value = globalColor; cIn.style.opacity = "0.35"; cIn.title = "未设置,跟随全局色"; await save(); refresh(); });
         new obsidian.ExtraButtonComponent(row).setIcon("trash").setTooltip("删除这个词典").onClick(async () => { this.plugin.settings.dicts.splice(i, 1); await save(); this.plugin.rebuildIndex(false); renderDicts(); this.renderStats(); });
       });
       const addDict = dictsWrap.createEl("button", { text: "+ 添加词典" });
