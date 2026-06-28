@@ -7,6 +7,7 @@
   let cfg = null;
   let keySet = null;
   let keyTags = null;
+  let keyFolder = null;
   let excludedKeys = null;
   let regex = null;
   let observer = null;
@@ -116,6 +117,7 @@
   function build(words) {
     keySet = new Set();
     keyTags = new Map();
+    keyFolder = new Map();
     excludedKeys = new Set();
     const exSet = excludeSet();
     const keys = [];
@@ -124,6 +126,7 @@
       if (k.length < 2) continue;
       const tags = (x.t || []).map((t) => String(t).toLowerCase());
       keyTags.set(k, tags);
+      if (x.f) keyFolder.set(k, x.f);
       if (exSet.size && tags.some((t) => exSet.has(t))) { excludedKeys.add(k); continue; }
       keySet.add(k);
       keys.push(k);
@@ -132,7 +135,21 @@
     regex = keys.length ? new RegExp("\\b(?:" + keys.map(esc).join("|") + ")\\b", "gi") : null;
   }
 
-  // 对标 Obsidian 的 inlineStyleForEntry:标签规则 → 颜色/线型,带透明度
+  // 某个词所属词典(文件夹)的专属高亮色;支持子文件夹归入父词典,取最长匹配
+  function dictColorFor(key) {
+    if (!styleCfg || !styleCfg.dictColors || !keyFolder) return null;
+    const wf = keyFolder.get(key);
+    if (!wf) return null;
+    const map = styleCfg.dictColors;
+    if (map[wf]) return map[wf];
+    let best = null, bestLen = -1;
+    for (const df in map) {
+      if (df && (wf === df || wf.startsWith(df + "/")) && df.length > bestLen) { best = map[df]; bestLen = df.length; }
+    }
+    return best;
+  }
+
+  // 对标 Obsidian 的 inlineStyleForEntry:词典色/标签规则 → 颜色/线型,带透明度
   function inlineStyleFor(key) {
     // 用户关了「使用 Obsidian 标签着色」→ 只用全局色
     if (cfg.useObsidianStyle === false || !styleCfg) {
@@ -147,6 +164,9 @@
     const tags = keyTags.get(key) || [];
     let color = styleCfg.highlightColor || cfg.color || "#7c5cff";
     let styleKind = styleCfg.highlightStyle || cfg.style || "wavy";
+    // 词典专属色(优先级:标签规则 > 词典色 > 全局色)
+    const dc = dictColorFor(key);
+    if (dc) color = dc;
     const rules = styleCfg.tagRules || [];
     if (tags.length && rules.length) {
       const rule = rules.find((r) => r.tag && tags.includes(r.tag.toLowerCase()));

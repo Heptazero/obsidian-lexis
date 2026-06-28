@@ -476,6 +476,7 @@ module.exports = class LexisPlugin extends Plugin {
         highlightStyle: this.settings.highlightStyle,
         excludeTags: this.parseTags(this.settings.excludeTags),
         dicts: this.dictFolders(),
+        dictColors: this.dictColorMap(),
         pillFolderPicker: !!this.settings.pillFolderPicker,
       },
     };
@@ -848,6 +849,16 @@ module.exports = class LexisPlugin extends Plugin {
   vocabTagSet() { return new Set(this.parseTags(this.settings.vocabTags)); }
   // 词典表的文件夹列表 = 文件夹来源的单一真相
   dictFolders() { return (this.settings.dicts || []).map((d) => this.normalizeFolder(d && d.folder)).filter(Boolean); }
+  // { 规范化文件夹: 颜色 },只含设了专属色的词典;供网页按所属词典着色
+  dictColorMap() {
+    const m = {};
+    for (const d of this.settings.dicts || []) {
+      const f = this.normalizeFolder(d && d.folder);
+      const c = (d && d.color || "").trim();
+      if (f && c) m[f] = c;
+    }
+    return m;
+  }
   primaryVocabFolder() { return this.dictFolders()[0] || ""; } // 新建单词时落地的文件夹(取第一个)
   inFolderScope(path) { const fs = this.dictFolders(); return fs.length ? this.inScope(path, fs) : false; }
   // 某文件夹对应的模板路径:词典行的 template,空则回退全局默认 newWordTemplate
@@ -1689,6 +1700,15 @@ class LexisSettingTab extends PluginSettingTab {
           new PathSuggest(this.app, fIn.inputEl, () => folders, (v) => { fIn.setValue(v); onFolder(v); });
           new PathSuggest(this.app, tIn.inputEl, () => mdFiles, (v) => { tIn.setValue(v); onTpl(v); });
         }
+        // 每个词典可选专属高亮色(留空=跟随全局色)
+        const globalColor = this.plugin.settings.highlightColor || "#7c5cff";
+        const cIn = row.createEl("input", { type: "color" });
+        cIn.style.width = "30px"; cIn.style.height = "24px"; cIn.style.padding = "0"; cIn.style.border = "none"; cIn.style.background = "none"; cIn.style.cursor = "pointer"; cIn.style.flex = "0 0 auto";
+        cIn.value = d.color || globalColor;
+        cIn.style.opacity = d.color ? "1" : "0.35";
+        cIn.title = d.color ? "这个词典的高亮色(网页)" : "未设置,跟随全局色;点选即设为专属色";
+        cIn.addEventListener("input", async () => { d.color = cIn.value; cIn.style.opacity = "1"; cIn.title = "这个词典的高亮色(网页)"; await save(); });
+        new obsidian.ExtraButtonComponent(row).setIcon("rotate-ccw").setTooltip("恢复跟随全局色").onClick(async () => { d.color = ""; cIn.value = globalColor; cIn.style.opacity = "0.35"; cIn.title = "未设置,跟随全局色"; await save(); });
         new obsidian.ExtraButtonComponent(row).setIcon("trash").setTooltip("删除这个词典").onClick(async () => { this.plugin.settings.dicts.splice(i, 1); await save(); this.plugin.rebuildIndex(false); renderDicts(); this.renderStats(); });
       });
       const addDict = dictsWrap.createEl("button", { text: "+ 添加词典" });

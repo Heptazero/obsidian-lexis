@@ -426,6 +426,12 @@
 - **现象**:点 pill 上的文件夹按钮,下拉闪一下就没。**根因**:点击的 `mouseup` 会触发 `scheduleSel`(200ms)→ `onSelect`,选区没变但它仍 `hideSelBtn()` 后重建整个 pill,把刚打开的下拉拆掉(还会把已选文件夹重置回默认)。
 - **修法**:pill 记下 `dataset.word`;`onSelect` 开头加守卫——**选区文本没变且 pill 已存在就直接 return**,不重建。这样在 pill 上点下拉/选文件夹都不会被自身的 mouseup 拆掉。
 
+## 新增:每个词典专属高亮色(插件 v1.0.9 / 扩展 v1.0.11)
+- **设置**:词典表每行模板后多一个色块(`<input type=color>`)+ 一个"恢复跟随全局色"按钮。`dicts` 行加 `color` 字段(留空=跟随全局),undefined 即旧数据兼容。
+- **数据链路**:`bridgeWordList` 的 styleConfig 加 `dictColors`(`dictColorMap()` = `{规范化文件夹: 颜色}`,只含设了色的);`background.js` 同步时给每个词补 `f`(文件夹,从 `file` 路径取目录);`content.js` `build` 存 `keyFolder`。
+- **着色**:`content.js` 新增 `dictColorFor(key)`(支持子文件夹归父词典、取最长匹配);`inlineStyleFor` 优先级 **标签规则 > 词典色 > 全局色**。
+- **范围/注意**:目前只作用于**网页高亮**(Obsidian 内高亮暂沿用标签着色);改完色需**重新 sync**(扩展弹窗同步)才生效;若关了「使用 Obsidian 标签着色」则只剩全局色、词典色不生效(那条路径本就是"纯单色")。Obsidian 内同款着色可作下一轮。
+
 ## 想法暂存(Hz 提出,暂不做)
 - (已实现 ↑)~~**标签识别为单词**:除了扫文件夹,再支持"带某标签的笔记也算单词来源"。~~ → 本轮已做,见上"地基"。
 

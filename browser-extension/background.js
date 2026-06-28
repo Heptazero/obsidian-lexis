@@ -43,7 +43,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       if (msg.type === "sync") {
         const data = await api(cfg, "/words");
         if (data && data.ok) {
-          const words = (data.words || []).map((x) => ({ k: x.key, w: x.word, t: x.tags || [] }));
+          const folderOf = (p) => { if (!p) return ""; const i = p.lastIndexOf("/"); return i > 0 ? p.slice(0, i) : ""; };
+          const words = (data.words || []).map((x) => ({ k: x.key, w: x.word, t: x.tags || [], f: folderOf(x.file) }));
           const meta = { count: words.length, syncedAt: Date.now(), version: data.version };
           const styleConfig = data.styleConfig || null;
           await chrome.storage.local.set({ words, meta, styleConfig });
