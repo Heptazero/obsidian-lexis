@@ -334,31 +334,39 @@
       if (allDicts.length > 1) {
         b.classList.add("lexis-web-dict-click");
         b.title = (dir || "根目录") + " —— 点击移到别的词典";
+        let listEl = null;
+        const closeList = () => { if (listEl) { listEl.remove(); listEl = null; document.removeEventListener("mousedown", onDocDown); } };
+        const onDocDown = (e) => { if (listEl && !listEl.contains(e.target) && e.target !== b) closeList(); };
+        b.addEventListener("mousedown", (ev) => { ev.preventDefault(); ev.stopPropagation(); });
         b.addEventListener("click", (ev) => {
           ev.preventDefault(); ev.stopPropagation();
-          const old = titleEl.parentElement.querySelector(".lexis-web-dictlist");
-          if (old) { old.remove(); return; }
-          const list = document.createElement("div");
-          list.className = "lexis-web-folderlist lexis-web-dictlist";
+          if (listEl) { closeList(); return; }
+          listEl = document.createElement("div");
+          listEl.className = "lexis-web-tag-list";
           allDicts.forEach((f) => {
-            const it = document.createElement("div");
-            it.className = "lexis-web-folderitem" + (f === dir ? " sel" : "");
+            const it = document.createElement("span");
+            it.className = "lexis-web-tag" + (f === dir ? " lexis-web-tag-off" : "");
             it.textContent = dname(f); it.title = f;
+            it.addEventListener("mousedown", (e2) => { e2.preventDefault(); e2.stopPropagation(); });
             it.addEventListener("click", async (e2) => {
-              e2.preventDefault(); e2.stopPropagation();
-              list.remove();
-              if (f === dir) return;
+              e2.stopPropagation();
+              if (f === dir) { closeList(); return; }
+              closeList();
               const r = await chrome.runtime.sendMessage({ type: "move", payload: { key: moveKey, folder: f } });
               if (r && r.ok) {
-                detailCache.delete((moveKey || "").toLowerCase());
                 toast(`已把「${data.word}」移到 ${dname(f)}`, true);
+                const k = pop && pop.dataset.k;
+                detailCache.delete(k);
                 await chrome.runtime.sendMessage({ type: "sync" });
-                removePop();
+                // 实时刷新悬浮卡(不关闭)
+                let fresh; try { fresh = await chrome.runtime.sendMessage({ type: "detail", key: k }); } catch (_e) {}
+                if (fresh && fresh.ok && pop && pop.dataset.k === k) { detailCache.set(k, fresh); renderDetail(pop, fresh); position(pop, currentSpan); }
               } else toast(r && r.error === "exists" ? "那个词典里已有同名词" : "移动失败", false);
             });
-            list.appendChild(it);
+            listEl.appendChild(it);
           });
-          b.appendChild(list);
+          b.appendChild(listEl);
+          document.addEventListener("mousedown", onDocDown);
         });
       }
       titleEl.appendChild(b);

@@ -1558,24 +1558,44 @@ class LexisHomeView extends ItemView {
   onClose() {}
 }
 
-// 输入时模糊匹配建议(文件夹/文件路径)。AbstractInputSuggest 在 Obsidian 1.0+ 运行时可用;
+// 输入时模糊匹配建议。AbstractInputSuggest 在 Obsidian 1.0+ 运行时可用;
 // 缺失时 `|| class {}` 避免 extends undefined 报错,且调用处会跳过实例化。
+// opts.multi=true 时按最后一个分隔符后的"活动 token"匹配,选中后追加(用于逗号/空格分隔的标签/属性多值字段)。
 class PathSuggest extends (obsidian.AbstractInputSuggest || class {}) {
-  constructor(app, inputEl, getItems, onPick) {
+  constructor(app, inputEl, getItems, onPick, opts) {
     super(app, inputEl);
     this.getItems = getItems;
     this.onPick = onPick;
+    this.multi = !!(opts && opts.multi);
+    this.sep = (opts && opts.sep) || " ";
+  }
+  _split() {
+    const v = (this.inputEl && this.inputEl.value) || "";
+    const m = v.match(/[^\s,，;；]*$/);
+    const token = m ? m[0] : "";
+    return { before: v.slice(0, v.length - token.length), token };
   }
   getSuggestions(query) {
-    const q = (query || "").toLowerCase();
-    return this.getItems().filter((p) => p.toLowerCase().includes(q)).slice(0, 50);
+    let items = this.getItems();
+    let q;
+    if (this.multi) {
+      const { token } = this._split();
+      q = token.toLowerCase();
+      const chosen = new Set(((this.inputEl && this.inputEl.value) || "").toLowerCase().split(/[\s,，;；]+/).filter(Boolean));
+      items = items.filter((p) => p.toLowerCase() === token.toLowerCase() || !chosen.has(p.toLowerCase()));
+    } else {
+      q = (query || "").toLowerCase();
+    }
+    return items.filter((p) => p.toLowerCase().includes(q)).slice(0, 50);
   }
   renderSuggestion(value, el) { el.setText(value); }
   selectSuggestion(value) {
-    if (typeof this.setValue === "function") this.setValue(value);
-    if (this.inputEl) this.inputEl.value = value;
+    let out = value;
+    if (this.multi) { const { before } = this._split(); out = before + value + this.sep; }
+    if (typeof this.setValue === "function") this.setValue(out);
+    if (this.inputEl) this.inputEl.value = out;
     if (typeof this.close === "function") this.close();
-    if (this.onPick) this.onPick(value);
+    if (this.onPick) this.onPick(out);
   }
 }
 
@@ -1593,6 +1613,16 @@ class LexisSettingTab extends PluginSettingTab {
     const folders = this.app.vault.getAllLoadedFiles().filter((f) => f instanceof TFolder).map((f) => f.path).filter((p) => p && p !== "/").sort();
     const mdFiles = this.app.vault.getMarkdownFiles().map((f) => f.path).sort();
     const hasSuggest = !!obsidian.AbstractInputSuggest;
+    const allTags = (() => {
+      const s = new Set(this.plugin.collectVocabTags());
+      try { const tg = this.app.metadataCache.getTags() || {}; for (const k in tg) s.add(k.replace(/^#/, "").toLowerCase()); } catch (_e) {}
+      return [...s].filter(Boolean).sort();
+    })();
+    const allProps = (() => {
+      try { const infos = this.app.metadataCache.getAllPropertyInfos ? this.app.metadataCache.getAllPropertyInfos() : null; if (infos) return Object.values(infos).map((x) => x && x.name).filter(Boolean).sort(); } catch (_e) {}
+      return [];
+    })();
+    const tagSuggest = (comp, apply) => { if (hasSuggest) new PathSuggest(this.app, comp.inputEl, () => allTags, (v) => { comp.setValue(v); apply(v); }, { multi: true }); };
 
     new Setting(containerEl).setName("词典(文件夹 → 模板)").setHeading();
     new Setting(containerEl).setDesc(`每行一个词典:文件夹(含子文件夹)里每个笔记标题都算一个词条,各词典可指定自己的新词模板(留空=用下方默认模板)。新词默认落到第一行。已有文件夹:${folders.slice(0, 8).join("、") || "(无)"}${folders.length > 8 ? "…" : ""}`);
@@ -1618,15 +1648,26 @@ class LexisSettingTab extends PluginSettingTab {
         }
         new obsidian.ExtraButtonComponent(row).setIcon("trash").setTooltip("删除这个词典").onClick(async () => { this.plugin.settings.dicts.splice(i, 1); await save(); this.plugin.rebuildIndex(false); renderDicts(); this.renderStats(); });
       });
-      new Setting(dictsWrap).addButton((b) => b.setButtonText("+ 添加词典").onClick(async () => { this.plugin.settings.dicts.push({ folder: "", template: "" }); await save(); renderDicts(); }));
+      const addDict = dictsWrap.createEl("button", { text: "+ 添加词典" });
+      addDict.style.marginTop = "2px";
+      addDict.addEventListener("click", async () => { this.plugin.settings.dicts.push({ folder: "", template: "" }); await save(); renderDicts(); });
     };
     renderDicts();
     new Setting(containerEl).setName("按标签收录").setDesc("带任一此标签的笔记也算词库(与文件夹取并集),逗号或空格分隔。留空=只按文件夹。")
-      .addText((t) => t.setPlaceholder("词汇 术语").setValue(this.plugin.settings.vocabTags).onChange(async (v) => { this.plugin.settings.vocabTags = v; await save(); this.plugin.rebuildIndex(true); this.renderStats(); }));
+      .addText((t) => {
+        t.setPlaceholder("词汇 术语").setValue(this.plugin.settings.vocabTags);
+        const apply = async (v) => { this.plugin.settings.vocabTags = v; await save(); this.plugin.rebuildIndex(true); this.renderStats(); };
+        t.onChange(apply); tagSuggest(t, apply);
+      });
     new Setting(containerEl).setName("别名也算单词").setDesc("启用后,单词笔记 frontmatter 里的别名也会被识别与高亮。")
       .addToggle((t) => t.setValue(this.plugin.settings.includeAliases).onChange(async (v) => { this.plugin.settings.includeAliases = v; await save(); this.plugin.rebuildIndex(false); this.renderStats(); }));
     new Setting(containerEl).setName("别名属性名").setDesc("除 aliases/alias 外,还从哪些 frontmatter 属性读取别名(逗号分隔)。例:past,forms,variants· 适合存过去式、复数等变形。")
-      .addText((t) => t.setPlaceholder("past,forms,variants").setValue(this.plugin.settings.aliasSources).onChange(async (v) => { this.plugin.settings.aliasSources = v.trim(); await save(); if (this.plugin.settings.includeAliases) { this.plugin.rebuildIndex(false); this.renderStats(); } }));
+      .addText((t) => {
+        t.setPlaceholder("past,forms,variants").setValue(this.plugin.settings.aliasSources);
+        const apply = async (v) => { this.plugin.settings.aliasSources = (v || "").trim(); await save(); if (this.plugin.settings.includeAliases) { this.plugin.rebuildIndex(false); this.renderStats(); } };
+        t.onChange(apply);
+        if (hasSuggest) new PathSuggest(this.app, t.inputEl, () => allProps, (v) => { t.setValue(v); apply(v); }, { multi: true, sep: "," });
+      });
 
     containerEl.createEl("h4", { text: "高亮" });
     new Setting(containerEl).setName("启用高亮").addToggle((t) => t.setValue(this.plugin.settings.enableHighlight).onChange(async (v) => { this.plugin.settings.enableHighlight = v; await save(); refresh(); }));
@@ -1648,12 +1689,17 @@ class LexisSettingTab extends PluginSettingTab {
       const grid = rulesWrap.createDiv({ cls: "lexis-rule-grid" });
       this.plugin.settings.tagRules.forEach((rule, i) => {
         const cell = grid.createDiv({ cls: "lexis-rule" });
-        new obsidian.TextComponent(cell).setPlaceholder("标签").setValue(rule.tag).onChange(async (v) => { rule.tag = v.trim(); await save(); refresh(); });
+        const tagIn = new obsidian.TextComponent(cell).setPlaceholder("标签").setValue(rule.tag);
+        const applyTag = async (v) => { rule.tag = (v || "").trim(); await save(); refresh(); };
+        tagIn.onChange(applyTag);
+        if (hasSuggest) new PathSuggest(this.app, tagIn.inputEl, () => allTags, (v) => { tagIn.setValue(v); applyTag(v); });
         new obsidian.ColorComponent(cell).setValue(rule.color || accentHex).onChange(async (v) => { rule.color = v; await save(); refresh(); });
         new obsidian.DropdownComponent(cell).addOption("", "默认").addOption("wavy", "波浪").addOption("underline", "实线").addOption("background", "背景").setValue(rule.style || "").onChange(async (v) => { rule.style = v; await save(); refresh(); });
         new obsidian.ExtraButtonComponent(cell).setIcon("trash").setTooltip("删除").onClick(async () => { this.plugin.settings.tagRules.splice(i, 1); await save(); refresh(); renderRules(); });
       });
-      new Setting(rulesWrap).addButton((b) => b.setButtonText("+ 添加标签规则").onClick(async () => { this.plugin.settings.tagRules.push({ tag: "", color: accentHex, style: "" }); await save(); renderRules(); }));
+      const addRule = rulesWrap.createEl("button", { text: "+ 添加标签规则" });
+      addRule.style.marginTop = "2px";
+      addRule.addEventListener("click", async () => { this.plugin.settings.tagRules.push({ tag: "", color: accentHex, style: "" }); await save(); renderRules(); });
     };
     renderRules();
 
@@ -1690,7 +1736,11 @@ class LexisSettingTab extends PluginSettingTab {
     // 排除标签:带任一此标签的单词不会在网页高亮
     const vocabTagsHint = this.plugin.collectVocabTags().slice(0, 10).join("、");
     new Setting(containerEl).setName("排除标签").setDesc(`带任一此标签的单词不在网页高亮(Obsidian 里不受影响),逗号或空格分隔。留空=不排除。词库标签:${vocabTagsHint || "(无)"}`)
-      .addText((t) => t.setPlaceholder("已掌握 暂缓").setValue(this.plugin.settings.excludeTags).onChange(async (v) => { this.plugin.settings.excludeTags = v; await save(); }));
+      .addText((t) => {
+        t.setPlaceholder("已掌握 暂缓").setValue(this.plugin.settings.excludeTags);
+        const apply = async (v) => { this.plugin.settings.excludeTags = v; await save(); };
+        t.onChange(apply); tagSuggest(t, apply);
+      });
     new Setting(containerEl).setName("划词 pill 显示词典选择").setDesc("开启后,网页划词加新词的小条上会多一个文件夹下拉,可当场选落到哪个词典(需多个词典)。关闭则新词进第一个词典,之后在悬浮卡里点文件夹小标可改。")
       .addToggle((t) => t.setValue(this.plugin.settings.pillFolderPicker).onChange(async (v) => { this.plugin.settings.pillFolderPicker = v; await save(); }));
     new Setting(containerEl).setName("启用本地桥接").setDesc(`开启后浏览器访问 http://127.0.0.1:${this.plugin.settings.bridgePort}/ping 应返回 ok。`)

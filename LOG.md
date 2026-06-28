@@ -403,6 +403,11 @@
 - **设置模糊匹配**:新增 `PathSuggest extends (obsidian.AbstractInputSuggest || class{})`(缺失时降级,避免 extends undefined 崩);词典表文件夹输入挂文件夹建议、模板输入挂 md 文件建议,"默认模板"同样。`hasSuggest = !!obsidian.AbstractInputSuggest` 守卫。
 - 用户当时疑惑"改词典会不会动批注/模板":澄清——移动只挪文件,内容不变;模板只影响新建。
 
+## UI 打磨:悬浮卡改词典下拉对齐标签风格+实时刷新,设置标签/属性模糊匹配,+按钮去空行(插件 v1.0.6 / 扩展 v1.0.7)
+- **悬浮卡文件夹下拉**:① 点外面不收起 → 加 document mousedown 关闭器(照搬标签下拉的 closer);② 选完会关掉悬浮卡 → 改成**实时刷新**:move 成功后 `detail` 重拉 + `renderDetail(pop, fresh)` 就地重渲(不 removePop);③ 风格统一 → 弃用自家 `.lexis-web-folderlist`,改用标签下拉的 `.lexis-web-tag-list`/`.lexis-web-tag`(主题感知、字号小、黑白统一)。`.lexis-web-dict-click` 需 `overflow:visible`。
+- **设置标签/属性模糊匹配**:`PathSuggest` 加 `multi` 模式(按最后一个分隔符后的活动 token 匹配,选中后追加,已选的不再提示)。挂到:按标签收录、排除标签(multi 空格)、别名属性名(multi 逗号,词源 `metadataCache.getAllPropertyInfos`)、标签规则的标签框(单值)。标签源 = `metadataCache.getTags()` ∪ `collectVocabTags()`。
+- **+ 按钮去空行**:原来 `new Setting(wrap).addButton()` 会渲染一整行空 setting-item(用户觉得怪)。改成直接 `wrap.createEl("button")`,词典表和标签规则两处都改。
+
 ## 想法暂存(Hz 提出,暂不做)
 - (已实现 ↑)~~**标签识别为单词**:除了扫文件夹,再支持"带某标签的笔记也算单词来源"。~~ → 本轮已做,见上"地基"。
 
