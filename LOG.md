@@ -369,8 +369,24 @@
 - **滑词不弹按钮**:只靠 `mouseup` 触发,但 YouTube player 会吞掉内部 mouseup → onSelect 不跑。改为 `mouseup` + `selectionchange` 双触发(共用 200ms 防抖的 `scheduleSel`),selectionchange 不受 stopPropagation 影响。加守卫:焦点在自己的别名 input 里时跳过(防 input 聚焦的 selectionchange 误触发关掉浮窗)。注意:字幕播放中节点会被替换致选区丢失,暂停后选最稳。
 - **高亮不稳定**:MutationObserver 原来任何变动就整页 `scan(document.body)`(400ms 防抖),YouTube 字幕高频重渲染下:整页扫慢 + 重渲染把高亮 span 冲掉要等到下次扫才回来 → 闪。改为**只扫变动的子树**(收集 addedNodes/characterData 的 root,120ms 防抖后逐个 scan),并忽略自己插入的 `.lexis-web-hl`(防自触发),observe 加 `characterData:true`。近乎即时重新高亮且不卡。
 
+## 地基:收录范围多文件夹+标签(并集)、排除多标签(插件 v1.0.2 / 扩展 v1.0.3)
+- **动机**:单一 `vocabFolder` / 单一 `excludeTag` 不够用。泛化成多选并集,作为后续(个人词典类型系统 / 每文件夹模板 / 悬浮卡选文件夹 / 跳转配置 / 滑词批注)的地基。本轮只做这层。
+- **收录范围**:`vocabFolder`(单)→ `vocabFolders`(多,逗号/换行)+ 新增 `vocabTags`(按标签收录,与文件夹取并集)。
+- **网页排除**:`excludeTag`(单)→ `excludeTags`(多,逗号/空格)。`styleConfig` 改发数组 `excludeTags`;扩展兼容旧 `excludeTag` 单字段兜底。"取消排除"按钮改为把该词身上命中的**全部**排除标签逐个删掉。
+- **关键技巧(避免改 14 处)**:`inVocabFolder(path)` 被 14 处调用、多在热循环里只有路径。不逐点改,而是 `rebuildIndex` 顺手存 `this.vocabPaths = new Set(命中路径)`,`inVocabFolder` 改成查这个集合——**签名不变、调用点全不动**,且天然支持"按标签命中"。新增 `parseTags / vocabTagSet / inFolderScope / isVocabFile / primaryVocabFolder` 工具;`parseFolders` 分隔符加 `\n`。
+- **迁移坑**:旧键 `vocabFolder/excludeTag` **不能留在 `DEFAULT_SETTINGS`**(否则 `Object.assign` 用默认值盖掉用户老值)。改在 `loadSettings` 里:`vocabFolders==null` 才从旧 `vocabFolder` 迁移、否则默认 `01-word`;`excludeTags` 同理。
+- **标签变动重索引**:加 `metadataCache.on("changed")` 监听(仅配了 vocabTags 时生效,800ms 防抖),让改 frontmatter 增减标签的笔记能进/出词库。
+- **设置面板**:文件夹下拉 → 文本域(多行);新增"按标签收录"文本框;排除标签下拉 → 文本框(多标签)。
+- **新建词落地文件夹**:`bridgeAddWord` / `addWordFromSelection` 用 `primaryVocabFolder()`(取 vocabFolders 第一个)。
+
 ## 想法暂存(Hz 提出,暂不做)
-- **标签识别为单词**:除了扫文件夹,再支持"带某标签的笔记也算单词来源"。Hz 说暂时不用,先记着。实现上只需在 `rebuildIndex` 里追加一类来源(按 tag 收集文件),与文件夹来源合并即可。
+- (已实现 ↑)~~**标签识别为单词**:除了扫文件夹,再支持"带某标签的笔记也算单词来源"。~~ → 本轮已做,见上"地基"。
+
+## 下一轮路线(已与 Hz 对齐,本轮未做)
+- **个人词典/类型系统**:类型=文件夹(每个纳入文件夹一种类型,各带模板/样式);加词时选文件夹即选类型即套模板。三类 word/atom/reference("网页或 ob 里任何东西"都能当词条)。
+- **跳转配置**:分平台开关(桌面 / 移动 / 网页悬浮卡)→ 当前窗口 vs 新标签;移动端默认当前窗口(in-ob 看 `onClick` 的 `getLeaf`,网页看 obsidian:// 链接)。
+- **滑词批注**:浮动按钮加第三个"笔"图标 → 批注写入笔记固定 `#### 批注` 区块(位置可配,默认不顶到 frontmatter 前)。
+- **word 特例多给设置**:把悬浮卡现有硬编码行为(如"小节下有内容才显示")挪进设置项,默认维持现状。
 
 ## 待确认 / 备忘
 - 复习算法:v3 先上 FSRS 还是先简单 SM-2?(FSRS 更准但代码多,可先 SM-2 跑通流程再换)

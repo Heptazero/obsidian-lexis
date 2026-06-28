@@ -106,18 +106,24 @@
     return (r * 0.299 + g * 0.587 + b * 0.114) > 160 ? "#1f2328" : "#fff";
   }
 
+  // 多标签排除集合(兼容旧的单字段 excludeTag)
+  function excludeSet() {
+    const arr = (styleCfg && styleCfg.excludeTags) || (styleCfg && styleCfg.excludeTag ? [styleCfg.excludeTag] : []);
+    return new Set(arr.map((t) => String(t).toLowerCase()));
+  }
+
   function build(words) {
     keySet = new Set();
     keyTags = new Map();
     excludedKeys = new Set();
-    const excludeTag = (styleCfg && styleCfg.excludeTag || "").toLowerCase();
+    const exSet = excludeSet();
     const keys = [];
     for (const x of words || []) {
       const k = (x.k || "").toLowerCase();
       if (k.length < 2) continue;
       const tags = (x.t || []).map((t) => String(t).toLowerCase());
       keyTags.set(k, tags);
-      if (excludeTag && tags.includes(excludeTag)) { excludedKeys.add(k); continue; }
+      if (exSet.size && tags.some((t) => exSet.has(t))) { excludedKeys.add(k); continue; }
       keySet.add(k);
       keys.push(k);
     }
@@ -350,7 +356,7 @@
     const tagWrap = document.createElement("div");
     tagWrap.className = "lexis-web-pop-tags";
     body.appendChild(tagWrap);
-    const excludeTag = (styleCfg && styleCfg.excludeTag || "").toLowerCase();
+    const exSet = excludeSet();
     let bucketEl = null;
 
     const syncTags = async () => { await chrome.runtime.sendMessage({ type: "sync" }).catch(() => {}); };
@@ -365,7 +371,7 @@
 
     const addTagPill = (tag) => {
       const s = document.createElement("span");
-      s.className = "lexis-web-tag" + (excludeTag && tag.toLowerCase() === excludeTag ? " lexis-web-tag-excl" : "");
+      s.className = "lexis-web-tag" + (exSet.has(tag.toLowerCase()) ? " lexis-web-tag-excl" : "");
       s.textContent = "#" + tag;
       s.dataset.tag = tag;
       const x = document.createElement("span");
@@ -495,9 +501,16 @@
       selBtn.addEventListener("mousedown", (e) => e.preventDefault());
       selBtn.addEventListener("click", async () => {
         selBtn.disabled = true; selBtn.textContent = "…";
-        const excludeTag = (styleCfg && styleCfg.excludeTag) || "";
-        const r = await chrome.runtime.sendMessage({ type: "tag", payload: { key: text, tag: excludeTag, action: "remove" } });
-        if (r && r.ok) { await chrome.runtime.sendMessage({ type: "sync" }); }
+        // 逐个去掉该词身上命中的全部排除标签
+        const exSet = excludeSet();
+        const wordTags = (keyTags && keyTags.get(text.toLowerCase())) || [];
+        const toRemove = [...new Set(wordTags.filter((t) => exSet.has(t)))];
+        let ok = false;
+        for (const tag of toRemove) {
+          const r = await chrome.runtime.sendMessage({ type: "tag", payload: { key: text, tag, action: "remove" } });
+          if (r && r.ok) ok = true;
+        }
+        if (ok) await chrome.runtime.sendMessage({ type: "sync" });
         hideSelBtn();
       });
       const bw = 72, bh = 26, gap = 6;

@@ -14,7 +14,9 @@ const LEXIS_REVIEW_VIEW = "lexis-review-view";
 const LEXIS_HOME_VIEW = "lexis-home-view";
 
 const DEFAULT_SETTINGS = {
-  vocabFolder: "01-word",
+  // 收录范围:多个文件夹(逗号/换行分隔) ∪ 携带任一标签的笔记(并集)。
+  // vocabFolders / excludeTags 不放默认值,迁移与兜底在 loadSettings 里做(留默认会盖掉用户老值)。
+  vocabTags: "", // 带任一此标签的笔记也算词库(与文件夹取并集)
   includeAliases: true,
   aliasSources: "", // 额外的别名来源属性名,逗号分隔(如 past,forms,variants)。留空只读 aliases/alias。
   enableHighlight: true,
@@ -38,8 +40,8 @@ const DEFAULT_SETTINGS = {
   cardFront: "note",
   // 移动端/桌面端 评分按钮底部间距(px)
   reviewBottomSpace: 70,
-  // 浏览器扩展排除标签:打上此标签的单词不在网页高亮
-  excludeTag: "",
+  // 浏览器扩展排除标签:打上任一此标签的单词不在网页高亮(多标签,逗号/空格分隔)。
+  // excludeTags 不放默认值,迁移在 loadSettings 里做。
   // 浏览器桥接(本地 HTTP,只听 127.0.0.1,供 Chrome 扩展拉词库/划词添加)
   bridgeEnabled: false,
   bridgePort: 45945,
@@ -90,6 +92,7 @@ module.exports = class LexisPlugin extends Plugin {
     await this.loadSettings();
 
     this.index = new Map();
+    this.vocabPaths = new Set();
     this.stats = { words: 0, aliases: 0, due: 0 };
     this._pattern = null;
     this._rebuildTimer = null;
@@ -132,6 +135,10 @@ module.exports = class LexisPlugin extends Plugin {
     this.registerEvent(this.app.vault.on("delete", (f) => this.maybeRebuild(f)));
     this.registerEvent(this.app.vault.on("rename", (f, old) => this.maybeRebuild(f, old)));
     this.registerEvent(this.app.vault.on("modify", () => this._occCache.clear()));
+    // 改 frontmatter 增减标签时,让笔记进/出按标签收录的词库(仅配了 vocabTags 才有意义;有 800ms 防抖)
+    this.registerEvent(this.app.metadataCache.on("changed", (file) => {
+      if (this.vocabTagSet().size && (this.isVocabFile(file) || this.vocabPaths.has(file.path))) this.scheduleRebuild();
+    }));
 
     // 划词添加(右键菜单)
     this.registerEvent(this.app.workspace.on("editor-menu", (menu, editor, view) => {
@@ -171,6 +178,10 @@ module.exports = class LexisPlugin extends Plugin {
     }
     if (!Array.isArray(this.settings.tagRules)) this.settings.tagRules = [];
     if (!this.settings.reviewLog) this.settings.reviewLog = {};
+    // 单值 → 多值迁移(收录文件夹 / 网页排除标签)。旧键不在 DEFAULT_SETTINGS,故能区分"未迁移"。
+    if (this.settings.vocabFolders == null) this.settings.vocabFolders = this.settings.vocabFolder != null ? this.settings.vocabFolder : "01-word";
+    if (this.settings.excludeTags == null) this.settings.excludeTags = this.settings.excludeTag || "";
+    if (this.settings.vocabTags == null) this.settings.vocabTags = "";
   }
   async saveSettings() { await this.saveData(this.settings); }
   parseTagRulesText(text) {
@@ -252,7 +263,7 @@ module.exports = class LexisPlugin extends Plugin {
     const link = url ? ` —— [${title || url}](${url})` : "";
     const line = (sentence || url) ? `> ${sentence}${link}` : "";
     const dupKey = sentence || url;
-    const folder = this.normalizeFolder(this.settings.vocabFolder);
+    const folder = this.primaryVocabFolder();
     const targetPath = (folder ? folder + "/" : "") + name + ".md";
     const existing = this.app.vault.getAbstractFileByPath(targetPath);
     const injectAlias = (data) => {
@@ -366,7 +377,7 @@ module.exports = class LexisPlugin extends Plugin {
         highlightColor: this.settings.highlightColor,
         highlightOpacity: this.settings.highlightOpacity,
         highlightStyle: this.settings.highlightStyle,
-        excludeTag: this.settings.excludeTag || "",
+        excludeTags: this.parseTags(this.settings.excludeTags),
       },
     };
   }
@@ -529,15 +540,12 @@ module.exports = class LexisPlugin extends Plugin {
 
   // ---------- 索引 ----------
   normalizeFolder(p) { return (p || "").trim().replace(/^\/+|\/+$/g, ""); }
-  inVocabFolder(path) {
-    const folder = this.normalizeFolder(this.settings.vocabFolder);
-    if (!folder) return false;
-    return path === folder || path.startsWith(folder + "/");
-  }
+  // 单一真相:rebuildIndex 算出的命中路径集合。支持"文件夹∪标签"两种收录,且 14 处调用点签名不变。
+  inVocabFolder(path) { return this.vocabPaths ? this.vocabPaths.has(path) : false; }
   maybeRebuild(file, oldPath) {
     const p = (file && file.path) || "";
     this._occCache.clear();
-    if (this.inVocabFolder(p) || (oldPath && this.inVocabFolder(oldPath))) this.scheduleRebuild();
+    if (this.isVocabFile(file) || this.vocabPaths.has(p) || (oldPath && (this.inFolderScope(oldPath) || this.vocabPaths.has(oldPath)))) this.scheduleRebuild();
   }
   scheduleRebuild() {
     window.clearTimeout(this._rebuildTimer);
@@ -578,11 +586,11 @@ module.exports = class LexisPlugin extends Plugin {
     return set;
   }
   rebuildIndex(notify) {
-    const folder = this.normalizeFolder(this.settings.vocabFolder);
     const index = new Map();
     const today = todayStr();
     let words = 0, aliases = 0, due = 0;
-    const files = this.app.vault.getMarkdownFiles().filter((f) => this.inVocabFolder(f.path));
+    const files = this.app.vault.getMarkdownFiles().filter((f) => this.isVocabFile(f));
+    this.vocabPaths = new Set(files.map((f) => f.path));
     for (const file of files) {
       const cache = this.app.metadataCache.getFileCache(file);
       const fm = cache?.frontmatter || {};
@@ -606,7 +614,9 @@ module.exports = class LexisPlugin extends Plugin {
     this.refreshAllViews();
     if (notify) {
       const aliasPart = this.settings.includeAliases ? `(含 ${aliases} 个别名)` : "";
-      new Notice(`Lexis:从「${folder || "/"}」识别到 ${words} 个单词${aliasPart}`);
+      const nf = this.parseFolders(this.settings.vocabFolders).length, nt = this.vocabTagSet().size;
+      const scope = [nf ? `${nf} 个文件夹` : "", nt ? `${nt} 个标签` : ""].filter(Boolean).join(" + ") || "(空)";
+      new Notice(`Lexis:从 ${scope} 识别到 ${words} 个单词${aliasPart}`);
     }
     return this.stats;
   }
@@ -734,7 +744,18 @@ module.exports = class LexisPlugin extends Plugin {
   }
 
   // ---------- 出处 & 相关词 ----------
-  parseFolders(text) { return (text || "").split(/[,，]/).map((s) => this.normalizeFolder(s)).filter(Boolean); }
+  parseFolders(text) { return (text || "").split(/[,，\n]/).map((s) => this.normalizeFolder(s)).filter(Boolean); }
+  parseTags(text) { return (text || "").split(/[,，;；\s]+/).map((s) => s.trim().replace(/^#/, "").toLowerCase()).filter(Boolean); }
+  vocabTagSet() { return new Set(this.parseTags(this.settings.vocabTags)); }
+  primaryVocabFolder() { return this.parseFolders(this.settings.vocabFolders)[0] || ""; } // 新建单词时落地的文件夹(取第一个)
+  inFolderScope(path) { const fs = this.parseFolders(this.settings.vocabFolders); return fs.length ? this.inScope(path, fs) : false; }
+  isVocabFile(file) {
+    if (!file || !file.path) return false;
+    if (this.inFolderScope(file.path)) return true;
+    const ts = this.vocabTagSet();
+    if (ts.size) { for (const t of this.getTags(file)) if (ts.has(t)) return true; }
+    return false;
+  }
   inScope(path, scope) { if (!scope.length) return true; return scope.some((f) => path === f || path.startsWith(f + "/")); }
   extractSentence(content, idx) {
     const bound = /[.!?。！？\n]/;
@@ -1014,7 +1035,7 @@ module.exports = class LexisPlugin extends Plugin {
     const clean = (word || "").trim();
     const fileName = this.sanitizeName(clean);
     if (!fileName) { new Notice("Lexis:无效的单词"); return; }
-    const folder = this.normalizeFolder(this.settings.vocabFolder);
+    const folder = this.primaryVocabFolder();
     const targetPath = (folder ? folder + "/" : "") + fileName + ".md";
     const existing = this.app.vault.getAbstractFileByPath(targetPath);
     const srcFile = (view && view.file) || this.app.workspace.getActiveFile();
@@ -1476,13 +1497,14 @@ class LexisSettingTab extends PluginSettingTab {
 
     const folders = this.app.vault.getAllLoadedFiles().filter((f) => f instanceof TFolder).map((f) => f.path).filter((p) => p && p !== "/").sort();
 
-    new Setting(containerEl).setName("单词库文件夹").setDesc("这个文件夹(含子文件夹)里每个笔记的标题都会被当作一个单词。")
-      .addDropdown((dd) => {
-        for (const p of folders) dd.addOption(p, p);
-        if (this.plugin.settings.vocabFolder && !folders.includes(this.plugin.settings.vocabFolder)) dd.addOption(this.plugin.settings.vocabFolder, this.plugin.settings.vocabFolder + "(当前)");
-        dd.setValue(this.plugin.settings.vocabFolder);
-        dd.onChange(async (v) => { this.plugin.settings.vocabFolder = v; await save(); this.plugin.rebuildIndex(true); this.renderStats(); });
+    new Setting(containerEl).setName("单词库文件夹").setDesc(`可填多个(含子文件夹),逗号或换行分隔;每个笔记标题都算一个单词。新建词落到第一个。已有文件夹:${folders.slice(0, 8).join("、") || "(无)"}${folders.length > 8 ? "…" : ""}`)
+      .addTextArea((t) => {
+        t.setPlaceholder("01-word\n02-phrase").setValue(this.plugin.settings.vocabFolders);
+        t.inputEl.rows = 2; t.inputEl.style.width = "100%";
+        t.onChange(async (v) => { this.plugin.settings.vocabFolders = v; await save(); this.plugin.rebuildIndex(true); this.renderStats(); });
       });
+    new Setting(containerEl).setName("按标签收录").setDesc("带任一此标签的笔记也算词库(与文件夹取并集),逗号或空格分隔。留空=只按文件夹。")
+      .addText((t) => t.setPlaceholder("词汇 术语").setValue(this.plugin.settings.vocabTags).onChange(async (v) => { this.plugin.settings.vocabTags = v; await save(); this.plugin.rebuildIndex(true); this.renderStats(); }));
     new Setting(containerEl).setName("别名也算单词").setDesc("启用后,单词笔记 frontmatter 里的别名也会被识别与高亮。")
       .addToggle((t) => t.setValue(this.plugin.settings.includeAliases).onChange(async (v) => { this.plugin.settings.includeAliases = v; await save(); this.plugin.rebuildIndex(false); this.renderStats(); }));
     new Setting(containerEl).setName("别名属性名").setDesc("除 aliases/alias 外,还从哪些 frontmatter 属性读取别名(逗号分隔)。例:past,forms,variants· 适合存过去式、复数等变形。")
@@ -1542,16 +1564,10 @@ class LexisSettingTab extends PluginSettingTab {
 
     containerEl.createEl("h4", { text: "浏览器扩展(桥接)" });
     containerEl.createEl("p", { cls: "setting-item-description", text: "在本机开一个只监听 127.0.0.1 的小服务,供 Chrome 扩展拉词库高亮、划词加词。数据不出本机。Obsidian 关掉后服务也停。" });
-    // 排除标签:选择后,带这个标签的单词不会在网页高亮
-    new Setting(containerEl).setName("排除标签").setDesc("打上此标签的单词不在网页高亮(在 Obsidian 里不受影响)。留空=不排除。")
-      .addDropdown((dd) => {
-        dd.addOption("", "(不排除)");
-        for (const t of this.plugin.collectVocabTags()) dd.addOption(t, "#" + t);
-        if (this.plugin.settings.excludeTag && !this.plugin.collectVocabTags().includes(this.plugin.settings.excludeTag))
-          dd.addOption(this.plugin.settings.excludeTag, "#" + this.plugin.settings.excludeTag + "(当前)");
-        dd.setValue(this.plugin.settings.excludeTag);
-        dd.onChange(async (v) => { this.plugin.settings.excludeTag = v; await save(); });
-      });
+    // 排除标签:带任一此标签的单词不会在网页高亮
+    const vocabTagsHint = this.plugin.collectVocabTags().slice(0, 10).join("、");
+    new Setting(containerEl).setName("排除标签").setDesc(`带任一此标签的单词不在网页高亮(Obsidian 里不受影响),逗号或空格分隔。留空=不排除。词库标签:${vocabTagsHint || "(无)"}`)
+      .addText((t) => t.setPlaceholder("已掌握 暂缓").setValue(this.plugin.settings.excludeTags).onChange(async (v) => { this.plugin.settings.excludeTags = v; await save(); }));
     new Setting(containerEl).setName("启用本地桥接").setDesc(`开启后浏览器访问 http://127.0.0.1:${this.plugin.settings.bridgePort}/ping 应返回 ok。`)
       .addToggle((t) => t.setValue(this.plugin.settings.bridgeEnabled).onChange(async (v) => {
         this.plugin.settings.bridgeEnabled = v;
