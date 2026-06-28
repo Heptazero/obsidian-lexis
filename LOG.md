@@ -379,6 +379,13 @@
 - **设置面板**:文件夹下拉 → 文本域(多行);新增"按标签收录"文本框;排除标签下拉 → 文本框(多标签)。
 - **新建词落地文件夹**:`bridgeAddWord` / `addWordFromSelection` 用 `primaryVocabFolder()`(取 vocabFolders 第一个)。
 
+## 滑词批注(悬浮卡,插件 v1.0.3 / 扩展 v1.0.4)
+- **范围**(与 Hz 对齐):只给**已有词**,入口在网页**悬浮卡**(不在划词 pill,也不动 ob 内);**纯文字、不带来源链接**;统一写进笔记的 `#### 批注` 小节。
+- **写哪**:`insertExampleLine` 抽成通用 `insertUnderHeading(data, heading, line)`,批注复用它写 `#### 批注`。新建该标题时插在末尾 ```lexis``` 代码块**之前**(紧跟例句,而非落在出处热力图后);已有则追加到小节末尾。node 测过 3 种情形(新建/追加/无标题普通笔记)。
+- **链路**:悬浮卡 `✎ 批注` 按钮(在"+ 例句"旁)→ 点开内联输入框(回车存/Esc 取消)→ `chrome.runtime.sendMessage({type:"note"})` → background `POST /note` → 服务端 `bridgeAnnotate`(按 key 查已有词,`vault.process` 写入,清 occ 缓存)。存完清 `detailCache` 让重新悬停拉到带新批注的渲染。
+- **为何纯文字 blockquote `> text`**:批注是个人想法,不像例句要记出处;放在自己的 `#### 批注` 段里,和例句区分开。
+- 兼容:`bridgeAnnotate` 接受 `note`/`text` 与 `key`/`word` 两种字段名。
+
 ## 想法暂存(Hz 提出,暂不做)
 - (已实现 ↑)~~**标签识别为单词**:除了扫文件夹,再支持"带某标签的笔记也算单词来源"。~~ → 本轮已做,见上"地基"。
 

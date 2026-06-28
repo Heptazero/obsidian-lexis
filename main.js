@@ -240,6 +240,7 @@ module.exports = class LexisPlugin extends Plugin {
     if (path === "/word" && req.method === "DELETE") return send(200, await this.bridgeDeleteWord(url.searchParams.get("key") || ""));
     if (path === "/add" && req.method === "POST") return send(200, await this.bridgeAddWord(await this.readBody(req)));
     if (path === "/tag" && req.method === "POST") return send(200, await this.bridgeTagWord(await this.readBody(req)));
+    if (path === "/note" && req.method === "POST") return send(200, await this.bridgeAnnotate(await this.readBody(req)));
     return send(404, { ok: false, error: "not-found" });
   }
   readBody(req) {
@@ -352,10 +353,16 @@ module.exports = class LexisPlugin extends Plugin {
     } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
   }
   // 把一条例句插到「#### 例句」段的末尾(已有例句之后、```lexis occ``` 代码块之前);没有该段就在文末新建
-  insertExampleLine(data, line) {
-    const re = /(^|\n)#{2,6}[ \t]*例句[^\n]*\n/;
+  // 把 line 追加到指定 #### 标题小节末尾(在子标题/代码块之前);没这个标题就在文末新建。
+  insertUnderHeading(data, heading, line) {
+    const re = new RegExp("(^|\\n)#{2,6}[ \\t]*" + escapeRe(heading) + "[^\\n]*\\n");
     const m = re.exec(data);
-    if (!m) return data.replace(/\s*$/, "") + `\n\n#### 例句\n${line}\n`;
+    if (!m) {
+      // 没这个标题就新建:优先插在末尾的 ```lexis 代码块之前(让批注紧跟正文/例句,而非落在出处热力图之后),否则文末
+      const block = data.search(/\n```lexis\b/);
+      if (block >= 0) return data.slice(0, block).replace(/\s*$/, "") + `\n\n#### ${heading}\n${line}\n` + data.slice(block);
+      return data.replace(/\s*$/, "") + `\n\n#### ${heading}\n${line}\n`;
+    }
     const headEnd = m.index + m[0].length;
     const after = data.slice(headEnd);
     let stop = after.search(/\n#{1,6}[ \t]|\n```/);
@@ -366,6 +373,23 @@ module.exports = class LexisPlugin extends Plugin {
     const newSection = section + sep + line + "\n";
     const tailFixed = /^\n*```/.test(tail) ? "\n" + tail.replace(/^\n+/, "") : tail;
     return data.slice(0, headEnd) + newSection + tailFixed;
+  }
+  insertExampleLine(data, line) { return this.insertUnderHeading(data, "例句", line); }
+  // 网页悬浮卡批注:纯文字写进已有词笔记的 #### 批注 小节(词笔记里它自然落在例句等段附近)
+  async bridgeAnnotate(payload) {
+    const text = String((payload && (payload.note ?? payload.text)) || "").trim().replace(/\r?\n+/g, " ");
+    if (!text) return { ok: false, error: "empty-note" };
+    const key = String((payload && (payload.key ?? payload.word)) || "").trim().toLowerCase();
+    const e = this.index.get(key);
+    if (!e || !e.file) return { ok: false, error: "not-found" };
+    const line = `> ${text}`;
+    try {
+      const apply = (data) => this.insertUnderHeading(data, "批注", line);
+      if (this.app.vault.process) await this.app.vault.process(e.file, apply);
+      else await this.app.vault.modify(e.file, apply(await this.app.vault.cachedRead(e.file)));
+      this._occCache.clear();
+      return { ok: true, key, file: e.file.path };
+    } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
   }
   bridgeWordList() {
     const words = [];

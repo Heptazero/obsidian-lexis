@@ -140,6 +140,17 @@
   background: color-mix(in srgb, var(--lexis-web-color) 14%, transparent);
 }
 
+/* 批注输入行 */
+.lexis-web-noterow { margin: 2px 0 8px; }
+.lexis-web-noteinput {
+  width: 100%; box-sizing: border-box; font-size: 13px; line-height: 1.4;
+  padding: 5px 8px; border-radius: 7px; font-family: inherit;
+  border: 1px solid color-mix(in srgb, var(--lexis-web-color) 45%, transparent);
+  background: color-mix(in srgb, var(--lexis-web-color) 6%, transparent); color: inherit; outline: none;
+}
+.lexis-web-noteinput:focus { border-color: var(--lexis-web-color); }
+.lexis-web-noteinput::placeholder { opacity: 0.5; }
+
 /* 可滚动正文 */
 .lexis-web-pop-body { max-height: 52vh; overflow-y: auto; overscroll-behavior: contain; }
 

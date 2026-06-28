@@ -332,6 +332,37 @@
       removePop();
     });
     titleEl.appendChild(addBtn);
+    // ✎ 批注:纯文字写进笔记的 #### 批注 小节
+    const noteBtn = document.createElement("button");
+    noteBtn.className = "lexis-web-addbtn";
+    noteBtn.textContent = "✎ 批注";
+    noteBtn.title = "给这个词写一条批注(纯文字,写入笔记的 #### 批注)";
+    noteBtn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      if (body.querySelector(".lexis-web-noterow")) { body.querySelector(".lexis-web-noteinput").focus(); return; }
+      const row = document.createElement("div");
+      row.className = "lexis-web-noterow";
+      const input = document.createElement("input");
+      input.className = "lexis-web-noteinput";
+      input.placeholder = "写批注,回车保存,Esc 取消";
+      const save = async () => {
+        const text = input.value.trim();
+        if (!text) { row.remove(); return; }
+        input.disabled = true;
+        try {
+          const r = await chrome.runtime.sendMessage({ type: "note", payload: { key: targetWord, note: text } });
+          if (r && r.ok) { toast(`已给「${data.word}」加批注`, true); detailCache.delete((data.word || data.base || "").toLowerCase()); }
+          else toast(r && r.error === "not-found" ? "这个词不在库里" : "批注失败(Obsidian 开着且桥接启用?)", false);
+        } catch (e) { toast("批注失败(连不上?)", false); }
+        removePop();
+      };
+      input.addEventListener("mousedown", (e) => e.stopPropagation());
+      input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); save(); } else if (e.key === "Escape") { e.preventDefault(); row.remove(); } });
+      row.appendChild(input);
+      body.insertBefore(row, body.firstChild);
+      input.focus();
+    });
+    titleEl.appendChild(noteBtn);
     // ✕ 删除按钮
     const delBtn = document.createElement("button");
     delBtn.className = "lexis-web-addbtn lexis-web-addbtn-del";
