@@ -414,6 +414,14 @@
 - **模糊建议只能选一个**:`selectSuggestion` 的 multi 分支原本选完就 `close()`。改成**追加后用 `setValue` 重新触发建议、保持下拉打开并 `focus()`**,可连续点选多个(已选的自动从列表里去掉)。
 - **换文件夹要不要换模板?——决定不换**:模板是建新词的脚手架,移动已有词只挪文件;重套模板会覆盖/重复正文与批注,得不偿失。批注/例句/正文一律保持原样。
 
+## 修复:划词 pill 下拉被裁/换夹空骨架重套模板+迁批注(插件 v1.0.8 / 扩展 v1.0.9)
+- **划词 pill 文件夹下拉点不开/看不见**:根因和悬浮卡同源——`.lexis-web-selpill` 有 `overflow:hidden`(为了圆角裁切分段按钮),把挂在 pill 里的 `.lexis-web-folderlist` 整个裁掉了。改成**挂到 `document.body`**、用 `getBoundingClientRect` 定位,点外面收起;`hideSelBtn` 顺手清掉游离的 folderlist。(悬浮卡的词典下拉上一版已用同法挂到 `pop` 根节点。)
+- **换文件夹智能重套模板**:`bridgeMoveWord` 现在——若该词笔记是**空骨架**(`isScaffoldOnly`:去 frontmatter/代码块/批注/标题后无任何字母数字汉字)且目标词典有自己的模板,则移动后**重套新模板**;否则只挪文件(原行为)。
+  - **批注一律迁移**:重套前用 `extractSection(_, "批注")` 抽出批注内容(去掉尾随 lexis 代码块),套完模板再 `insertUnderHeading` 写回。
+  - **frontmatter 保留**:重套只换正文 body,**沿用原 frontmatter**(标签/别名/复习数据不丢)。
+  - 新增 `splitFrontmatter` / `isScaffoldOnly`;move 返回 `reTemplated`,扩展据此提示并**重新取 detail 重渲卡片**(仍不调 position,卡片不跳走)。
+- 决定:**有正文的词不会被重套**(怕覆盖),只有空骨架才套——既满足"空的就加载模板",又不毁已写内容。空文件夹=库根这种**没做**(会把整个根目录都当词库,太危险);默认模板留空仍回退到 minimalSkeleton。
+
 ## 想法暂存(Hz 提出,暂不做)
 - (已实现 ↑)~~**标签识别为单词**:除了扫文件夹,再支持"带某标签的笔记也算单词来源"。~~ → 本轮已做,见上"地基"。
 

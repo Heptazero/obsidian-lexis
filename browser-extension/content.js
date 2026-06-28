@@ -354,14 +354,14 @@
               closeList();
               const r = await chrome.runtime.sendMessage({ type: "move", payload: { key: moveKey, folder: f } });
               if (r && r.ok) {
-                toast(`已把「${data.word}」移到 ${dname(f)}`, true);
+                toast(r.reTemplated ? `已移到 ${dname(f)} 并套用该词典模板(批注保留)` : `已把「${data.word}」移到 ${dname(f)}`, true);
                 const k = (pop && pop.dataset.k) || (data.word || "").toLowerCase();
                 detailCache.delete(k);
-                // 就地更新所属文件夹并重渲染卡片(不重新取数据、不重新定位,避免卡片跳走/消失)
-                data.file = r.file || ((f ? f + "/" : "") + (data.file || "").split("/").pop());
-                if (pop) { detailCache.set(k, data); renderDetail(pop, data); }
-                // 后台静默同步高亮缓存(folder 不影响是否高亮,失败也无所谓)
-                chrome.runtime.sendMessage({ type: "sync" }).catch(() => {});
+                // 重新取最新内容(可能重套了模板),就地重渲染卡片;不调 position(),避免卡片跳走
+                let fresh; try { fresh = await chrome.runtime.sendMessage({ type: "detail", key: k }); } catch (_e) {}
+                const nd = (fresh && fresh.ok) ? fresh : Object.assign({}, data, { file: r.file });
+                detailCache.set(k, nd);
+                if (pop && pop.dataset.k === k) renderDetail(pop, nd);
               } else toast(r && r.error === "exists" ? "那个词典里已有同名词" : "移动失败", false);
             });
             listEl.appendChild(it);
@@ -570,7 +570,7 @@
 
   // ---- 划词添加:选中文本 → 浮动 pill([➕ 添加] [aliases]) ----
   let selBtn = null;
-  function hideSelBtn() { if (selBtn) { selBtn.remove(); selBtn = null; } }
+  function hideSelBtn() { if (selBtn) { selBtn.remove(); selBtn = null; } document.querySelectorAll(".lexis-web-folderlist").forEach((el) => el.remove()); }
   function onSelect() {
     // 正在用我们自己的别名输入框时别打扰(selectionchange 会因 input 聚焦误触发)
     if (selBtn && document.activeElement && selBtn.contains(document.activeElement)) return;
@@ -643,23 +643,30 @@
       folderBtn.textContent = "📁 " + fname(selFolder);
       folderBtn.title = "选择加到哪个词典(文件夹)";
       folderBtn.addEventListener("mousedown", (e) => e.preventDefault());
+      let flist = null;
+      const closeFList = () => { if (flist) { flist.remove(); flist = null; document.removeEventListener("mousedown", onFDown); } };
+      const onFDown = (e) => { if (flist && !flist.contains(e.target) && e.target !== folderBtn) closeFList(); };
       folderBtn.addEventListener("click", (e) => {
         e.stopPropagation();
-        const old = pill.querySelector(".lexis-web-folderlist");
-        if (old) { old.remove(); return; }
-        const list = document.createElement("div");
-        list.className = "lexis-web-folderlist";
+        if (flist) { closeFList(); return; }
+        // 挂到 document.body(而不是 pill 内部),否则会被 .lexis-web-selpill 的 overflow:hidden 裁掉,看不见也点不动
+        flist = document.createElement("div");
+        flist.className = "lexis-web-folderlist";
         dicts.forEach((f) => {
           const it = document.createElement("div");
           it.className = "lexis-web-folderitem" + (f === selFolder ? " sel" : "");
           it.textContent = fname(f); it.title = f;
           it.addEventListener("mousedown", (ev) => {
             ev.preventDefault(); ev.stopPropagation();
-            selFolder = f; folderBtn.textContent = "📁 " + fname(f); list.remove();
+            selFolder = f; folderBtn.textContent = "📁 " + fname(f); closeFList();
           });
-          list.appendChild(it);
+          flist.appendChild(it);
         });
-        pill.appendChild(list);
+        const r = folderBtn.getBoundingClientRect();
+        flist.style.left = Math.round(r.left + window.scrollX) + "px";
+        flist.style.top = Math.round(r.bottom + window.scrollY + 4) + "px";
+        document.body.appendChild(flist);
+        document.addEventListener("mousedown", onFDown);
       });
       pill.appendChild(folderBtn);
     }

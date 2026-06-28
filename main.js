@@ -412,7 +412,23 @@ module.exports = class LexisPlugin extends Plugin {
       return { ok: true, key, file: e.file.path };
     } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
   }
-  // 把已有词移动到另一个词典文件夹(只移动文件,正文/批注/例句全保留;模板只在新建时套用,不重套)
+  // 切掉开头的 frontmatter,返回 { fm, body }
+  splitFrontmatter(content) {
+    const m = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(content || "");
+    if (m && m.index === 0) return { fm: m[0], body: (content || "").slice(m[0].length) };
+    return { fm: "", body: content || "" };
+  }
+  // 判断一篇词笔记是不是"只有模板骨架"(去掉 frontmatter / 代码块 / 批注小节 / 所有标题后没有任何文字)
+  // 用于:移动到别的词典时,空骨架可以安全地重套新词典模板,有正文则只挪文件不动内容。
+  isScaffoldOnly(content) {
+    let s = this.splitFrontmatter(content).body;
+    s = s.replace(/```[\s\S]*?```/g, "");                                    // 围栏代码块(lexis/heatmap 等)
+    s = s.replace(/(^|\n)#{2,6}[ \t][^\n]*批注[\s\S]*?(?=\n#{1,6}[ \t]|$)/g, "\n"); // 批注小节(另行保留)
+    s = s.replace(/^#{1,6}[ \t].*$/gm, "");                                  // 所有标题(模板骨架)
+    return !/[A-Za-z0-9一-鿿]/.test(s);                      // 没有任何字母/数字/汉字 = 只是骨架
+  }
+  // 把已有词移动到另一个词典文件夹。默认只移动文件(正文/批注/例句全保留);
+  // 但若该词笔记是空骨架且目标词典有自己的模板,则顺手重套模板——并把 #### 批注 内容迁移过去。
   async bridgeMoveWord(payload) {
     const key = String((payload && (payload.key ?? payload.word)) || "").trim().toLowerCase();
     const folder = this.normalizeFolder((payload && payload.folder) || "");
@@ -423,10 +439,29 @@ module.exports = class LexisPlugin extends Plugin {
     if (target === e.file.path) return { ok: true, key, file: e.file.path, moved: false };
     if (this.app.vault.getAbstractFileByPath(target)) return { ok: false, error: "exists" };
     try {
+      let oldContent = "";
+      try { oldContent = await this.app.vault.cachedRead(e.file); } catch (_e) {}
+      const tplRaw = await this.templateForFolder(folder);
+      const retemplate = tplRaw != null && tplRaw.trim() !== "" && this.isScaffoldOnly(oldContent);
       await this.ensureFolder(folder);
       await this.app.fileManager.renameFile(e.file, target);
+      let reTemplated = false;
+      if (retemplate) {
+        const annot = this.extractSection(oldContent, "批注").replace(/```[\s\S]*?```/g, "").trim(); // 迁移批注(去掉尾随的 lexis 代码块)
+        const oldFm = this.splitFrontmatter(oldContent).fm;             // 保留原 frontmatter(标签/别名/复习数据)
+        const filled = tplRaw.replace(/\{\{word\}\}/g, e.display).replace(/\{\{date\}\}/g, todayStr());
+        const tplBody = this.splitFrontmatter(filled).body.replace(/^\s+/, "");
+        let nc = (oldFm ? oldFm.replace(/\s*$/, "\n") : "") + (oldFm ? "\n" : "") + tplBody;
+        if (annot) nc = this.insertUnderHeading(nc, "批注", annot);
+        const fileNow = this.app.vault.getAbstractFileByPath(target);
+        if (fileNow instanceof TFile) {
+          if (this.app.vault.process) await this.app.vault.process(fileNow, () => nc);
+          else await this.app.vault.modify(fileNow, nc);
+          reTemplated = true;
+        }
+      }
       this.rebuildIndex(false);
-      return { ok: true, key, file: target, folder, moved: true };
+      return { ok: true, key, file: target, folder, moved: true, reTemplated };
     } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
   }
   bridgeWordList() {
