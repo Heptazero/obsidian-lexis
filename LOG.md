@@ -408,6 +408,12 @@
 - **设置标签/属性模糊匹配**:`PathSuggest` 加 `multi` 模式(按最后一个分隔符后的活动 token 匹配,选中后追加,已选的不再提示)。挂到:按标签收录、排除标签(multi 空格)、别名属性名(multi 逗号,词源 `metadataCache.getAllPropertyInfos`)、标签规则的标签框(单值)。标签源 = `metadataCache.getTags()` ∪ `collectVocabTags()`。
 - **+ 按钮去空行**:原来 `new Setting(wrap).addButton()` 会渲染一整行空 setting-item(用户觉得怪)。改成直接 `wrap.createEl("button")`,词典表和标签规则两处都改。
 
+## 修复:词典下拉只露一项/换夹卡片跳走/多值建议只能选一个(插件 v1.0.7 / 扩展 v1.0.8)
+- **下拉只看到一项、点不动**:根因——下拉原本挂在小标 `<span>`(badge)里,被悬浮卡正文盖住,只有第一项露在标题行。改成**挂到悬浮卡根节点 `pop`** 并用 `getBoundingClientRect` 手动定位(`.lexis-web-dict-list`),彻底脱离 badge 的 flex/ellipsis/overflow 约束。
+- **一换文件夹卡片就跳走/消失**:根因——move 后调 `sync` → 内容脚本 `unwrapAll()`+重扫,`currentSpan` 被拆掉,`position(pop, currentSpan)` 对着已脱离 DOM 的节点把卡片甩到角落。改成:move 成功后**只就地 patch `data.file` + `renderDetail`(不重取 detail、不调 position)**;`sync` 改后台静默(folder 不影响是否高亮);`position()` 加 `span.isConnected` 守卫。
+- **模糊建议只能选一个**:`selectSuggestion` 的 multi 分支原本选完就 `close()`。改成**追加后用 `setValue` 重新触发建议、保持下拉打开并 `focus()`**,可连续点选多个(已选的自动从列表里去掉)。
+- **换文件夹要不要换模板?——决定不换**:模板是建新词的脚手架,移动已有词只挪文件;重套模板会覆盖/重复正文与批注,得不偿失。批注/例句/正文一律保持原样。
+
 ## 想法暂存(Hz 提出,暂不做)
 - (已实现 ↑)~~**标签识别为单词**:除了扫文件夹,再支持"带某标签的笔记也算单词来源"。~~ → 本轮已做,见上"地基"。
 

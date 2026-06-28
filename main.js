@@ -1590,12 +1590,20 @@ class PathSuggest extends (obsidian.AbstractInputSuggest || class {}) {
   }
   renderSuggestion(value, el) { el.setText(value); }
   selectSuggestion(value) {
-    let out = value;
-    if (this.multi) { const { before } = this._split(); out = before + value + this.sep; }
-    if (typeof this.setValue === "function") this.setValue(out);
-    if (this.inputEl) this.inputEl.value = out;
+    if (this.multi) {
+      // 多值:把选中项追加到当前列表后,重新触发建议(列表保持打开),可以接着选下一个
+      const { before } = this._split();
+      const out = before + value + this.sep;
+      if (this.inputEl) this.inputEl.value = out;
+      if (this.onPick) this.onPick(out);
+      if (typeof this.setValue === "function") this.setValue(out); // 触发 input 事件,刷新并保持下拉
+      if (this.inputEl) this.inputEl.focus();
+      return;
+    }
+    if (typeof this.setValue === "function") this.setValue(value);
+    if (this.inputEl) this.inputEl.value = value;
     if (typeof this.close === "function") this.close();
-    if (this.onPick) this.onPick(out);
+    if (this.onPick) this.onPick(value);
   }
 }
 

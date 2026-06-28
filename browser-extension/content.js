@@ -342,7 +342,7 @@
           ev.preventDefault(); ev.stopPropagation();
           if (listEl) { closeList(); return; }
           listEl = document.createElement("div");
-          listEl.className = "lexis-web-tag-list";
+          listEl.className = "lexis-web-tag-list lexis-web-dict-list";
           allDicts.forEach((f) => {
             const it = document.createElement("span");
             it.className = "lexis-web-tag" + (f === dir ? " lexis-web-tag-off" : "");
@@ -355,17 +355,24 @@
               const r = await chrome.runtime.sendMessage({ type: "move", payload: { key: moveKey, folder: f } });
               if (r && r.ok) {
                 toast(`已把「${data.word}」移到 ${dname(f)}`, true);
-                const k = pop && pop.dataset.k;
+                const k = (pop && pop.dataset.k) || (data.word || "").toLowerCase();
                 detailCache.delete(k);
-                await chrome.runtime.sendMessage({ type: "sync" });
-                // 实时刷新悬浮卡(不关闭)
-                let fresh; try { fresh = await chrome.runtime.sendMessage({ type: "detail", key: k }); } catch (_e) {}
-                if (fresh && fresh.ok && pop && pop.dataset.k === k) { detailCache.set(k, fresh); renderDetail(pop, fresh); position(pop, currentSpan); }
+                // 就地更新所属文件夹并重渲染卡片(不重新取数据、不重新定位,避免卡片跳走/消失)
+                data.file = r.file || ((f ? f + "/" : "") + (data.file || "").split("/").pop());
+                if (pop) { detailCache.set(k, data); renderDetail(pop, data); }
+                // 后台静默同步高亮缓存(folder 不影响是否高亮,失败也无所谓)
+                chrome.runtime.sendMessage({ type: "sync" }).catch(() => {});
               } else toast(r && r.error === "exists" ? "那个词典里已有同名词" : "移动失败", false);
             });
             listEl.appendChild(it);
           });
-          b.appendChild(listEl);
+          // 挂到悬浮卡根节点(而不是小标 span)并手动定位,避免被卡片正文盖住/裁掉
+          const host = pop || b;
+          const br = b.getBoundingClientRect();
+          const hr = host.getBoundingClientRect();
+          listEl.style.left = Math.round(br.left - hr.left) + "px";
+          listEl.style.top = Math.round(br.bottom - hr.top + 4) + "px";
+          host.appendChild(listEl);
           document.addEventListener("mousedown", onDocDown);
         });
       }
@@ -541,6 +548,7 @@
   }
 
   function position(box, span) {
+    if (!span || !span.isConnected) return; // span 被重新高亮拆掉后别把卡片定位到角落
     const r = span.getBoundingClientRect();
     const bw = box.offsetWidth || 320, bh = box.offsetHeight || 80;
     let left = r.left + window.scrollX;
