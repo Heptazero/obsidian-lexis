@@ -144,10 +144,22 @@ module.exports = class LexisPlugin extends Plugin {
     this.registerEvent(this.app.workspace.on("editor-menu", (menu, editor, view) => {
       const sel = (editor.getSelection() || "").trim();
       if (!sel || sel.length > 60) return;
-      menu.addItem((item) => item
-        .setTitle(`Lexis:添加到单词库 “${sel.length > 16 ? sel.slice(0, 16) + "…" : sel}”`)
-        .setIcon("book-plus")
-        .onClick(() => this.addWordFromSelection(sel, editor, view)));
+      const label = sel.length > 16 ? sel.slice(0, 16) + "…" : sel;
+      const dicts = this.dictFolders();
+      if (dicts.length > 1) {
+        // 多词典:每个文件夹一项「添加到 <folder>」
+        for (const f of dicts) {
+          menu.addItem((item) => item
+            .setTitle(`Lexis:添加“${label}”到 ${f}`)
+            .setIcon("book-plus")
+            .onClick(() => this.addWordFromSelection(sel, editor, view, f)));
+        }
+      } else {
+        menu.addItem((item) => item
+          .setTitle(`Lexis:添加到单词库 “${label}”`)
+          .setIcon("book-plus")
+          .onClick(() => this.addWordFromSelection(sel, editor, view)));
+      }
     }));
 
     // 浏览器桥接(Stage 0):本地 HTTP 服务,供 Chrome 扩展通信
@@ -182,6 +194,10 @@ module.exports = class LexisPlugin extends Plugin {
     if (this.settings.vocabFolders == null) this.settings.vocabFolders = this.settings.vocabFolder != null ? this.settings.vocabFolder : "01-word";
     if (this.settings.excludeTags == null) this.settings.excludeTags = this.settings.excludeTag || "";
     if (this.settings.vocabTags == null) this.settings.vocabTags = "";
+    // 词典表:文件夹来源升级成 [{folder, template}]。从旧 vocabFolders 迁移(模板留空=用全局默认)。
+    if (!Array.isArray(this.settings.dicts)) {
+      this.settings.dicts = this.parseFolders(this.settings.vocabFolders).map((f) => ({ folder: f, template: "" }));
+    }
   }
   async saveSettings() { await this.saveData(this.settings); }
   parseTagRulesText(text) {
@@ -264,7 +280,9 @@ module.exports = class LexisPlugin extends Plugin {
     const link = url ? ` —— [${title || url}](${url})` : "";
     const line = (sentence || url) ? `> ${sentence}${link}` : "";
     const dupKey = sentence || url;
-    const folder = this.primaryVocabFolder();
+    // 目标词典文件夹:payload.folder 命中词典表则用它,否则回退第一个
+    const reqFolder = this.normalizeFolder((payload && payload.folder) || "");
+    const folder = (reqFolder && this.dictFolders().includes(reqFolder)) ? reqFolder : this.primaryVocabFolder();
     const targetPath = (folder ? folder + "/" : "") + name + ".md";
     const existing = this.app.vault.getAbstractFileByPath(targetPath);
     const injectAlias = (data) => {
@@ -300,7 +318,7 @@ module.exports = class LexisPlugin extends Plugin {
         return { ok: true, created: false, word, alias: alias || undefined, file: existing.path };
       }
       await this.ensureFolder(folder);
-      const tpl = await this.readTemplate();
+      const tpl = await this.templateForFolder(folder);
       let content = (tpl != null ? tpl : this.minimalSkeleton()).replace(/\{\{word\}\}/g, word).replace(/\{\{date\}\}/g, todayStr());
       if (line) content = this.insertExampleLine(content, line);
       // 别名注入到 frontmatter 再建文件,保证 metadataCache 第一时间就包含别名
@@ -402,6 +420,7 @@ module.exports = class LexisPlugin extends Plugin {
         highlightOpacity: this.settings.highlightOpacity,
         highlightStyle: this.settings.highlightStyle,
         excludeTags: this.parseTags(this.settings.excludeTags),
+        dicts: this.dictFolders(),
       },
     };
   }
@@ -638,7 +657,7 @@ module.exports = class LexisPlugin extends Plugin {
     this.refreshAllViews();
     if (notify) {
       const aliasPart = this.settings.includeAliases ? `(含 ${aliases} 个别名)` : "";
-      const nf = this.parseFolders(this.settings.vocabFolders).length, nt = this.vocabTagSet().size;
+      const nf = this.dictFolders().length, nt = this.vocabTagSet().size;
       const scope = [nf ? `${nf} 个文件夹` : "", nt ? `${nt} 个标签` : ""].filter(Boolean).join(" + ") || "(空)";
       new Notice(`Lexis:从 ${scope} 识别到 ${words} 个单词${aliasPart}`);
     }
@@ -771,8 +790,17 @@ module.exports = class LexisPlugin extends Plugin {
   parseFolders(text) { return (text || "").split(/[,，\n]/).map((s) => this.normalizeFolder(s)).filter(Boolean); }
   parseTags(text) { return (text || "").split(/[,，;；\s]+/).map((s) => s.trim().replace(/^#/, "").toLowerCase()).filter(Boolean); }
   vocabTagSet() { return new Set(this.parseTags(this.settings.vocabTags)); }
-  primaryVocabFolder() { return this.parseFolders(this.settings.vocabFolders)[0] || ""; } // 新建单词时落地的文件夹(取第一个)
-  inFolderScope(path) { const fs = this.parseFolders(this.settings.vocabFolders); return fs.length ? this.inScope(path, fs) : false; }
+  // 词典表的文件夹列表 = 文件夹来源的单一真相
+  dictFolders() { return (this.settings.dicts || []).map((d) => this.normalizeFolder(d && d.folder)).filter(Boolean); }
+  primaryVocabFolder() { return this.dictFolders()[0] || ""; } // 新建单词时落地的文件夹(取第一个)
+  inFolderScope(path) { const fs = this.dictFolders(); return fs.length ? this.inScope(path, fs) : false; }
+  // 某文件夹对应的模板路径:词典行的 template,空则回退全局默认 newWordTemplate
+  templateForFolder(folder) {
+    const f = this.normalizeFolder(folder);
+    const row = (this.settings.dicts || []).find((d) => d && this.normalizeFolder(d.folder) === f);
+    const p = ((row && row.template) || this.settings.newWordTemplate || "").trim();
+    return this.readTemplatePath(p);
+  }
   isVocabFile(file) {
     if (!file || !file.path) return false;
     if (this.inFolderScope(file.path)) return true;
@@ -1033,8 +1061,8 @@ module.exports = class LexisPlugin extends Plugin {
     if (!folder) return;
     if (!this.app.vault.getAbstractFileByPath(folder)) { try { await this.app.vault.createFolder(folder); } catch (_e) {} }
   }
-  async readTemplate() {
-    const p = (this.settings.newWordTemplate || "").trim();
+  async readTemplatePath(p) {
+    p = (p || "").trim();
     if (!p) return null;
     const f = this.app.vault.getAbstractFileByPath(p);
     if (f instanceof TFile) { try { return await this.app.vault.read(f); } catch (_e) {} }
@@ -1055,11 +1083,12 @@ module.exports = class LexisPlugin extends Plugin {
     if (!word) { new Notice("Lexis:请先选中一个词"); return; }
     this.addWordFromSelection(word, editor, view);
   }
-  async addWordFromSelection(word, editor, view) {
+  async addWordFromSelection(word, editor, view, targetFolder) {
     const clean = (word || "").trim();
     const fileName = this.sanitizeName(clean);
     if (!fileName) { new Notice("Lexis:无效的单词"); return; }
-    const folder = this.primaryVocabFolder();
+    const reqFolder = this.normalizeFolder(targetFolder || "");
+    const folder = (reqFolder && this.dictFolders().includes(reqFolder)) ? reqFolder : this.primaryVocabFolder();
     const targetPath = (folder ? folder + "/" : "") + fileName + ".md";
     const existing = this.app.vault.getAbstractFileByPath(targetPath);
     const srcFile = (view && view.file) || this.app.workspace.getActiveFile();
@@ -1071,7 +1100,7 @@ module.exports = class LexisPlugin extends Plugin {
     }
     try {
       await this.ensureFolder(folder);
-      const tpl = await this.readTemplate();
+      const tpl = await this.templateForFolder(folder);
       let content = (tpl != null ? tpl : this.minimalSkeleton()).replace(/\{\{word\}\}/g, clean).replace(/\{\{date\}\}/g, todayStr());
       // 出处写进正文(而不是 frontmatter 属性),好看且笔记里直接可见
       if (sentence || srcFile) {
@@ -1521,12 +1550,27 @@ class LexisSettingTab extends PluginSettingTab {
 
     const folders = this.app.vault.getAllLoadedFiles().filter((f) => f instanceof TFolder).map((f) => f.path).filter((p) => p && p !== "/").sort();
 
-    new Setting(containerEl).setName("单词库文件夹").setDesc(`可填多个(含子文件夹),逗号或换行分隔;每个笔记标题都算一个单词。新建词落到第一个。已有文件夹:${folders.slice(0, 8).join("、") || "(无)"}${folders.length > 8 ? "…" : ""}`)
-      .addTextArea((t) => {
-        t.setPlaceholder("01-word\n02-phrase").setValue(this.plugin.settings.vocabFolders);
-        t.inputEl.rows = 2; t.inputEl.style.width = "100%";
-        t.onChange(async (v) => { this.plugin.settings.vocabFolders = v; await save(); this.plugin.rebuildIndex(true); this.renderStats(); });
+    new Setting(containerEl).setName("词典(文件夹 → 模板)").setHeading();
+    new Setting(containerEl).setDesc(`每行一个词典:文件夹(含子文件夹)里每个笔记标题都算一个词条,各词典可指定自己的新词模板(留空=用下方默认模板)。新词默认落到第一行。已有文件夹:${folders.slice(0, 8).join("、") || "(无)"}${folders.length > 8 ? "…" : ""}`);
+    const dictsWrap = containerEl.createDiv();
+    const renderDicts = () => {
+      dictsWrap.empty();
+      (this.plugin.settings.dicts || []).forEach((d, i) => {
+        const row = dictsWrap.createDiv();
+        row.style.display = "flex"; row.style.gap = "6px"; row.style.marginBottom = "6px"; row.style.alignItems = "center";
+        const fIn = new obsidian.TextComponent(row);
+        fIn.setPlaceholder("文件夹 如 01-word").setValue(d.folder || "");
+        fIn.inputEl.style.flex = "1";
+        fIn.onChange(async (v) => { d.folder = v.trim(); await save(); this.plugin.rebuildIndex(false); this.renderStats(); });
+        const tIn = new obsidian.TextComponent(row);
+        tIn.setPlaceholder("模板路径,留空=默认").setValue(d.template || "");
+        tIn.inputEl.style.flex = "1.4";
+        tIn.onChange(async (v) => { d.template = v.trim(); await save(); });
+        new obsidian.ExtraButtonComponent(row).setIcon("trash").setTooltip("删除这个词典").onClick(async () => { this.plugin.settings.dicts.splice(i, 1); await save(); this.plugin.rebuildIndex(false); renderDicts(); this.renderStats(); });
       });
+      new Setting(dictsWrap).addButton((b) => b.setButtonText("+ 添加词典").onClick(async () => { this.plugin.settings.dicts.push({ folder: "", template: "" }); await save(); renderDicts(); }));
+    };
+    renderDicts();
     new Setting(containerEl).setName("按标签收录").setDesc("带任一此标签的笔记也算词库(与文件夹取并集),逗号或空格分隔。留空=只按文件夹。")
       .addText((t) => t.setPlaceholder("词汇 术语").setValue(this.plugin.settings.vocabTags).onChange(async (v) => { this.plugin.settings.vocabTags = v; await save(); this.plugin.rebuildIndex(true); this.renderStats(); }));
     new Setting(containerEl).setName("别名也算单词").setDesc("启用后,单词笔记 frontmatter 里的别名也会被识别与高亮。")
@@ -1572,7 +1616,7 @@ class LexisSettingTab extends PluginSettingTab {
       .addText((t) => t.setPlaceholder("留空=全库").setValue(this.plugin.settings.occurrenceFolders).onChange(async (v) => { this.plugin.settings.occurrenceFolders = v.trim(); await save(); this.plugin._occCache.clear(); }));
 
     containerEl.createEl("h4", { text: "划词添加" });
-    new Setting(containerEl).setName("新词模板文件").setDesc("阅读时选中词→右键「添加到单词库」建新文件时套用的模板;留空=极简骨架。模板里可用 {{word}} {{date}} 占位。")
+    new Setting(containerEl).setName("默认模板").setDesc("词典没单独指定模板时用它建新词;留空=极简骨架。模板里可用 {{word}} {{date}} 占位。")
       .addText((t) => t.setPlaceholder("template/单词模板.md").setValue(this.plugin.settings.newWordTemplate).onChange(async (v) => { this.plugin.settings.newWordTemplate = v.trim(); await save(); }));
 
     containerEl.createEl("h4", { text: "背单词 (FSRS)" });

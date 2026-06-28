@@ -386,6 +386,16 @@
 - **为何纯文字 blockquote `> text`**:批注是个人想法,不像例句要记出处;放在自己的 `#### 批注` 段里,和例句区分开。
 - 兼容:`bridgeAnnotate` 接受 `note`/`text` 与 `key`/`word` 两种字段名。
 
+## 个人词典:词典表(文件夹→模板)+ 加词选夹 + 悬浮卡文件夹标(插件 v1.0.4 / 扩展 v1.0.5)
+- **动机**:不同文件夹是不同词典(word/atom/reference 只是文件夹名),各带自己的模板;网页加词能选落哪个词典;悬停知道词在哪个文件夹。
+- **关键 pushback(采纳)**:**不要独立 type 字段**——文件夹本身就是词典身份。所以词典表只 `{folder, template}` 两列。
+- **模型**:新增 `dicts: [{folder, template}]` 作文件夹来源的**单一真相**。新增 `dictFolders()`,`primaryVocabFolder/inFolderScope/Notice 摘要` 全改走它(不再读 vocabFolders 文本框,该值只在 loadSettings 迁移时读一次 → dicts)。
+- **per-folder 模板**:`readTemplate()` 拆成 `readTemplatePath(p)`;新增 `templateForFolder(folder)`(词典行 template,空则回退全局 `newWordTemplate`)。`bridgeAddWord` 读 `payload.folder`(命中 dictFolders 才用,否则回退第一个)、`addWordFromSelection` 加可选 folder 参;两处建词都改用 `templateForFolder`。
+- **ob 右键**:`dictFolders().length>1` 时,编辑器选词右键出每文件夹一项「添加“词”到 <folder>」,各自套模板;单词典保持单项。
+- **扩展**:`styleConfig` 加 `dicts`(文件夹名数组,模板不出本机)。划词 pill 多词典时加文件夹下拉段(`📁 名 ▾`,点开选,默认第一个);`doAdd(word,sentence,alias,folder)` 带 folder 进 payload。`background.js` 无改(add 透传 folder)。
+- **悬浮卡文件夹标**:从词条 `file` 路径取目录名,标题行加 `.lexis-web-dict` 小标,满足"知道在哪个文件夹"。
+- **迁移**:旧 `vocabFolders` → dicts 每文件夹一行(template 空=用默认);`newWordTemplate` 文案改"默认模板"。设置面板"单词库文件夹"文本框 → 词典表(flex 内联样式,无新 CSS 类)。
+
 ## 想法暂存(Hz 提出,暂不做)
 - (已实现 ↑)~~**标签识别为单词**:除了扫文件夹,再支持"带某标签的笔记也算单词来源"。~~ → 本轮已做,见上"地基"。
 

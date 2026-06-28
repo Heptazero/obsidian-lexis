@@ -59,9 +59,10 @@
     setTimeout(() => { t.style.opacity = "0"; setTimeout(() => t.remove(), 300); }, 1600);
   }
 
-  async function doAdd(word, sentence, alias) {
+  async function doAdd(word, sentence, alias, folder) {
     const payload = { word, sentence, url: location.href, title: document.title };
     if (alias) payload.alias = alias;
+    if (folder) payload.folder = folder;
     let r;
     try { r = await chrome.runtime.sendMessage({ type: "add", payload }); }
     catch (e) { r = null; }
@@ -318,6 +319,19 @@
     } else {
       titleEl.textContent = label;
     }
+    // 所属文件夹/词典小标
+    {
+      const fp = data.file || "";
+      const slash = fp.lastIndexOf("/");
+      const dir = slash > 0 ? fp.slice(0, slash) : "";
+      if (dir) {
+        const b = document.createElement("span");
+        b.className = "lexis-web-dict";
+        b.textContent = dir.split("/").pop();
+        b.title = dir;
+        titleEl.appendChild(b);
+      }
+    }
     // ➕ 给这个词加例句(抓页面上它所在的那句)
     const addBtn = document.createElement("button");
     addBtn.className = "lexis-web-addbtn";
@@ -555,6 +569,10 @@
     }
     hideSelBtn();
     const sentence = sentenceFromSelection(sel);
+    // 目标词典(文件夹)列表;>1 个才显示选择段,默认第一个
+    const dicts = (styleCfg && Array.isArray(styleCfg.dicts) ? styleCfg.dicts : []).filter(Boolean);
+    let selFolder = dicts[0] || "";
+    const fname = (f) => (String(f).split("/").pop() || f);
 
     const pill = document.createElement("div");
     pill.className = "lexis-web-selpill";
@@ -566,10 +584,38 @@
     addBtn.addEventListener("mousedown", (e) => e.preventDefault());
     addBtn.addEventListener("click", async () => {
       addBtn.disabled = true; addBtn.textContent = "…";
-      await doAdd(text, sentence);
+      await doAdd(text, sentence, undefined, selFolder);
       hideSelBtn();
     });
     pill.appendChild(addBtn);
+
+    // 文件夹/词典选择段(仅多词典时)
+    if (dicts.length > 1) {
+      const folderBtn = document.createElement("button");
+      folderBtn.className = "lexis-web-selbtn-pill lexis-web-selfolder";
+      folderBtn.textContent = "📁 " + fname(selFolder);
+      folderBtn.title = "选择加到哪个词典(文件夹)";
+      folderBtn.addEventListener("mousedown", (e) => e.preventDefault());
+      folderBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const old = pill.querySelector(".lexis-web-folderlist");
+        if (old) { old.remove(); return; }
+        const list = document.createElement("div");
+        list.className = "lexis-web-folderlist";
+        dicts.forEach((f) => {
+          const it = document.createElement("div");
+          it.className = "lexis-web-folderitem" + (f === selFolder ? " sel" : "");
+          it.textContent = fname(f); it.title = f;
+          it.addEventListener("mousedown", (ev) => {
+            ev.preventDefault(); ev.stopPropagation();
+            selFolder = f; folderBtn.textContent = "📁 " + fname(f); list.remove();
+          });
+          list.appendChild(it);
+        });
+        pill.appendChild(list);
+      });
+      pill.appendChild(folderBtn);
+    }
 
     const aliasBtn = document.createElement("button");
     aliasBtn.className = "lexis-web-selbtn-pill";
@@ -587,7 +633,7 @@
         const real = input.value.trim();
         if (!real || !/[A-Za-z]/.test(real)) return;
         input.disabled = true;
-        await doAdd(real, sentence, text);
+        await doAdd(real, sentence, text, selFolder);
         hideSelBtn();
       };
       input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } if (e.key === "Escape") hideSelBtn(); });

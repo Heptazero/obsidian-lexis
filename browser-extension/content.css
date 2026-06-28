@@ -97,6 +97,25 @@
 }
 .lexis-web-selinput::placeholder { color: rgba(255,255,255,.45); }
 
+/* 划词 pill 的文件夹/词典选择段 */
+.lexis-web-selfolder { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lexis-web-folderlist {
+  position: absolute; top: 100%; left: 0; margin-top: 4px; z-index: 2147483647;
+  display: flex; flex-direction: column; min-width: 120px; max-height: 220px; overflow-y: auto;
+  padding: 4px; border-radius: 8px; background: #2a2a30; color: #e6e6e6;
+  box-shadow: 0 4px 16px rgba(0,0,0,.35);
+}
+.lexis-web-folderitem { padding: 5px 8px; border-radius: 5px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.lexis-web-folderitem:hover { background: rgba(255,255,255,.12); }
+.lexis-web-folderitem.sel { color: #fff; font-weight: 600; background: color-mix(in srgb, var(--lexis-web-color) 40%, transparent); }
+
+/* 悬浮卡:所属文件夹/词典小标 */
+.lexis-web-dict {
+  flex: 0 0 auto; font-size: 11px !important; font-weight: 600; padding: 1px 7px; border-radius: 999px;
+  background: color-mix(in srgb, var(--lexis-web-color) 14%, transparent); color: var(--lexis-web-color);
+  white-space: nowrap; max-width: 120px; overflow: hidden; text-overflow: ellipsis;
+}
+
 /* 提示条 */
 .lexis-web-toast {
   position: fixed; z-index: 2147483647; left: 50%; bottom: 32px; transform: translateX(-50%);
