@@ -576,6 +576,8 @@
     if (selBtn && document.activeElement && selBtn.contains(document.activeElement)) return;
     const sel = window.getSelection();
     const text = sel ? sel.toString().trim() : "";
+    // 选区没变、且 pill 已经在了 → 别重建(否则在 pill 上点文件夹下拉会被 mouseup 触发的本函数拆掉,闪一下就没)
+    if (selBtn && selBtn.dataset && selBtn.dataset.word === text && text) return;
     if (!text || text.length > 60 || text.split(/\s+/).length > 6 || !/[A-Za-z]/.test(text)) { hideSelBtn(); return; }
     // 选中词已在库中(含别名) → 不弹按钮
     if (keySet && keySet.has(text.toLowerCase())) { hideSelBtn(); return; }
@@ -713,6 +715,7 @@
     document.body.appendChild(pill);
     const tc = textColorFor(getComputedStyle(pill).backgroundColor);
     pill.style.color = tc;
+    pill.dataset.word = text;
     selBtn = pill;
   }
   // mouseup + selectionchange 双触发:YouTube 等会吞掉 player 内的 mouseup,selectionchange 兜底
