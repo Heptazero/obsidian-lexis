@@ -319,18 +319,49 @@
     } else {
       titleEl.textContent = label;
     }
-    // 所属文件夹/词典小标
+    // 所属文件夹/词典小标;点击可把这个词移到别的词典(只移动文件,正文/批注不变)
     {
       const fp = data.file || "";
       const slash = fp.lastIndexOf("/");
       const dir = slash > 0 ? fp.slice(0, slash) : "";
-      if (dir) {
-        const b = document.createElement("span");
-        b.className = "lexis-web-dict";
-        b.textContent = dir.split("/").pop();
-        b.title = dir;
-        titleEl.appendChild(b);
+      const allDicts = (styleCfg && Array.isArray(styleCfg.dicts) ? styleCfg.dicts : []).filter(Boolean);
+      const dname = (f) => (String(f).split("/").pop() || f);
+      const b = document.createElement("span");
+      b.className = "lexis-web-dict";
+      b.textContent = dir ? dname(dir) : "(根目录)";
+      b.title = dir || "根目录";
+      const moveKey = data.base || data.word;
+      if (allDicts.length > 1) {
+        b.classList.add("lexis-web-dict-click");
+        b.title = (dir || "根目录") + " —— 点击移到别的词典";
+        b.addEventListener("click", (ev) => {
+          ev.preventDefault(); ev.stopPropagation();
+          const old = titleEl.parentElement.querySelector(".lexis-web-dictlist");
+          if (old) { old.remove(); return; }
+          const list = document.createElement("div");
+          list.className = "lexis-web-folderlist lexis-web-dictlist";
+          allDicts.forEach((f) => {
+            const it = document.createElement("div");
+            it.className = "lexis-web-folderitem" + (f === dir ? " sel" : "");
+            it.textContent = dname(f); it.title = f;
+            it.addEventListener("click", async (e2) => {
+              e2.preventDefault(); e2.stopPropagation();
+              list.remove();
+              if (f === dir) return;
+              const r = await chrome.runtime.sendMessage({ type: "move", payload: { key: moveKey, folder: f } });
+              if (r && r.ok) {
+                detailCache.delete((moveKey || "").toLowerCase());
+                toast(`已把「${data.word}」移到 ${dname(f)}`, true);
+                await chrome.runtime.sendMessage({ type: "sync" });
+                removePop();
+              } else toast(r && r.error === "exists" ? "那个词典里已有同名词" : "移动失败", false);
+            });
+            list.appendChild(it);
+          });
+          b.appendChild(list);
+        });
       }
+      titleEl.appendChild(b);
     }
     // ➕ 给这个词加例句(抓页面上它所在的那句)
     const addBtn = document.createElement("button");
@@ -589,8 +620,8 @@
     });
     pill.appendChild(addBtn);
 
-    // 文件夹/词典选择段(仅多词典时)
-    if (dicts.length > 1) {
+    // 文件夹/词典选择段(需在设置里开启,且有多个词典)
+    if (styleCfg && styleCfg.pillFolderPicker && dicts.length > 1) {
       const folderBtn = document.createElement("button");
       folderBtn.className = "lexis-web-selbtn-pill lexis-web-selfolder";
       folderBtn.textContent = "📁 " + fname(selFolder);

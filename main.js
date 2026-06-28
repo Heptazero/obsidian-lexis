@@ -46,6 +46,8 @@ const DEFAULT_SETTINGS = {
   bridgeEnabled: false,
   bridgePort: 45945,
   bridgeToken: "",
+  // 划词 pill 上是否显示"文件夹/词典"选择段(默认关,避免拥挤;关掉则新词进第一个词典,可在悬浮卡里改)
+  pillFolderPicker: false,
 };
 
 // ---------- 小工具 ----------
@@ -257,6 +259,7 @@ module.exports = class LexisPlugin extends Plugin {
     if (path === "/add" && req.method === "POST") return send(200, await this.bridgeAddWord(await this.readBody(req)));
     if (path === "/tag" && req.method === "POST") return send(200, await this.bridgeTagWord(await this.readBody(req)));
     if (path === "/note" && req.method === "POST") return send(200, await this.bridgeAnnotate(await this.readBody(req)));
+    if (path === "/move" && req.method === "POST") return send(200, await this.bridgeMoveWord(await this.readBody(req)));
     return send(404, { ok: false, error: "not-found" });
   }
   readBody(req) {
@@ -409,6 +412,23 @@ module.exports = class LexisPlugin extends Plugin {
       return { ok: true, key, file: e.file.path };
     } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
   }
+  // 把已有词移动到另一个词典文件夹(只移动文件,正文/批注/例句全保留;模板只在新建时套用,不重套)
+  async bridgeMoveWord(payload) {
+    const key = String((payload && (payload.key ?? payload.word)) || "").trim().toLowerCase();
+    const folder = this.normalizeFolder((payload && payload.folder) || "");
+    const e = this.index.get(key);
+    if (!e || !e.file) return { ok: false, error: "not-found" };
+    if (folder && !this.dictFolders().includes(folder)) return { ok: false, error: "bad-folder" };
+    const target = (folder ? folder + "/" : "") + e.file.name;
+    if (target === e.file.path) return { ok: true, key, file: e.file.path, moved: false };
+    if (this.app.vault.getAbstractFileByPath(target)) return { ok: false, error: "exists" };
+    try {
+      await this.ensureFolder(folder);
+      await this.app.fileManager.renameFile(e.file, target);
+      this.rebuildIndex(false);
+      return { ok: true, key, file: target, folder, moved: true };
+    } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
+  }
   bridgeWordList() {
     const words = [];
     for (const [key, e] of this.index) words.push({ key, word: e.display, alias: !!e.isAlias, tags: [...(e.tags || [])], file: e.file && e.file.path });
@@ -421,6 +441,7 @@ module.exports = class LexisPlugin extends Plugin {
         highlightStyle: this.settings.highlightStyle,
         excludeTags: this.parseTags(this.settings.excludeTags),
         dicts: this.dictFolders(),
+        pillFolderPicker: !!this.settings.pillFolderPicker,
       },
     };
   }
@@ -1537,6 +1558,27 @@ class LexisHomeView extends ItemView {
   onClose() {}
 }
 
+// 输入时模糊匹配建议(文件夹/文件路径)。AbstractInputSuggest 在 Obsidian 1.0+ 运行时可用;
+// 缺失时 `|| class {}` 避免 extends undefined 报错,且调用处会跳过实例化。
+class PathSuggest extends (obsidian.AbstractInputSuggest || class {}) {
+  constructor(app, inputEl, getItems, onPick) {
+    super(app, inputEl);
+    this.getItems = getItems;
+    this.onPick = onPick;
+  }
+  getSuggestions(query) {
+    const q = (query || "").toLowerCase();
+    return this.getItems().filter((p) => p.toLowerCase().includes(q)).slice(0, 50);
+  }
+  renderSuggestion(value, el) { el.setText(value); }
+  selectSuggestion(value) {
+    if (typeof this.setValue === "function") this.setValue(value);
+    if (this.inputEl) this.inputEl.value = value;
+    if (typeof this.close === "function") this.close();
+    if (this.onPick) this.onPick(value);
+  }
+}
+
 class LexisSettingTab extends PluginSettingTab {
   constructor(app, plugin) { super(app, plugin); this.plugin = plugin; }
 
@@ -1549,6 +1591,8 @@ class LexisSettingTab extends PluginSettingTab {
     containerEl.createEl("h3", { text: "Lexis 设置" });
 
     const folders = this.app.vault.getAllLoadedFiles().filter((f) => f instanceof TFolder).map((f) => f.path).filter((p) => p && p !== "/").sort();
+    const mdFiles = this.app.vault.getMarkdownFiles().map((f) => f.path).sort();
+    const hasSuggest = !!obsidian.AbstractInputSuggest;
 
     new Setting(containerEl).setName("词典(文件夹 → 模板)").setHeading();
     new Setting(containerEl).setDesc(`每行一个词典:文件夹(含子文件夹)里每个笔记标题都算一个词条,各词典可指定自己的新词模板(留空=用下方默认模板)。新词默认落到第一行。已有文件夹:${folders.slice(0, 8).join("、") || "(无)"}${folders.length > 8 ? "…" : ""}`);
@@ -1561,11 +1605,17 @@ class LexisSettingTab extends PluginSettingTab {
         const fIn = new obsidian.TextComponent(row);
         fIn.setPlaceholder("文件夹 如 01-word").setValue(d.folder || "");
         fIn.inputEl.style.flex = "1";
-        fIn.onChange(async (v) => { d.folder = v.trim(); await save(); this.plugin.rebuildIndex(false); this.renderStats(); });
+        const onFolder = async (v) => { d.folder = (v || "").trim(); await save(); this.plugin.rebuildIndex(false); this.renderStats(); };
+        fIn.onChange(onFolder);
         const tIn = new obsidian.TextComponent(row);
         tIn.setPlaceholder("模板路径,留空=默认").setValue(d.template || "");
         tIn.inputEl.style.flex = "1.4";
-        tIn.onChange(async (v) => { d.template = v.trim(); await save(); });
+        const onTpl = async (v) => { d.template = (v || "").trim(); await save(); };
+        tIn.onChange(onTpl);
+        if (hasSuggest) {
+          new PathSuggest(this.app, fIn.inputEl, () => folders, (v) => { fIn.setValue(v); onFolder(v); });
+          new PathSuggest(this.app, tIn.inputEl, () => mdFiles, (v) => { tIn.setValue(v); onTpl(v); });
+        }
         new obsidian.ExtraButtonComponent(row).setIcon("trash").setTooltip("删除这个词典").onClick(async () => { this.plugin.settings.dicts.splice(i, 1); await save(); this.plugin.rebuildIndex(false); renderDicts(); this.renderStats(); });
       });
       new Setting(dictsWrap).addButton((b) => b.setButtonText("+ 添加词典").onClick(async () => { this.plugin.settings.dicts.push({ folder: "", template: "" }); await save(); renderDicts(); }));
@@ -1617,7 +1667,12 @@ class LexisSettingTab extends PluginSettingTab {
 
     containerEl.createEl("h4", { text: "划词添加" });
     new Setting(containerEl).setName("默认模板").setDesc("词典没单独指定模板时用它建新词;留空=极简骨架。模板里可用 {{word}} {{date}} 占位。")
-      .addText((t) => t.setPlaceholder("template/单词模板.md").setValue(this.plugin.settings.newWordTemplate).onChange(async (v) => { this.plugin.settings.newWordTemplate = v.trim(); await save(); }));
+      .addText((t) => {
+        t.setPlaceholder("template/单词模板.md").setValue(this.plugin.settings.newWordTemplate);
+        const onTpl = async (v) => { this.plugin.settings.newWordTemplate = (v || "").trim(); await save(); };
+        t.onChange(onTpl);
+        if (hasSuggest) new PathSuggest(this.app, t.inputEl, () => mdFiles, (v) => { t.setValue(v); onTpl(v); });
+      });
 
     containerEl.createEl("h4", { text: "背单词 (FSRS)" });
     new Setting(containerEl).setName("目标记忆保留率").setDesc("越高复习越频繁。默认 0.9。")
@@ -1636,6 +1691,8 @@ class LexisSettingTab extends PluginSettingTab {
     const vocabTagsHint = this.plugin.collectVocabTags().slice(0, 10).join("、");
     new Setting(containerEl).setName("排除标签").setDesc(`带任一此标签的单词不在网页高亮(Obsidian 里不受影响),逗号或空格分隔。留空=不排除。词库标签:${vocabTagsHint || "(无)"}`)
       .addText((t) => t.setPlaceholder("已掌握 暂缓").setValue(this.plugin.settings.excludeTags).onChange(async (v) => { this.plugin.settings.excludeTags = v; await save(); }));
+    new Setting(containerEl).setName("划词 pill 显示词典选择").setDesc("开启后,网页划词加新词的小条上会多一个文件夹下拉,可当场选落到哪个词典(需多个词典)。关闭则新词进第一个词典,之后在悬浮卡里点文件夹小标可改。")
+      .addToggle((t) => t.setValue(this.plugin.settings.pillFolderPicker).onChange(async (v) => { this.plugin.settings.pillFolderPicker = v; await save(); }));
     new Setting(containerEl).setName("启用本地桥接").setDesc(`开启后浏览器访问 http://127.0.0.1:${this.plugin.settings.bridgePort}/ping 应返回 ok。`)
       .addToggle((t) => t.setValue(this.plugin.settings.bridgeEnabled).onChange(async (v) => {
         this.plugin.settings.bridgeEnabled = v;

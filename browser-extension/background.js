@@ -79,6 +79,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         sendResponse(await r.json());
         return;
       }
+      if (msg.type === "move") {
+        const u = new URL(base(cfg) + "/move");
+        if (cfg.token) u.searchParams.set("token", cfg.token);
+        const r = await fetch(u.toString(), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(msg.payload || {}) });
+        sendResponse(await r.json());
+        return;
+      }
       if (msg.type === "add") {
         const u = new URL(base(cfg) + "/add");
         if (cfg.token) u.searchParams.set("token", cfg.token);

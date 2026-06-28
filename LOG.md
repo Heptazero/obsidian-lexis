@@ -396,6 +396,13 @@
 - **悬浮卡文件夹标**:从词条 `file` 路径取目录名,标题行加 `.lexis-web-dict` 小标,满足"知道在哪个文件夹"。
 - **迁移**:旧 `vocabFolders` → dicts 每文件夹一行(template 空=用默认);`newWordTemplate` 文案改"默认模板"。设置面板"单词库文件夹"文本框 → 词典表(flex 内联样式,无新 CSS 类)。
 
+## 个人词典迭代:pill 选夹改设置开关 + 悬浮卡点文件夹改词典 + 设置模糊匹配(插件 v1.0.5 / 扩展 v1.0.6)
+- **反馈**:pill 文件夹下拉(a)默认没出现(只有 ≥2 词典且 re-sync 后才有)、(b)太挤(三段);悬浮卡文件夹小标点了没反应;设置里填路径不方便。
+- **pill 选夹改成设置开关**:新增 `pillFolderPicker`(默认关),`styleConfig` 带出;content.js 改成 `styleCfg.pillFolderPicker && dicts.length>1` 才显示。默认新词进第一个词典。
+- **悬浮卡点文件夹小标 → 改词典**:小标变可点(多词典时),弹文件夹列表 → 选 → `move` 消息 → `POST /move` → `bridgeMoveWord`(`app.fileManager.renameFile` 只移动文件,正文/批注/例句全留,**模板只在新建时套,不重套**)→ toast + re-sync。CSS 上 `.lexis-web-dict-click` 要 `overflow:visible`(否则 badge 的 ellipsis overflow 会裁掉下拉)。
+- **设置模糊匹配**:新增 `PathSuggest extends (obsidian.AbstractInputSuggest || class{})`(缺失时降级,避免 extends undefined 崩);词典表文件夹输入挂文件夹建议、模板输入挂 md 文件建议,"默认模板"同样。`hasSuggest = !!obsidian.AbstractInputSuggest` 守卫。
+- 用户当时疑惑"改词典会不会动批注/模板":澄清——移动只挪文件,内容不变;模板只影响新建。
+
 ## 想法暂存(Hz 提出,暂不做)
 - (已实现 ↑)~~**标签识别为单词**:除了扫文件夹,再支持"带某标签的笔记也算单词来源"。~~ → 本轮已做,见上"地基"。
 

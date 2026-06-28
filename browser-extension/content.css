@@ -115,6 +115,8 @@
   background: color-mix(in srgb, var(--lexis-web-color) 14%, transparent); color: var(--lexis-web-color);
   white-space: nowrap; max-width: 120px; overflow: hidden; text-overflow: ellipsis;
 }
+.lexis-web-dict-click { cursor: pointer; position: relative; overflow: visible; }
+.lexis-web-dict-click:hover { background: color-mix(in srgb, var(--lexis-web-color) 26%, transparent); }
 
 /* 提示条 */
 .lexis-web-toast {
