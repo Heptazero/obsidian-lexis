@@ -1745,15 +1745,15 @@ class LexisSettingTab extends PluginSettingTab {
           new PathSuggest(this.app, fIn.inputEl, () => folders, (v) => { fIn.setValue(v); onFolder(v); });
           new PathSuggest(this.app, tIn.inputEl, () => mdFiles, (v) => { tIn.setValue(v); onTpl(v); });
         }
-        // 每个词典可选专属高亮色(留空=跟随全局色)
-        const globalColor = this.plugin.settings.highlightColor || "#7c5cff";
-        const cIn = row.createEl("input", { type: "color" });
-        cIn.style.width = "30px"; cIn.style.height = "24px"; cIn.style.padding = "0"; cIn.style.border = "none"; cIn.style.background = "none"; cIn.style.cursor = "pointer"; cIn.style.flex = "0 0 auto";
-        cIn.value = d.color || globalColor;
-        cIn.style.opacity = d.color ? "1" : "0.35";
-        cIn.title = d.color ? "这个词典的高亮色(库内+网页)" : "未设置,跟随全局色;点选即设为专属色";
-        cIn.addEventListener("input", async () => { d.color = cIn.value; cIn.style.opacity = "1"; cIn.title = "这个词典的高亮色(库内+网页)"; await save(); refresh(); });
-        new obsidian.ExtraButtonComponent(row).setIcon("rotate-ccw").setTooltip("恢复跟随全局色").onClick(async () => { d.color = ""; cIn.value = globalColor; cIn.style.opacity = "0.35"; cIn.title = "未设置,跟随全局色"; await save(); refresh(); });
+        // 每个词典可选专属高亮色(留空=跟随全局/主题色)。用 obsidian.ColorComponent,和「按标签着色」一致
+        const globalColor = this.plugin.settings.highlightColor || accentHex;
+        const cComp = new obsidian.ColorComponent(row);
+        const swatch = () => cComp.colorPickerEl || cComp.containerEl || null;
+        const markInherit = (inherit) => { const el = swatch(); if (el) { el.style.opacity = inherit ? "0.4" : "1"; el.title = inherit ? "未设置,跟随全局/主题色;点选即设为这个词典的专属色" : "这个词典的专属高亮色(库内+网页)"; } };
+        cComp.setValue(d.color || globalColor);
+        markInherit(!d.color);
+        cComp.onChange(async (v) => { d.color = v; markInherit(false); await save(); refresh(); });
+        new obsidian.ExtraButtonComponent(row).setIcon("reset").setTooltip("恢复跟随全局/主题色").onClick(async () => { d.color = ""; cComp.setValue(globalColor); markInherit(true); await save(); refresh(); });
         new obsidian.ExtraButtonComponent(row).setIcon("trash").setTooltip("删除这个词典").onClick(async () => { this.plugin.settings.dicts.splice(i, 1); await save(); this.plugin.rebuildIndex(false); renderDicts(); this.renderStats(); });
       });
       const addDict = dictsWrap.createEl("button", { text: "+ 添加词典" });

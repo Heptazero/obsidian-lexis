@@ -449,6 +449,11 @@
 - 好处:网页颜色 = ob 同一套优先级、同一处计算,不再依赖客户端 folder 匹配;改色重新 sync 即生效(background 字段已稳定,无需每次重载扩展)。
 - 注意:本次因为 background.js 改了,**要重载一次扩展**;之后再改配色只需 sync。
 
+## 修复:词典色块用错控件导致存不进+重置无反应(插件 v1.0.13)
+- **真凶**:词典行的颜色我用了原生 `row.createEl("input",{type:"color"})`——Obsidian 的 `createEl` 不认 `type` 字段,生成的是普通文本输入,**选色根本没存进 `d.color`**,于是 `dictColorMap` 永远空 → 网页只剩全局色;那个"重置"按钮也因为对着这个假控件,点了没视觉反应。
+- **修法**:改用 `new obsidian.ColorComponent(row)`(和「按标签着色」同一控件),`onChange` 正常写入 `d.color`;重置按钮(icon `reset`)`setValue(全局/主题色)` + `d.color=""`,**重置=恢复跟随全局主题色**。淡色表示"未设(跟随全局)"。
+- 服务端 `colorForEntry/dictColorForFile/dictColorMap` 逻辑已单测验证正确(含子文件夹前缀匹配、标签规则覆盖词典色)。本次只是控件存值的坑。
+
 ## 想法暂存(Hz 提出,暂不做)
 - (已实现 ↑)~~**标签识别为单词**:除了扫文件夹,再支持"带某标签的笔记也算单词来源"。~~ → 本轮已做,见上"地基"。
 
