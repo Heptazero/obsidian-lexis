@@ -471,7 +471,7 @@ module.exports = class LexisPlugin extends Plugin {
       ok: true, version: this.manifest.version, count: words.length, words,
       styleConfig: {
         tagRules: this.settings.tagRules || [],
-        highlightColor: this.settings.highlightColor,
+        highlightColor: this.effectiveHighlightColor(),
         highlightOpacity: this.settings.highlightOpacity,
         highlightStyle: this.settings.highlightStyle,
         excludeTags: this.parseTags(this.settings.excludeTags),
@@ -867,6 +867,13 @@ module.exports = class LexisPlugin extends Plugin {
   vocabTagSet() { return new Set(this.parseTags(this.settings.vocabTags)); }
   // 词典表的文件夹列表 = 文件夹来源的单一真相
   dictFolders() { return (this.settings.dicts || []).map((d) => this.normalizeFolder(d && d.folder)).filter(Boolean); }
+  // 全局高亮色的"实际值":留空(=主题强调色)时解析成真实 hex 发给网页,否则网页只能看到 var(--text-accent) 这种 ob 专用变量、读不到
+  effectiveHighlightColor() {
+    const c = (this.settings.highlightColor || "").trim();
+    if (c) return c;
+    try { return cssColorToHex(getComputedStyle(document.body).getPropertyValue("--text-accent")); }
+    catch (_e) { return "#7c5cff"; }
+  }
   // { 规范化文件夹: 颜色 },只含设了专属色的词典;供网页按所属词典着色
   dictColorMap() {
     const m = {};

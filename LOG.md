@@ -437,6 +437,12 @@
 - 本版:`inlineStyleForEntry`(ob 内)也调 `dictColorForFile(entry.file)`,**优先级与网页端 `inlineStyleFor` 完全一致:标签规则 > 词典色 > 全局色**。`dictColorForFile` 与网页 `dictColorFor` 同逻辑(子文件夹归父词典、最长匹配)。
 - 设置里改色后 `refresh()`(`refreshAllViews`)即时重绘库内高亮;网页端仍需 sync。色块 tooltip 改为"库内+网页"。
 
+## 修复:网页"跟随 ob 配色"勾了没变化(插件 v1.0.11 / 扩展 v1.0.12)
+- **根因**:ob 全局高亮色留空时 = 主题强调色 `var(--text-accent)`,`bridgeWordList` 直接发空字符串/这个变量,网页根本读不到 ob 的 CSS 变量,于是 `inlineStyleFor` 回退到网页本地色 → 勾不勾"跟随 ob"看着都一样。
+- **修法**:新增 `effectiveHighlightColor()`——留空时在插件侧(Electron 渲染进程,有 document)用 `cssColorToHex(getComputedStyle(body)--text-accent)` 解析成**真实 hex** 再发;`styleConfig.highlightColor` 改发它。标签规则/词典色本就是显式 hex,一起生效。
+- **顺手**:popup 那个开关标签从"使用 Obsidian 标签着色"改成"跟随 Obsidian 配色(全局色 / 词典色 / 标签规则)"——它本就管全局+词典+标签,不只是标签。
+- 注意:改完仍需在扩展弹窗 **同步** 一次,网页才拿到新 styleConfig。
+
 ## 想法暂存(Hz 提出,暂不做)
 - (已实现 ↑)~~**标签识别为单词**:除了扫文件夹,再支持"带某标签的笔记也算单词来源"。~~ → 本轮已做,见上"地基"。
 
