@@ -8,6 +8,8 @@
   let keySet = null;
   let keyTags = null;
   let keyFolder = null;
+  let keyColor = null;
+  let keyStyle = null;
   let excludedKeys = null;
   let regex = null;
   let observer = null;
@@ -118,6 +120,8 @@
     keySet = new Set();
     keyTags = new Map();
     keyFolder = new Map();
+    keyColor = new Map();
+    keyStyle = new Map();
     excludedKeys = new Set();
     const exSet = excludeSet();
     const keys = [];
@@ -127,6 +131,8 @@
       const tags = (x.t || []).map((t) => String(t).toLowerCase());
       keyTags.set(k, tags);
       if (x.f) keyFolder.set(k, x.f);
+      if (x.c) keyColor.set(k, x.c);
+      if (x.s) keyStyle.set(k, x.s);
       if (exSet.size && tags.some((t) => exSet.has(t))) { excludedKeys.add(k); continue; }
       keySet.add(k);
       keys.push(k);
@@ -161,17 +167,19 @@
       const line = s === "underline" ? "solid" : "wavy";
       return `text-decoration:underline ${line} ${c};text-underline-offset:2px`;
     }
-    const tags = keyTags.get(key) || [];
-    let color = styleCfg.highlightColor || cfg.color || "#7c5cff";
-    let styleKind = styleCfg.highlightStyle || cfg.style || "wavy";
-    // 词典专属色(优先级:标签规则 > 词典色 > 全局色)
-    const dc = dictColorFor(key);
-    if (dc) color = dc;
-    const rules = styleCfg.tagRules || [];
-    if (tags.length && rules.length) {
-      const rule = rules.find((r) => r.tag && tags.includes(r.tag.toLowerCase()));
-      if (rule) { if (rule.color) color = rule.color; if (rule.style) styleKind = rule.style; }
+    // 颜色/线型优先用服务端按「标签规则 > 词典色 > 全局」算好的值(与 ob 完全一致);没有则客户端兜底解析
+    let color = keyColor.get(key);
+    let styleKind = keyStyle.get(key);
+    if (!color) {
+      const tags = keyTags.get(key) || [];
+      color = dictColorFor(key) || styleCfg.highlightColor || cfg.color || "#7c5cff";
+      const rules = styleCfg.tagRules || [];
+      if (tags.length && rules.length) {
+        const rule = rules.find((r) => r.tag && tags.includes(r.tag.toLowerCase()));
+        if (rule) { if (rule.color) color = rule.color; if (rule.style && !styleKind) styleKind = rule.style; }
+      }
     }
+    if (!styleKind) styleKind = styleCfg.highlightStyle || cfg.style || "wavy";
     const alpha = styleCfg.highlightOpacity != null ? styleCfg.highlightOpacity : 1;
     if (alpha < 1) color = `color-mix(in srgb, ${color} ${Math.round(alpha * 100)}%, transparent)`;
     if (styleKind === "background") return `background-color:${color};border-radius:3px;padding:0 1px;text-decoration:none`;

@@ -466,7 +466,7 @@ module.exports = class LexisPlugin extends Plugin {
   }
   bridgeWordList() {
     const words = [];
-    for (const [key, e] of this.index) words.push({ key, word: e.display, alias: !!e.isAlias, tags: [...(e.tags || [])], file: e.file && e.file.path });
+    for (const [key, e] of this.index) words.push({ key, word: e.display, alias: !!e.isAlias, tags: [...(e.tags || [])], file: e.file && e.file.path, color: this.colorForEntry(e), wstyle: this.styleKindForEntry(e) });
     return {
       ok: true, version: this.manifest.version, count: words.length, words,
       styleConfig: {
@@ -867,6 +867,26 @@ module.exports = class LexisPlugin extends Plugin {
   vocabTagSet() { return new Set(this.parseTags(this.settings.vocabTags)); }
   // 词典表的文件夹列表 = 文件夹来源的单一真相
   dictFolders() { return (this.settings.dicts || []).map((d) => this.normalizeFolder(d && d.folder)).filter(Boolean); }
+  // 一条词的最终高亮色(优先级:标签规则 > 词典色 > 全局兜底),返回解析后的真实 hex —— 网页和 ob 同一套优先级
+  colorForEntry(e) {
+    let color = this.effectiveHighlightColor();           // 全局兜底(留空=主题色,已解析)
+    const dc = this.dictColorForFile(e && e.file);         // 词典映射
+    if (dc) color = dc;
+    if (e && e.tags && this.settings.tagRules && this.settings.tagRules.length) { // 标签映射(最高)
+      const rule = this.settings.tagRules.find((r) => r.tag && e.tags.has(r.tag.toLowerCase()));
+      if (rule && rule.color) color = rule.color;
+    }
+    return color;
+  }
+  // 一条词的最终线型(标签规则可覆盖全局)
+  styleKindForEntry(e) {
+    let s = this.settings.highlightStyle || "wavy";
+    if (e && e.tags && this.settings.tagRules && this.settings.tagRules.length) {
+      const rule = this.settings.tagRules.find((r) => r.tag && e.tags.has(r.tag.toLowerCase()));
+      if (rule && rule.style) s = rule.style;
+    }
+    return s;
+  }
   // 全局高亮色的"实际值":留空(=主题强调色)时解析成真实 hex 发给网页,否则网页只能看到 var(--text-accent) 这种 ob 专用变量、读不到
   effectiveHighlightColor() {
     const c = (this.settings.highlightColor || "").trim();
