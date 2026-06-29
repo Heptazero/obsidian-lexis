@@ -19,6 +19,12 @@
 
 把本仓库克隆/解压到你的库 `<vault>/.obsidian/plugins/lexis/`,在 Obsidian 第三方插件里启用。
 
+## 隐私与本机桥接 / Privacy & local bridge
+
+可选的配套浏览器扩展通过本机桥接通信:插件**只在 `127.0.0.1:45945` 监听**(不对外网开放)、**token 鉴权**、**数据不出本机**。桌面端才会启动该服务(`require("http")` 在移动端缺失时自动跳过);不装扩展、不用这功能则桥接根本不启动。
+
+> The optional companion browser extension talks to the plugin over a local bridge that listens **only on `127.0.0.1:45945`**, requires **token auth**, and **never sends your data off your machine**. The server starts on desktop only and is skipped entirely if you don't use the feature.
+
 ## 开发笔记
 
 详细的分阶段开发记录见 [LOG.md](LOG.md)。

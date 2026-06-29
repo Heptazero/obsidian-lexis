@@ -3,7 +3,7 @@
   "name": "Lexis",
   "version": "1.0.13",
   "minAppVersion": "1.4.0",
-  "description": "把指定文件夹里的笔记标题当作单词库:全文高亮、悬浮释义、间隔重复背诵、出处自动聚合与热力图。",
+  "description": "Turn note titles in a folder into your word bank: in-text highlighting, hover definitions, FSRS spaced-repetition review, auto-collected occurrences, and a review heatmap.",
   "author": "Hz & Claude",
   "isDesktopOnly": false
 }
