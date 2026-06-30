@@ -477,6 +477,12 @@
 - **开关**:设置「PDF 里也高亮」(`enablePdfHighlight`,默认开),关掉即 teardown observer + 清掉已高亮。
 - 待 Hz 在真 PDF 上验:高亮是否出现、悬浮、点击跳转、翻页后仍在、缩放不串位。阶段 3(PDF 划词加词,复用药丸)等本阶段验完再上。
 
+## 调整:PDF 高亮改用半透明背景"荧光笔"(插件 v1.0.17)
+- **反馈(Hz)**:PDF 高亮颜色很浅、个别区域过长。
+- **诊断**:① 浅——默认色是 `var(--text-accent)`(偏柔)+ 细波浪线,在 PDF 上本就不显;② 过长——pdf.js 对个别 span 用 `transform:scaleX(k)` 拉伸(两端对齐/字距异常),高亮随字一起被拉宽,细下划线尤其扎眼。
+- **改法**:`inlineStyleForEntry(entry, opts)` 加 `opts.pdf` 分支 → PDF 专用样式 `background-color: color-mix(... 40%, transparent)`(半透明荧光笔,贴字、显眼),不再用细波浪线。`wrapMatchesInElement` 透传 styleOpts,`scanPdfLayer` 传 `{pdf:true}`。颜色仍走词典色/标签色优先级。
+- **残留**:scaleX 拉伸是 pdf.js 排版本身导致,背景版比下划线版观感好很多但极个别仍可能略宽;若仍介意,后续可改"按 getClientRects 画绝对定位叠加块"(更准但更重),暂不做。
+
 ## 想法暂存(Hz 提出,暂不做)
 - (已实现 ↑)~~**标签识别为单词**:除了扫文件夹,再支持"带某标签的笔记也算单词来源"。~~ → 本轮已做,见上"地基"。
 

@@ -773,7 +773,7 @@ module.exports = class LexisPlugin extends Plugin {
     }
     return best;
   }
-  inlineStyleForEntry(entry) {
+  inlineStyleForEntry(entry, opts) {
     let color = this.settings.highlightColor || "var(--text-accent)";
     let styleKind = this.settings.highlightStyle || "wavy";
     // 优先级:标签规则 > 词典色 > 全局色(和网页端 inlineStyleFor 完全一致)
@@ -783,6 +783,8 @@ module.exports = class LexisPlugin extends Plugin {
       const rule = this.settings.tagRules.find((r) => r.tag && entry.tags.has(r.tag.toLowerCase()));
       if (rule) { if (rule.color) color = rule.color; if (rule.style) styleKind = rule.style; }
     }
+    // PDF:文字层文字透明,细波浪线又浅又容易随 pdf.js 拉伸显得过长 → 改用半透明背景"荧光笔",显眼且贴字
+    if (opts && opts.pdf) return `background-color:${this.applyAlpha(color, 0.4)};border-radius:2px;`;
     const c = this.applyAlpha(color, this.settings.highlightOpacity);
     if (styleKind === "background") return `background-color:${c};border-radius:3px;padding:0 1px;text-decoration:none;`;
     const line = styleKind === "underline" ? "solid" : "wavy";
@@ -806,7 +808,7 @@ module.exports = class LexisPlugin extends Plugin {
   }
   // 把 el 内文本节点里命中词库的片段包成 <span class="lexis-hl">(供阅读模式 + PDF 复用)。
   // rejectSelector:父元素命中则跳过该文本节点(避免重复包/包进代码块等)。
-  wrapMatchesInElement(el, rejectSelector) {
+  wrapMatchesInElement(el, rejectSelector, styleOpts) {
     if (!this._pattern || !this.index.size) return;
     const regex = new RegExp(this._pattern, "gi");
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
@@ -834,7 +836,7 @@ module.exports = class LexisPlugin extends Plugin {
         span.className = "lexis-hl";
         span.textContent = m[0];
         span.dataset.lexisKey = m[0].toLowerCase();
-        span.setAttribute("style", this.inlineStyleForEntry(entry));
+        span.setAttribute("style", this.inlineStyleForEntry(entry, styleOpts));
         frag.appendChild(span);
         last = m.index + m[0].length;
         if (m[0].length === 0) regex.lastIndex++;
@@ -879,7 +881,7 @@ module.exports = class LexisPlugin extends Plugin {
   }
   scanPdfLayer(layer) {
     if (!this.settings.enablePdfHighlight || !this.settings.enableHighlight) return;
-    this.wrapMatchesInElement(layer, ".lexis-hl,.lexis-popover");
+    this.wrapMatchesInElement(layer, ".lexis-hl,.lexis-popover", { pdf: true });
   }
   teardownPdfHighlight() {
     if (this._pdfObserver) { this._pdfObserver.disconnect(); this._pdfObserver = null; }
