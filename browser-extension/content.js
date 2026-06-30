@@ -21,6 +21,9 @@
   let pop = null, hideTimer = null, currentSpan = null;
 
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // 词边界(支持中文):仅当词以英文字母/数字/下划线开头或结尾时加 ASCII 边界;中文不加,否则 \b 永不命中
+  const boundedSrc = (w) => (/^[A-Za-z0-9_]/.test(w) ? "(?<![A-Za-z0-9_])" : "") + esc(w) + (/[A-Za-z0-9_]$/.test(w) ? "(?![A-Za-z0-9_])" : "");
+  const buildRe = (keys) => (keys.length ? new RegExp(keys.map(boundedSrc).join("|"), "gi") : null);
 
   // ---- 句子抽取(按标点切,跟 Obsidian 端「出现过的地方」一致) ----
   const SENT_SEP = /[.!?。!?…\n]/;
@@ -82,7 +85,7 @@
           if (!keySet.has(ak)) {
             keySet.add(ak);
             const keys = [...keySet].sort((a, b) => b.length - a.length);
-            regex = keys.length ? new RegExp("\\b(?:" + keys.map(esc).join("|") + ")\\b", "gi") : null;
+            regex = buildRe(keys);
             if (cfg && cfg.highlight) { scan(document.body); startObserver(); }
           }
         }
@@ -127,7 +130,7 @@
     const keys = [];
     for (const x of words || []) {
       const k = (x.k || "").toLowerCase();
-      if (k.length < 2) continue;
+      if (k.length < 2 && !/[^\x00-\x7f]/.test(k)) continue; // 英文单字母跳过,单个汉字保留
       const tags = (x.t || []).map((t) => String(t).toLowerCase());
       keyTags.set(k, tags);
       if (x.f) keyFolder.set(k, x.f);
@@ -138,7 +141,7 @@
       keys.push(k);
     }
     keys.sort((a, b) => b.length - a.length);
-    regex = keys.length ? new RegExp("\\b(?:" + keys.map(esc).join("|") + ")\\b", "gi") : null;
+    regex = buildRe(keys);
   }
 
   // 某个词所属词典(文件夹)的专属高亮色;支持子文件夹归入父词典,取最长匹配
@@ -225,7 +228,7 @@
     if (!regex || !(cfg && cfg.highlight)) return;
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
       acceptNode(n) {
-        if (!n.nodeValue || n.nodeValue.length < 2) return NodeFilter.FILTER_REJECT;
+        if (!n.nodeValue || (n.nodeValue.length < 2 && !/[^\x00-\x7f]/.test(n.nodeValue))) return NodeFilter.FILTER_REJECT;
         if (skip(n)) return NodeFilter.FILTER_REJECT;
         regex.lastIndex = 0;
         if (!regex.test(n.nodeValue)) return NodeFilter.FILTER_REJECT;

@@ -54,6 +54,13 @@ const DEFAULT_SETTINGS = {
 
 // ---------- 小工具 ----------
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// 词边界(支持中文):只有当词以英文字母/数字/下划线开头或结尾时才加 ASCII 边界
+// (避免 cat 命中 category);中文/日文等无空格语言不加边界,否则 \b 永不命中。
+const boundedSource = (word) => {
+  const lb = /^[A-Za-z0-9_]/.test(word) ? "(?<![A-Za-z0-9_])" : "";
+  const rb = /[A-Za-z0-9_]$/.test(word) ? "(?![A-Za-z0-9_])" : "";
+  return lb + escapeRe(word) + rb;
+};
 const escHtml = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const round2 = (x) => Math.round(x * 100) / 100;
 function cssColorToHex(c) {
@@ -727,10 +734,11 @@ module.exports = class LexisPlugin extends Plugin {
     return this.stats;
   }
   buildMatcher() {
-    const keys = [...this.index.keys()].filter((k) => k.length >= 2);
+    // 英文单字母(a/I)噪声大,过滤;但单个汉字等非 ASCII 字符常是有意义的词,保留
+    const keys = [...this.index.keys()].filter((k) => k.length >= 2 || /[^\x00-\x7f]/.test(k));
     keys.sort((a, b) => b.length - a.length);
     if (!keys.length) { this._pattern = null; return; }
-    this._pattern = "\\b(?:" + keys.map(escapeRe).join("|") + ")\\b";
+    this._pattern = keys.map(boundedSource).join("|");
   }
   updateStatusBar() {
     if (!this.statusBarEl) return;
@@ -939,7 +947,7 @@ module.exports = class LexisPlugin extends Plugin {
     const key = word.toLowerCase();
     if (this._occCache.has(key)) return this._occCache.get(key);
     const limit = this.settings.occurrenceLimit || 6;
-    const re = new RegExp("\\b" + escapeRe(word) + "\\b", "i");
+    const re = new RegExp(boundedSource(word), "i");
     const scope = this.parseFolders(this.settings.occurrenceFolders);
     const files = this.app.vault.getMarkdownFiles().filter((f) => !this.inVocabFolder(f.path) && this.inScope(f.path, scope));
     const results = [];
@@ -1126,7 +1134,7 @@ module.exports = class LexisPlugin extends Plugin {
       return line.replace(/^>\s*/, "").replace(/\s*——\s*\[\[[^\]]*\]\].*$/, "").trim();
     } catch (_e) { return ""; }
   }
-  buildCloze(sentence, word) { return sentence.replace(new RegExp("\\b" + escapeRe(word) + "\\b", "ig"), "______"); }
+  buildCloze(sentence, word) { return sentence.replace(new RegExp(boundedSource(word), "ig"), "______"); }
   humanInterval(days) {
     if (days < 1) return "<1天";
     if (days < 30) return days + "天";
@@ -1376,7 +1384,7 @@ module.exports = class LexisPlugin extends Plugin {
     try {
       const ed = leaf.view && leaf.view.editor;
       if (ed && word) {
-        const m = new RegExp("\\b" + escapeRe(word) + "\\b", "i").exec(ed.getValue());
+        const m = new RegExp(boundedSource(word), "i").exec(ed.getValue());
         if (m) { const pos = ed.offsetToPos(m.index); ed.setCursor(pos); ed.scrollIntoView({ from: pos, to: ed.offsetToPos(m.index + word.length) }, true); }
       }
     } catch (_e) {}
