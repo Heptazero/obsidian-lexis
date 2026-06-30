@@ -861,6 +861,12 @@ module.exports = class LexisPlugin extends Plugin {
     if (this._pdfObserver) { this._pdfObserver.disconnect(); this._pdfObserver = null; }
     if (this._pdfRaf) { window.cancelAnimationFrame(this._pdfRaf); this._pdfRaf = 0; }
     if (!this.settings.enablePdfHighlight || typeof MutationObserver === "undefined") return;
+    if (!this._pdfStyleEl) {
+      this._pdfStyleEl = document.createElement("style");
+      this._pdfStyleEl.id = "lexis-pdf-style";
+      this._pdfStyleEl.textContent = ".textLayer{opacity:1 !important;}";
+      document.head.appendChild(this._pdfStyleEl);
+    }
     this._pdfPending = new Set();
     const flush = () => {
       this._pdfRaf = 0;
@@ -892,6 +898,7 @@ module.exports = class LexisPlugin extends Plugin {
   teardownPdfHighlight() {
     if (this._pdfObserver) { this._pdfObserver.disconnect(); this._pdfObserver = null; }
     if (this._pdfRaf) { window.cancelAnimationFrame(this._pdfRaf); this._pdfRaf = 0; }
+    if (this._pdfStyleEl) { this._pdfStyleEl.remove(); this._pdfStyleEl = null; }
   }
   // 词库/配色变化后,清掉 PDF 里旧高亮再重扫(.lexis-hl 拆回纯文本)
   rescanPdfLayers() {
