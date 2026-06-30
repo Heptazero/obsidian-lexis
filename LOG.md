@@ -468,6 +468,15 @@
 - **单字**:英文单字母(a/I)仍过滤(噪声),但**单个汉字等非 ASCII 字符保留**(常是有意义的词):`k.length>=2 || /[^\x00-\x7f]/.test(k)`;网页文本节点扫描同理放行单个非 ASCII 字符。
 - 需重载 Lexis;网页端需重载扩展 + 刷新页面。
 
+## feat:PDF 高亮(阶段1)——钩 pdf.js 文字层,白嫖悬浮+跳转(插件 v1.0.16)
+- **可行性核对**:ob 内置 PDF=pdf.js,`.textLayer` 在主 DOM 无 iframe;文字层文字 `color:transparent` 只供选中。我们把命中词包成 `.lexis-hl`——因为 `inlineStyleForEntry` 的下划线/背景**显式带颜色**(`text-decoration:underline wavy <color>`),透明文字上也看得见。
+- **复用**:抽出 `wrapMatchesInElement(el, rejectSelector)`(阅读模式高亮和 PDF 共用同一套匹配/包裹)。PDF 包出来的 `.lexis-hl` 带 `data-lexis-key` → **悬浮卡 + 点击跳转直接白嫖** `document` 级监听,零额外代码(阶段 2 等于免费拿到)。
+- **翻页/缩放**:pdf.js 会重建文字层 → `setupPdfHighlight()` 用 `MutationObserver`(观察 body childList/subtree)收集新出现的 `.textLayer`,`requestAnimationFrame` 去抖后 `scanPdfLayer`。`.lexis-hl` 在 rejectSelector 里 → 重扫不会重复包。
+- **配色/词库变化**:`refreshAllViews()` 末尾调 `rescanPdfLayers()`(先把旧 `.lexis-hl` 拆回文本 + `normalize()`,再重扫)。
+- **限制**:① 跨 pdf.js span 边界的词暂不处理(绝大多数词在单个 span 内);② 扫描版/纯图片 PDF 无文字层→无效(优雅降级);③ 整块 try/catch,pdf.js 内部 API 变了也不连累其它功能。
+- **开关**:设置「PDF 里也高亮」(`enablePdfHighlight`,默认开),关掉即 teardown observer + 清掉已高亮。
+- 待 Hz 在真 PDF 上验:高亮是否出现、悬浮、点击跳转、翻页后仍在、缩放不串位。阶段 3(PDF 划词加词,复用药丸)等本阶段验完再上。
+
 ## 想法暂存(Hz 提出,暂不做)
 - (已实现 ↑)~~**标签识别为单词**:除了扫文件夹,再支持"带某标签的笔记也算单词来源"。~~ → 本轮已做,见上"地基"。
 

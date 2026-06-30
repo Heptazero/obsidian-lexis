@@ -50,6 +50,8 @@ const DEFAULT_SETTINGS = {
   pillFolderPicker: false,
   // 在 Obsidian 笔记里划词后,选区旁冒出"+ 加入词库"浮动药丸(阅读/编辑两种模式都生效)
   selectionPill: true,
+  // 在 Obsidian 内置 PDF 阅读器里也高亮词库词(钩 pdf.js 文字层;扫描版无文字层则无效)
+  enablePdfHighlight: true,
 };
 
 // ---------- 小工具 ----------
@@ -136,6 +138,7 @@ module.exports = class LexisPlugin extends Plugin {
     this.registerMarkdownCodeBlockProcessor("lexis", (src, el, ctx) => this.renderLexisBlock(el, ctx, src));
     this.registerMarkdownCodeBlockProcessor("lexis-heatmap", (src, el) => this.renderHeatmap(el));
     this.setupLiveExtension();
+    this.setupPdfHighlight();
 
     this.registerDomEvent(document, "mouseover", (e) => this.onMouseOver(e));
     this.registerDomEvent(document, "click", (e) => this.onClick(e));
@@ -193,6 +196,7 @@ module.exports = class LexisPlugin extends Plugin {
     window.clearTimeout(this._hideTimer);
     this.removePopover();
     this.removeSelPill();
+    this.teardownPdfHighlight();
     this.stopBridge();
   }
 
@@ -790,6 +794,7 @@ module.exports = class LexisPlugin extends Plugin {
       if (pm && typeof pm.rerender === "function") pm.rerender(true);
     });
     if (this.liveAvailable) this.app.workspace.updateOptions();
+    this.rescanPdfLayers();
   }
 
   // ---------- 阅读模式高亮 ----------
@@ -797,12 +802,18 @@ module.exports = class LexisPlugin extends Plugin {
     if (!this.settings.enableHighlight || !this._pattern || !this.index.size) return;
     if (el.closest && el.closest(".lexis-popover")) return;
     if (ctx && ctx.sourcePath && this.inVocabFolder(ctx.sourcePath)) return;
+    this.wrapMatchesInElement(el, "code,pre,a,.lexis-hl,.lexis-popover,.math,.tag");
+  }
+  // 把 el 内文本节点里命中词库的片段包成 <span class="lexis-hl">(供阅读模式 + PDF 复用)。
+  // rejectSelector:父元素命中则跳过该文本节点(避免重复包/包进代码块等)。
+  wrapMatchesInElement(el, rejectSelector) {
+    if (!this._pattern || !this.index.size) return;
     const regex = new RegExp(this._pattern, "gi");
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
       acceptNode: (node) => {
         if (!node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
         const p = node.parentElement;
-        if (!p || p.closest("code,pre,a,.lexis-hl,.lexis-popover,.math,.tag")) return NodeFilter.FILTER_REJECT;
+        if (!p || (rejectSelector && p.closest(rejectSelector))) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       },
     });
@@ -831,6 +842,58 @@ module.exports = class LexisPlugin extends Plugin {
       if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
       node.parentNode.replaceChild(frag, node);
     }
+  }
+
+  // ---------- PDF 高亮(钩 pdf.js 文字层) ----------
+  // ob 内置 PDF 阅读器 = pdf.js,.textLayer 在主 DOM(无 iframe),文字层文字是透明的、
+  // 仅供选中复制;我们把命中词包成 .lexis-hl(下划线/背景色显式带颜色,所以透明文字上也看得见),
+  // 顺带白嫖现成的 document 级 mouseover/click → 悬浮卡 + 跳转。翻页/缩放时 pdf.js 重建文字层,
+  // 用 MutationObserver 重扫;.lexis-hl 在 rejectSelector 里,重扫不会重复包。
+  setupPdfHighlight() {
+    if (this._pdfObserver) { this._pdfObserver.disconnect(); this._pdfObserver = null; }
+    if (this._pdfRaf) { window.cancelAnimationFrame(this._pdfRaf); this._pdfRaf = 0; }
+    if (!this.settings.enablePdfHighlight || typeof MutationObserver === "undefined") return;
+    this._pdfPending = new Set();
+    const flush = () => {
+      this._pdfRaf = 0;
+      const items = [...this._pdfPending]; this._pdfPending.clear();
+      for (const layer of items) { try { if (layer.isConnected) this.scanPdfLayer(layer); } catch (_e) {} }
+    };
+    this._pdfObserver = new MutationObserver((muts) => {
+      try {
+        for (const mu of muts) {
+          for (const node of mu.addedNodes) {
+            if (!node || node.nodeType !== 1) continue;
+            if (node.classList && node.classList.contains("textLayer")) this._pdfPending.add(node);
+            else if (node.querySelectorAll) node.querySelectorAll(".textLayer").forEach((l) => this._pdfPending.add(l));
+            const layer = node.closest && node.closest(".textLayer");
+            if (layer) this._pdfPending.add(layer);
+          }
+        }
+      } catch (_e) {}
+      if (this._pdfPending.size && !this._pdfRaf) this._pdfRaf = window.requestAnimationFrame(flush);
+    });
+    this._pdfObserver.observe(document.body, { childList: true, subtree: true });
+    // 首次:扫描已经打开的 PDF
+    try { document.querySelectorAll(".textLayer").forEach((l) => this.scanPdfLayer(l)); } catch (_e) {}
+  }
+  scanPdfLayer(layer) {
+    if (!this.settings.enablePdfHighlight || !this.settings.enableHighlight) return;
+    this.wrapMatchesInElement(layer, ".lexis-hl,.lexis-popover");
+  }
+  teardownPdfHighlight() {
+    if (this._pdfObserver) { this._pdfObserver.disconnect(); this._pdfObserver = null; }
+    if (this._pdfRaf) { window.cancelAnimationFrame(this._pdfRaf); this._pdfRaf = 0; }
+  }
+  // 词库/配色变化后,清掉 PDF 里旧高亮再重扫(.lexis-hl 拆回纯文本)
+  rescanPdfLayers() {
+    try {
+      document.querySelectorAll(".textLayer .lexis-hl").forEach((s) => {
+        const t = document.createTextNode(s.textContent || "");
+        s.parentNode && s.parentNode.replaceChild(t, s);
+      });
+      document.querySelectorAll(".textLayer").forEach((l) => { l.normalize(); this.scanPdfLayer(l); });
+    } catch (_e) {}
   }
 
   // ---------- 实时预览高亮 ----------
@@ -1843,6 +1906,8 @@ class LexisSettingTab extends PluginSettingTab {
       .addToggle((t) => t.setValue(this.plugin.settings.enableLivePreview).setDisabled(!this.plugin.liveAvailable).onChange(async (v) => { this.plugin.settings.enableLivePreview = v; await save(); refresh(); }));
     new Setting(containerEl).setName("划词冒出「加入词库」药丸").setDesc("在笔记里(阅读/编辑模式)选中一段文字,松开鼠标后选区旁出现浮动按钮,点一下即建词并记出处。")
       .addToggle((t) => t.setValue(this.plugin.settings.selectionPill).onChange(async (v) => { this.plugin.settings.selectionPill = v; await save(); if (!v) this.plugin.removeSelPill(); }));
+    new Setting(containerEl).setName("PDF 里也高亮").setDesc("在 Obsidian 内置 PDF 阅读器里高亮词库词,可悬浮看释义、点击跳转。仅对有文字层的 PDF 有效(扫描版/纯图片 PDF 无效)。")
+      .addToggle((t) => t.setValue(this.plugin.settings.enablePdfHighlight).onChange(async (v) => { this.plugin.settings.enablePdfHighlight = v; await save(); if (v) this.plugin.setupPdfHighlight(); else { this.plugin.teardownPdfHighlight(); this.plugin.rescanPdfLayers(); } }));
     new Setting(containerEl).setName("默认高亮线型").setDesc("没被标签规则覆盖时使用。")
       .addDropdown((dd) => dd.addOption("wavy", "波浪下划线").addOption("underline", "实线下划线").addOption("background", "背景色").setValue(this.plugin.settings.highlightStyle).onChange(async (v) => { this.plugin.settings.highlightStyle = v; await save(); refresh(); }));
     new Setting(containerEl).setName("默认高亮颜色").setDesc("点色块选色;右侧按钮恢复主题色。")
