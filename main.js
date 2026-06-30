@@ -48,6 +48,8 @@ const DEFAULT_SETTINGS = {
   bridgeToken: "",
   // 划词 pill 上是否显示"文件夹/词典"选择段(默认关,避免拥挤;关掉则新词进第一个词典,可在悬浮卡里改)
   pillFolderPicker: false,
+  // 在 Obsidian 笔记里划词后,选区旁冒出"+ 加入词库"浮动药丸(阅读/编辑两种模式都生效)
+  selectionPill: true,
 };
 
 // ---------- 小工具 ----------
@@ -130,7 +132,10 @@ module.exports = class LexisPlugin extends Plugin {
 
     this.registerDomEvent(document, "mouseover", (e) => this.onMouseOver(e));
     this.registerDomEvent(document, "click", (e) => this.onClick(e));
-    this.registerDomEvent(window, "scroll", (e) => { if (this._popover && e.target instanceof Node && this._popover.contains(e.target)) return; this.removePopover(); }, { capture: true });
+    this.registerDomEvent(window, "scroll", (e) => { if (this._popover && e.target instanceof Node && this._popover.contains(e.target)) return; this.removePopover(); this.removeSelPill(); }, { capture: true });
+    // 划词添加:松开鼠标后,若选区在笔记里则冒出"+ 加入词库"药丸
+    this.registerDomEvent(document, "mouseup", (e) => this.maybeShowSelPill(e));
+    this.registerDomEvent(document, "keydown", (e) => { if (e.key === "Escape") this.removeSelPill(); });
 
     this.app.workspace.onLayoutReady(() => this.rebuildIndex(false));
     this.registerEvent(this.app.vault.on("create", (f) => this.maybeRebuild(f)));
@@ -180,6 +185,7 @@ module.exports = class LexisPlugin extends Plugin {
     window.clearTimeout(this._rebuildTimer);
     window.clearTimeout(this._hideTimer);
     this.removePopover();
+    this.removeSelPill();
     this.stopBridge();
   }
 
@@ -1315,6 +1321,52 @@ module.exports = class LexisPlugin extends Plugin {
     if (this._popoverComp) { this._popoverComp.unload(); this._popoverComp = null; }
     if (this._popover) { this._popover.remove(); this._popover = null; }
   }
+  // ---------- 划词添加药丸(普通笔记,阅读/编辑两种模式) ----------
+  removeSelPill() { if (this._selPill) { this._selPill.remove(); this._selPill = null; } }
+  maybeShowSelPill(e) {
+    if (!this.settings.selectionPill) return;
+    const tgt = e && e.target;
+    // 点到自己的 UI(药丸/悬浮卡/菜单)不处理,避免抢选区
+    if (tgt && tgt.closest && tgt.closest(".lexis-sel-pill, .lexis-popover, .menu")) return;
+    let sel, text;
+    try { sel = window.getSelection(); text = sel ? sel.toString().trim() : ""; } catch (_e) { return; }
+    if (!text || text.length > 60 || /[\n\r]/.test(text)) { this.removeSelPill(); return; }
+    // 选区必须落在 Markdown 笔记内容里(编辑或阅读视图),其它面板/PDF/设置一律不弹
+    const node = sel.anchorNode;
+    const host = node ? (node.nodeType === 1 ? node : node.parentElement) : null;
+    if (!host || !host.closest || !host.closest(".markdown-source-view, .markdown-reading-view, .markdown-preview-view")) { this.removeSelPill(); return; }
+    let rect; try { rect = sel.getRangeAt(0).getBoundingClientRect(); } catch (_e) { return; }
+    if (!rect || (!rect.width && !rect.height)) { this.removeSelPill(); return; }
+    this.removeSelPill();
+    const known = this.index.has(text.toLowerCase());
+    const pill = document.body.createDiv({ cls: "lexis-sel-pill" });
+    pill.setText(known ? "📖 已有,打开" : "➕ 加入词库");
+    // 阻止 mousedown 收起选区/夺焦
+    pill.addEventListener("mousedown", (ev) => ev.preventDefault());
+    pill.addEventListener("click", (ev) => {
+      ev.preventDefault(); ev.stopPropagation();
+      const dicts = this.dictFolders();
+      if (!known && dicts.length > 1) {
+        const menu = new obsidian.Menu();
+        for (const f of dicts) menu.addItem((it) => it.setTitle(f || "(库根目录)").setIcon("book-plus").onClick(() => this.addFromPill(text, f)));
+        menu.showAtPosition({ x: ev.clientX, y: ev.clientY });
+      } else {
+        this.addFromPill(text);
+      }
+    });
+    // 定位:选区下方略偏左;贴边时夹回视口
+    const top = Math.min(rect.bottom + 6, window.innerHeight - 36);
+    const left = Math.max(6, Math.min(rect.left, window.innerWidth - pill.offsetWidth - 6));
+    pill.style.top = top + "px";
+    pill.style.left = left + "px";
+    this._selPill = pill;
+  }
+  addFromPill(text, folder) {
+    const view = this.app.workspace.getActiveViewOfType(obsidian.MarkdownView);
+    const editor = (view && view.getMode && view.getMode() === "source" && view.editor) ? view.editor : null;
+    this.removeSelPill();
+    this.addWordFromSelection(text, editor, view, folder);
+  }
   openAndClose(file) { this.app.workspace.getLeaf(false).openFile(file); this.removePopover(); }
   async openOccurrence(file, word) {
     let leaf = this._occLeaf;
@@ -1781,6 +1833,8 @@ class LexisSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("启用高亮").addToggle((t) => t.setValue(this.plugin.settings.enableHighlight).onChange(async (v) => { this.plugin.settings.enableHighlight = v; await save(); refresh(); }));
     new Setting(containerEl).setName("实时预览也高亮(编辑模式)").setDesc(this.plugin.liveAvailable ? "编辑时也显示高亮。" : "⚠️ 当前环境无法加载 CodeMirror,不可用。")
       .addToggle((t) => t.setValue(this.plugin.settings.enableLivePreview).setDisabled(!this.plugin.liveAvailable).onChange(async (v) => { this.plugin.settings.enableLivePreview = v; await save(); refresh(); }));
+    new Setting(containerEl).setName("划词冒出「加入词库」药丸").setDesc("在笔记里(阅读/编辑模式)选中一段文字,松开鼠标后选区旁出现浮动按钮,点一下即建词并记出处。")
+      .addToggle((t) => t.setValue(this.plugin.settings.selectionPill).onChange(async (v) => { this.plugin.settings.selectionPill = v; await save(); if (!v) this.plugin.removeSelPill(); }));
     new Setting(containerEl).setName("默认高亮线型").setDesc("没被标签规则覆盖时使用。")
       .addDropdown((dd) => dd.addOption("wavy", "波浪下划线").addOption("underline", "实线下划线").addOption("background", "背景色").setValue(this.plugin.settings.highlightStyle).onChange(async (v) => { this.plugin.settings.highlightStyle = v; await save(); refresh(); }));
     new Setting(containerEl).setName("默认高亮颜色").setDesc("点色块选色;右侧按钮恢复主题色。")

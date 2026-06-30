@@ -477,3 +477,23 @@ body.is-phone
         font-size: 40px;
     }
 }
+
+/* 划词添加浮动药丸 */
+.lexis-sel-pill {
+    position: fixed;
+    z-index: var(--layer-popover, 50);
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.4;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+}
+.lexis-sel-pill:hover {
+    filter: brightness(1.08);
+}

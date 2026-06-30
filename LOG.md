@@ -454,6 +454,13 @@
 - **修法**:改用 `new obsidian.ColorComponent(row)`(和「按标签着色」同一控件),`onChange` 正常写入 `d.color`;重置按钮(icon `reset`)`setValue(全局/主题色)` + `d.color=""`,**重置=恢复跟随全局主题色**。淡色表示"未设(跟随全局)"。
 - 服务端 `colorForEntry/dictColorForFile/dictColorMap` 逻辑已单测验证正确(含子文件夹前缀匹配、标签规则覆盖词典色)。本次只是控件存值的坑。
 
+## feat:普通笔记划词冒出「加入词库」药丸(插件 v1.0.14)
+- **背景**:之前 ob 里加词只有右键菜单;网页端早有划词药丸。这是「ob 内 PDF 高亮+悬浮+划词」大计划的**阶段 0**——先把"选词药丸 UI"在普通笔记里落地,后面 PDF 划词加词直接复用。
+- **做法**:`document` 上挂 `mouseup`→`maybeShowSelPill(e)`:选区 trim 后 1-60 字、无换行、且 `anchorNode` 落在 `.markdown-source-view/.markdown-reading-view/.markdown-preview-view` 内才弹;用 `range.getBoundingClientRect()` 定位到选区下方(贴边夹回视口)。药丸 `mousedown` `preventDefault` 防止收起选区/夺焦。点击→若该词已存在显示「📖 已有,打开」,否则「➕ 加入词库」;多词典时弹 `obsidian.Menu` 选文件夹,否则直接进第一个词典。
+- **复用**:实际建词全走现成的 `addWordFromSelection(word, editor, view, folder)`(含模板/出处/重名处理),药丸只负责取选区文本 + 当前视图的 editor(source 模式才传)。`Escape`/滚动/再次松开鼠标都会收起。
+- **开关**:设置「划词冒出「加入词库」药丸」(`selectionPill`,默认开)。
+- **PDF 大计划备忘(已与另一 AI 核对)**:ob 的 PDF 阅读器 = 内嵌 pdf.js,`.textLayer` 在主 DOM 无 iframe,**可直接包 `.lexis-hl`**;但文字层文字 `color:transparent`,波浪/下划线得显式给 `text-decoration-color`(用词典/标签色),否则看不见;翻页 textLayer 全量重建→`MutationObserver` 重扫;扫描版无文字层→不支持(降级)。阶段:1 高亮、2 悬浮+跳转(白嫖 `.lexis-hl` 委托)、3 PDF 划词加词(复用本阶段药丸)。
+
 ## 想法暂存(Hz 提出,暂不做)
 - (已实现 ↑)~~**标签识别为单词**:除了扫文件夹,再支持"带某标签的笔记也算单词来源"。~~ → 本轮已做,见上"地基"。
 
