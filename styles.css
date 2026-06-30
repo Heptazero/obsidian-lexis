@@ -497,3 +497,11 @@ body.is-phone
 .lexis-sel-pill:hover {
     filter: brightness(1.08);
 }
+
+/* PDF 高亮独立层:叠在 Canvas 上、textLayer 下,不沾 textLayer 的 opacity */
+.lexis-pdf-hl-layer {
+    pointer-events: none;
+}
+.lexis-pdf-hl {
+    cursor: pointer;
+}

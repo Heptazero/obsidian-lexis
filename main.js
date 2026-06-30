@@ -783,14 +783,9 @@ module.exports = class LexisPlugin extends Plugin {
       const rule = this.settings.tagRules.find((r) => r.tag && entry.tags.has(r.tag.toLowerCase()));
       if (rule) { if (rule.color) color = rule.color; if (rule.style) styleKind = rule.style; }
     }
-    // PDF:文字层文字透明,细波浪线又浅又容易随 pdf.js 拉伸显得过长 → 改用半透明背景"荧光笔"。
-    // 透明度跟随"高亮透明度"设置,但封顶 0.6:高亮在 PDF 页面图之上、文字透明,全不透明会盖住字。
-    // 显式 text-decoration:none 去掉基类 .lexis-hl 残留的波浪下划线(否则下方 3px 处有条线,像错位)。
-    if (opts && opts.pdf) {
-      const o = this.settings.highlightOpacity;
-      const alpha = Math.max(0.15, Math.min(0.6, (o == null ? 1 : o) * 0.6));
-      return `background-color:${this.applyAlpha(color, alpha)};border-radius:2px;text-decoration:none;`;
-    }
+    // PDF:文字层 opacity 0.2,内嵌高亮不可见 → 单独建一层叠在 Canvas 之上、textLayer 之下,
+    // 用内联 .lexis-hl 隐形做事件代理,视觉高亮画在独立 overlay 层里。
+    if (opts && opts.pdf) return "text-decoration:none;";
     const c = this.applyAlpha(color, this.settings.highlightOpacity);
     if (styleKind === "background") return `background-color:${c};border-radius:3px;padding:0 1px;text-decoration:none;`;
     const line = styleKind === "underline" ? "solid" : "wavy";
@@ -861,13 +856,6 @@ module.exports = class LexisPlugin extends Plugin {
     if (this._pdfObserver) { this._pdfObserver.disconnect(); this._pdfObserver = null; }
     if (this._pdfRaf) { window.cancelAnimationFrame(this._pdfRaf); this._pdfRaf = 0; }
     if (!this.settings.enablePdfHighlight || typeof MutationObserver === "undefined") return;
-    if (!this._pdfStyleEl) {
-      this._pdfStyleEl = document.createElement("style");
-      this._pdfStyleEl.id = "lexis-pdf-style";
-      this._pdfStyleEl.textContent = ".textLayer::selection{background:rgba(100,149,237,0.25) !important;}";
-    }
-    this._pdfStyleEl.remove();
-    document.body.appendChild(this._pdfStyleEl);
     this._pdfPending = new Set();
     const flush = () => {
       this._pdfRaf = 0;
@@ -894,13 +882,57 @@ module.exports = class LexisPlugin extends Plugin {
   }
   scanPdfLayer(layer) {
     if (!this.settings.enablePdfHighlight || !this.settings.enableHighlight) return;
-    layer.style.setProperty("opacity", "1", "important");
+    // 1. 在 textLayer 里注入隐形 .lexis-hl(仅事件代理,无视觉样式)
     this.wrapMatchesInElement(layer, ".lexis-hl,.lexis-popover", { pdf: true });
+    // 2. 建独立高亮 overlay,叠在 Canvas 上、textLayer 下(不沾 textLayer 的 opacity)
+    const page = layer.parentElement;
+    let hl = page.querySelector(".lexis-pdf-hl-layer");
+    if (!hl) {
+      hl = document.createElement("div");
+      hl.className = "lexis-pdf-hl-layer";
+      const canvas = page.querySelector("canvas");
+      if (canvas) canvas.insertAdjacentElement("afterend", hl);
+      else layer.insertAdjacentElement("beforebegin", hl);
+    }
+    const hlBB = layer.getBoundingClientRect();
+    const pageBB = page.getBoundingClientRect();
+    hl.style.cssText = `position:absolute;left:${hlBB.left - pageBB.left}px;top:${hlBB.top - pageBB.top}px;width:${hlBB.width}px;height:${hlBB.height}px;z-index:1;pointer-events:none;`;
+    hl.innerHTML = "";
+    // 3. 遍历内联 .lexis-hl,在 overlay 层画出对应荧光笔矩形
+    const spans = layer.querySelectorAll(".lexis-hl");
+    for (const s of spans) {
+      const key = s.dataset.lexisKey;
+      if (!key) continue;
+      const entry = this.index.get(key);
+      if (!entry) continue;
+      try {
+        const color = (() => {
+          const dc = this.dictColorForFile(entry.file);
+          if (dc) return dc;
+          if (this.settings.highlightColor) return this.settings.highlightColor;
+          return "var(--text-accent)";
+        })();
+        const o = this.settings.highlightOpacity;
+        const alpha = Math.max(0.15, Math.min(0.6, (o == null ? 1 : o) * 0.6));
+        const rect = s.getBoundingClientRect();
+        const d = document.createElement("div");
+        d.className = "lexis-pdf-hl";
+        d.dataset.lexisKey = key;
+        d.style.cssText = `position:absolute;left:${rect.left - hlBB.left}px;top:${rect.top - hlBB.top}px;width:${rect.width}px;height:${rect.height}px;background:${this.applyAlpha(color, alpha)};border-radius:2px;pointer-events:auto;`;
+        hl.appendChild(d);
+      } catch (_e) {}
+    }
   }
   teardownPdfHighlight() {
     if (this._pdfObserver) { this._pdfObserver.disconnect(); this._pdfObserver = null; }
     if (this._pdfRaf) { window.cancelAnimationFrame(this._pdfRaf); this._pdfRaf = 0; }
-    if (this._pdfStyleEl) { this._pdfStyleEl.remove(); this._pdfStyleEl = null; }
+    try { document.querySelectorAll(".lexis-pdf-hl-layer").forEach((l) => l.remove()); } catch (_e) {}
+    try {
+      document.querySelectorAll(".textLayer .lexis-hl").forEach((s) => {
+        const t = document.createTextNode(s.textContent || "");
+        s.parentNode && s.parentNode.replaceChild(t, s);
+      });
+    } catch (_e) {}
   }
   // 词库/配色变化后,清掉 PDF 里旧高亮再重扫(.lexis-hl 拆回纯文本)
   rescanPdfLayers() {
@@ -909,6 +941,7 @@ module.exports = class LexisPlugin extends Plugin {
         const t = document.createTextNode(s.textContent || "");
         s.parentNode && s.parentNode.replaceChild(t, s);
       });
+      document.querySelectorAll(".lexis-pdf-hl-layer").forEach((l) => l.remove());
       document.querySelectorAll(".textLayer").forEach((l) => { l.normalize(); this.scanPdfLayer(l); });
     } catch (_e) {}
   }
@@ -1421,10 +1454,10 @@ module.exports = class LexisPlugin extends Plugin {
   }
 
   // ---------- 悬浮卡 ----------
-  onMouseOver(e) { const t = e.target; if (t && t.classList && t.classList.contains("lexis-hl")) this.showPopover(t); }
+  onMouseOver(e) { const t = e.target; if (t && t.classList && (t.classList.contains("lexis-hl") || t.classList.contains("lexis-pdf-hl"))) this.showPopover(t); }
   onClick(e) {
     const t = e.target;
-    if (t && t.classList && t.classList.contains("lexis-hl")) {
+    if (t && t.classList && (t.classList.contains("lexis-hl") || t.classList.contains("lexis-pdf-hl"))) {
       const entry = this.index.get(t.dataset.lexisKey);
       if (entry) { e.preventDefault(); this.app.workspace.getLeaf(e.ctrlKey || e.metaKey ? "tab" : false).openFile(entry.file); this.removePopover(); }
     } else if (this._popover && !this._popover.contains(t)) this.removePopover();
