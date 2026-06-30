@@ -483,6 +483,13 @@
 - **改法**:`inlineStyleForEntry(entry, opts)` 加 `opts.pdf` 分支 → PDF 专用样式 `background-color: color-mix(... 40%, transparent)`(半透明荧光笔,贴字、显眼),不再用细波浪线。`wrapMatchesInElement` 透传 styleOpts,`scanPdfLayer` 传 `{pdf:true}`。颜色仍走词典色/标签色优先级。
 - **残留**:scaleX 拉伸是 pdf.js 排版本身导致,背景版比下划线版观感好很多但极个别仍可能略宽;若仍介意,后续可改"按 getClientRects 画绝对定位叠加块"(更准但更重),暂不做。
 
+## feat:PDF 里划词加词(阶段3,完结 PDF 三阶段)(插件 v1.0.18)
+- **基本免费**:阶段 0 的 `addFromPill` 在没有 MarkdownView 时已回退到 `getActiveFile()`(PDF 视图下就是那个 PDF)。所以核心只改一处:`maybeShowSelPill` 的容器判断加上 `.pdf-viewer/.pdf-container/.pdf-embed/.textLayer` → PDF 选区也冒药丸。
+- **出处带页码**:新增 `currentPdfPage()`(从选区 `anchorNode` 往上找 `[data-page-number]`,pdf.js 在 `.page` 上挂)。PDF 划词加词时,例句出处写成 `[[xxx.pdf#page=N|xxx p.N]]`,点链接直接跳到那一页。
+- **不顶掉 PDF**:从 PDF 加词时(`fromPdf = srcFile.extension==="pdf" && !editor`),新词笔记开到**新标签页**(`getLeaf("tab")`),正在读的 PDF 不被替换;已存在的词同理。普通笔记仍是当前页打开(行为不变)。
+- **句子**:PDF 出处句子走 `getReadingSentence()`(取选区起点 span 的文本),pdf.js 文字按 span 切,故是"那一段"而非完整长句——够用;要更完整可后续按 `.textLayer` 拼整行,暂不做。
+- 受 `selectionPill` 同一开关控制。
+
 ## 想法暂存(Hz 提出,暂不做)
 - (已实现 ↑)~~**标签识别为单词**:除了扫文件夹,再支持"带某标签的笔记也算单词来源"。~~ → 本轮已做,见上"地基"。
 

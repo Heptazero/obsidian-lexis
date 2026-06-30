@@ -1266,6 +1266,17 @@ module.exports = class LexisPlugin extends Plugin {
   getReadingSentence() {
     try { const sel = window.getSelection(); if (!sel || !sel.anchorNode) return ""; const text = sel.anchorNode.textContent || ""; return this.extractSentence(text, sel.anchorOffset || 0); } catch (_e) { return ""; }
   }
+  // 当前选区所在 PDF 页码(pdf.js 在 .page 上挂 data-page-number);取不到返回 0
+  currentPdfPage() {
+    try {
+      const sel = window.getSelection();
+      const n = sel && sel.anchorNode;
+      const el = n ? (n.nodeType === 1 ? n : n.parentElement) : null;
+      const page = el && el.closest && el.closest("[data-page-number]");
+      const v = page && page.getAttribute("data-page-number");
+      return v ? parseInt(v, 10) || 0 : 0;
+    } catch (_e) { return 0; }
+  }
   addSelectedWordCommand() {
     const view = this.app.workspace.getActiveViewOfType(obsidian.MarkdownView);
     let word = "", editor = null;
@@ -1284,9 +1295,11 @@ module.exports = class LexisPlugin extends Plugin {
     const existing = this.app.vault.getAbstractFileByPath(targetPath);
     const srcFile = (view && view.file) || this.app.workspace.getActiveFile();
     const sentence = editor ? this.getSelectionSentence(editor) : this.getReadingSentence();
+    // 从 PDF 划词加词时,新词笔记开到新标签页,免得把正在读的 PDF 顶掉
+    const fromPdf = srcFile && srcFile.extension === "pdf" && !editor;
     if (existing) {
       new Notice(`Lexis:「${fileName}」已存在,打开它`);
-      this.app.workspace.getLeaf(false).openFile(existing);
+      this.app.workspace.getLeaf(fromPdf ? "tab" : false).openFile(existing);
       return;
     }
     try {
@@ -1295,12 +1308,18 @@ module.exports = class LexisPlugin extends Plugin {
       let content = (tpl != null ? tpl : this.minimalSkeleton()).replace(/\{\{word\}\}/g, clean).replace(/\{\{date\}\}/g, todayStr());
       // 出处写进正文(而不是 frontmatter 属性),好看且笔记里直接可见
       if (sentence || srcFile) {
-        const link = srcFile ? ` —— [[${srcFile.path}|${srcFile.basename}]]` : "";
+        // PDF 出处带上页码,链接可直接跳到那一页
+        let sub = "", disp = srcFile ? srcFile.basename : "";
+        if (fromPdf) {
+          const pg = this.currentPdfPage();
+          if (pg) { sub = `#page=${pg}`; disp = `${srcFile.basename} p.${pg}`; }
+        }
+        const link = srcFile ? ` —— [[${srcFile.path}${sub}|${disp}]]` : "";
         content = content.replace(/\s*$/, "") + `\n\n#### 例句\n> ${sentence || ""}${link}\n`;
       }
       const file = await this.app.vault.create(targetPath, content);
       new Notice(`Lexis:已创建「${fileName}」`);
-      await this.app.workspace.getLeaf(false).openFile(file);
+      await this.app.workspace.getLeaf(fromPdf ? "tab" : false).openFile(file);
       this.scheduleRebuild();
     } catch (err) { new Notice("Lexis 创建失败:" + (err?.message || err)); }
   }
@@ -1404,10 +1423,10 @@ module.exports = class LexisPlugin extends Plugin {
     let sel, text;
     try { sel = window.getSelection(); text = sel ? sel.toString().trim() : ""; } catch (_e) { return; }
     if (!text || text.length > 60 || /[\n\r]/.test(text)) { this.removeSelPill(); return; }
-    // 选区必须落在 Markdown 笔记内容里(编辑或阅读视图),其它面板/PDF/设置一律不弹
+    // 选区必须落在 Markdown 笔记内容 或 PDF 文字层里(其它面板/设置一律不弹)
     const node = sel.anchorNode;
     const host = node ? (node.nodeType === 1 ? node : node.parentElement) : null;
-    if (!host || !host.closest || !host.closest(".markdown-source-view, .markdown-reading-view, .markdown-preview-view")) { this.removeSelPill(); return; }
+    if (!host || !host.closest || !host.closest(".markdown-source-view, .markdown-reading-view, .markdown-preview-view, .pdf-viewer, .pdf-container, .pdf-embed, .textLayer")) { this.removeSelPill(); return; }
     let rect; try { rect = sel.getRangeAt(0).getBoundingClientRect(); } catch (_e) { return; }
     if (!rect || (!rect.width && !rect.height)) { this.removeSelPill(); return; }
     this.removeSelPill();
