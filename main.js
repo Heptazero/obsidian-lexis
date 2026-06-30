@@ -864,7 +864,7 @@ module.exports = class LexisPlugin extends Plugin {
     if (!this._pdfStyleEl) {
       this._pdfStyleEl = document.createElement("style");
       this._pdfStyleEl.id = "lexis-pdf-style";
-      this._pdfStyleEl.textContent = ".textLayer{opacity:1 !important;}";
+      this._pdfStyleEl.textContent = ".textLayer{opacity:1 !important;}.textLayer::selection{background:rgba(100,149,237,0.3) !important;}";
       document.head.appendChild(this._pdfStyleEl);
     }
     this._pdfPending = new Set();
