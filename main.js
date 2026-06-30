@@ -783,8 +783,14 @@ module.exports = class LexisPlugin extends Plugin {
       const rule = this.settings.tagRules.find((r) => r.tag && entry.tags.has(r.tag.toLowerCase()));
       if (rule) { if (rule.color) color = rule.color; if (rule.style) styleKind = rule.style; }
     }
-    // PDF:文字层文字透明,细波浪线又浅又容易随 pdf.js 拉伸显得过长 → 改用半透明背景"荧光笔",显眼且贴字
-    if (opts && opts.pdf) return `background-color:${this.applyAlpha(color, 0.4)};border-radius:2px;`;
+    // PDF:文字层文字透明,细波浪线又浅又容易随 pdf.js 拉伸显得过长 → 改用半透明背景"荧光笔"。
+    // 透明度跟随"高亮透明度"设置,但封顶 0.6:高亮在 PDF 页面图之上、文字透明,全不透明会盖住字。
+    // 显式 text-decoration:none 去掉基类 .lexis-hl 残留的波浪下划线(否则下方 3px 处有条线,像错位)。
+    if (opts && opts.pdf) {
+      const o = this.settings.highlightOpacity;
+      const alpha = Math.max(0.15, Math.min(0.6, (o == null ? 1 : o) * 0.6));
+      return `background-color:${this.applyAlpha(color, alpha)};border-radius:2px;text-decoration:none;`;
+    }
     const c = this.applyAlpha(color, this.settings.highlightOpacity);
     if (styleKind === "background") return `background-color:${c};border-radius:3px;padding:0 1px;text-decoration:none;`;
     const line = styleKind === "underline" ? "solid" : "wavy";
@@ -1318,9 +1324,15 @@ module.exports = class LexisPlugin extends Plugin {
         content = content.replace(/\s*$/, "") + `\n\n#### 例句\n> ${sentence || ""}${link}\n`;
       }
       const file = await this.app.vault.create(targetPath, content);
-      new Notice(`Lexis:已创建「${fileName}」`);
-      await this.app.workspace.getLeaf(fromPdf ? "tab" : false).openFile(file);
-      this.scheduleRebuild();
+      if (fromPdf) {
+        // 从 PDF 加词:留在 PDF 页面,不打开新词笔记;立刻重建索引→当场高亮
+        new Notice(`Lexis:已加入「${fileName}」,已在 PDF 高亮`);
+        this.rebuildIndex(false);
+      } else {
+        new Notice(`Lexis:已创建「${fileName}」`);
+        await this.app.workspace.getLeaf(false).openFile(file);
+        this.scheduleRebuild();
+      }
     } catch (err) { new Notice("Lexis 创建失败:" + (err?.message || err)); }
   }
   // 遗忘曲线 SVG(FSRS 衰减)

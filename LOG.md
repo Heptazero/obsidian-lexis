@@ -490,6 +490,12 @@
 - **句子**:PDF 出处句子走 `getReadingSentence()`(取选区起点 span 的文本),pdf.js 文字按 span 切,故是"那一段"而非完整长句——够用;要更完整可后续按 `.textLayer` 拼整行,暂不做。
 - 受 `selectionPill` 同一开关控制。
 
+## 修复:PDF 加词后跳走/透明度无效/残留下划线(插件 v1.0.19)
+- **反馈(Hz)**:① 加词后跳进了单词笔记,应留在 PDF 当场高亮;② 个别高亮错位;③ 透明度拉满 PDF 里亮度不变(被覆盖)。
+- **①**:`fromPdf` 时不再 `openFile` 新词笔记,改为 `rebuildIndex(false)`(内部 `refreshAllViews→rescanPdfLayers`)→ 留在 PDF、当场高亮新词。Notice 改「已加入…,已在 PDF 高亮」。
+- **③**:之前 PDF 背景 alpha 写死 0.4,忽略了 `highlightOpacity`。改成 `alpha = clamp(highlightOpacity*0.6, 0.15, 0.6)` → 拉满更浓。**封顶 0.6**:高亮在 PDF 页图之上、文字层文字透明,全不透明会盖住字(物理限制,已在注释/答复里说明)。
+- **②(部分)**:PDF inline style 之前只设了 background,基类 `.lexis-hl` 的 `text-decoration:underline wavy` 仍生效 → 字下方 3px 有条波浪线,看着像错位。PDF 分支显式 `text-decoration:none` 去掉。**真·几何错位**(少数 span 受 pdf.js per-span transform 影响)本次未根治,彻底解法是「getClientRects 画绝对定位叠加块」,视反馈再上。
+
 ## 想法暂存(Hz 提出,暂不做)
 - (已实现 ↑)~~**标签识别为单词**:除了扫文件夹,再支持"带某标签的笔记也算单词来源"。~~ → 本轮已做,见上"地基"。
 
