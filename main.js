@@ -864,9 +864,10 @@ module.exports = class LexisPlugin extends Plugin {
     if (!this._pdfStyleEl) {
       this._pdfStyleEl = document.createElement("style");
       this._pdfStyleEl.id = "lexis-pdf-style";
-      this._pdfStyleEl.textContent = ".textLayer{opacity:1 !important;}.textLayer::selection{background:rgba(100,149,237,0.3) !important;}";
-      document.head.appendChild(this._pdfStyleEl);
+      this._pdfStyleEl.textContent = ".textLayer::selection{background:rgba(100,149,237,0.25) !important;}";
     }
+    this._pdfStyleEl.remove();
+    document.body.appendChild(this._pdfStyleEl);
     this._pdfPending = new Set();
     const flush = () => {
       this._pdfRaf = 0;
@@ -893,6 +894,7 @@ module.exports = class LexisPlugin extends Plugin {
   }
   scanPdfLayer(layer) {
     if (!this.settings.enablePdfHighlight || !this.settings.enableHighlight) return;
+    layer.style.setProperty("opacity", "1", "important");
     this.wrapMatchesInElement(layer, ".lexis-hl,.lexis-popover", { pdf: true });
   }
   teardownPdfHighlight() {
