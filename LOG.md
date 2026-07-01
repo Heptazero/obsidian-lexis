@@ -502,6 +502,12 @@
 - **② 没选模板却有内容**:`templateForFolder` 之前 `row.template || newWordTemplate` —— 词典模板留空会**回退全局默认模板**(那个含 意思/词根 的完整模板),所以"没选"也满是标题。改成:**命中词典行就完全按它的 template,留空=空白**(不回退全局);只有落到没列出的文件夹才用全局兜底。`minimalSkeleton` 也从含 `#### 意思/#### 词根` 改成只剩最简 frontmatter。设置里三处文案同步(词典模板"留空=空白笔记";默认模板标注"兜底,正常用不到")。
   - Hz 现有两个词典其实都设了模板(01-word→单词模板.md 含意思/词根;cog→模板.md),想要空白就把对应词典的模板清空即可。
 
+## 撤回:v1.0.22 的 PDF 缩放重扫反而更歪 → 回到 v1.0.21 对齐逻辑(插件 v1.0.23)
+- Hz 反馈"高亮更歪了,不行就改回去"。v1.0.22 加的 ctrl+滚轮 `rescanPdfSoon` 很可能在 pdf.js 瞬时 CSS 缩放变换期间用 `getBoundingClientRect` 重画 overlay,坐标算错 → 比原来更歪。
+- 处理:把 PDF 对齐相关改动**全部撤回到 v1.0.21**(移除 wheel 监听 / rescanPdfSoon;observer 恢复 rAF、不 disconnect;teardown 恢复 `_pdfRaf`)。已 `git diff HEAD~1` 确认:main.js 相对 v1.0.21 只剩模板那处改动。
+- **保留** #2 模板修复(词典模板留空=空白、minimalSkeleton 去 意思/词根)——与"歪"无关。
+- 缩放对齐仍是 overlay 方案(另一台机 v1.0.21 引入)的已知短板;下次要碰得先在真机上盯着 `getClientRects` 的时序,别再盲改。
+
 ## 想法暂存(Hz 提出,暂不做)
 - (已实现 ↑)~~**标签识别为单词**:除了扫文件夹,再支持"带某标签的笔记也算单词来源"。~~ → 本轮已做,见上"地基"。
 
