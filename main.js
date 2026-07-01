@@ -146,6 +146,8 @@ module.exports = class LexisPlugin extends Plugin {
     // 划词添加:松开鼠标后,若选区在笔记里则冒出"+ 加入词库"药丸
     this.registerDomEvent(document, "mouseup", (e) => this.maybeShowSelPill(e));
     this.registerDomEvent(document, "keydown", (e) => { if (e.key === "Escape") this.removeSelPill(); });
+    // PDF 缩放(ctrl/⌘+滚轮)后重排文字层 → 去抖重扫高亮,免得手动点一下才对齐
+    this.registerDomEvent(document, "wheel", (e) => { if ((e.ctrlKey || e.metaKey) && e.target && e.target.closest && e.target.closest(".pdf-viewer, .pdf-container, .pdf-embed")) this.rescanPdfSoon(); }, { passive: true, capture: true });
 
     this.app.workspace.onLayoutReady(() => this.rebuildIndex(false));
     this.registerEvent(this.app.vault.on("create", (f) => this.maybeRebuild(f)));
@@ -854,13 +856,16 @@ module.exports = class LexisPlugin extends Plugin {
   // 用 MutationObserver 重扫;.lexis-hl 在 rejectSelector 里,重扫不会重复包。
   setupPdfHighlight() {
     if (this._pdfObserver) { this._pdfObserver.disconnect(); this._pdfObserver = null; }
-    if (this._pdfRaf) { window.cancelAnimationFrame(this._pdfRaf); this._pdfRaf = 0; }
+    if (this._pdfTimer) { window.clearTimeout(this._pdfTimer); this._pdfTimer = 0; }
     if (!this.settings.enablePdfHighlight || typeof MutationObserver === "undefined") return;
     this._pdfPending = new Set();
     const flush = () => {
-      this._pdfRaf = 0;
+      this._pdfTimer = 0;
       const items = [...this._pdfPending]; this._pdfPending.clear();
+      // 扫描时先断开观察,免得自己包高亮产生的 DOM 变动又触发一轮
+      if (this._pdfObserver) this._pdfObserver.disconnect();
       for (const layer of items) { try { if (layer.isConnected) this.scanPdfLayer(layer); } catch (_e) {} }
+      if (this._pdfObserver) try { this._pdfObserver.observe(document.body, { childList: true, subtree: true }); } catch (_e) {}
     };
     this._pdfObserver = new MutationObserver((muts) => {
       try {
@@ -874,11 +879,18 @@ module.exports = class LexisPlugin extends Plugin {
           }
         }
       } catch (_e) {}
-      if (this._pdfPending.size && !this._pdfRaf) this._pdfRaf = window.requestAnimationFrame(flush);
+      // 去抖:等 pdf.js 把这一页/这次缩放的文字层完全铺好、位置定了再扫,避免扫早了对不齐
+      if (this._pdfPending.size) { window.clearTimeout(this._pdfTimer); this._pdfTimer = window.setTimeout(flush, 140); }
     });
     this._pdfObserver.observe(document.body, { childList: true, subtree: true });
     // 首次:扫描已经打开的 PDF
     try { document.querySelectorAll(".textLayer").forEach((l) => this.scanPdfLayer(l)); } catch (_e) {}
+  }
+  // 缩放(ctrl/⌘+滚轮)后,pdf.js 会重排文字层但可能不重建 → 高亮位置对不上;去抖后整层清掉重扫,强制对齐
+  rescanPdfSoon() {
+    if (!this.settings.enablePdfHighlight) return;
+    window.clearTimeout(this._pdfRescanTimer);
+    this._pdfRescanTimer = window.setTimeout(() => this.rescanPdfLayers(), 220);
   }
   scanPdfLayer(layer) {
     if (!this.settings.enablePdfHighlight || !this.settings.enableHighlight) return;
@@ -925,7 +937,8 @@ module.exports = class LexisPlugin extends Plugin {
   }
   teardownPdfHighlight() {
     if (this._pdfObserver) { this._pdfObserver.disconnect(); this._pdfObserver = null; }
-    if (this._pdfRaf) { window.cancelAnimationFrame(this._pdfRaf); this._pdfRaf = 0; }
+    if (this._pdfTimer) { window.clearTimeout(this._pdfTimer); this._pdfTimer = 0; }
+    if (this._pdfRescanTimer) { window.clearTimeout(this._pdfRescanTimer); this._pdfRescanTimer = 0; }
     try { document.querySelectorAll(".lexis-pdf-hl-layer").forEach((l) => l.remove()); } catch (_e) {}
     try {
       document.querySelectorAll(".textLayer .lexis-hl").forEach((s) => {
@@ -1033,11 +1046,12 @@ module.exports = class LexisPlugin extends Plugin {
   }
   primaryVocabFolder() { return this.dictFolders()[0] || ""; } // 新建单词时落地的文件夹(取第一个)
   inFolderScope(path) { const fs = this.dictFolders(); return fs.length ? this.inScope(path, fs) : false; }
-  // 某文件夹对应的模板路径:词典行的 template,空则回退全局默认 newWordTemplate
+  // 某文件夹对应的模板:命中某词典行 → 完全按它的 template(留空=空白笔记,不再回退全局);
+  // 没有对应词典行(极少见)→ 才用全局默认 newWordTemplate。这样"没给这个词典选模板"= 空白,符合直觉。
   templateForFolder(folder) {
     const f = this.normalizeFolder(folder);
     const row = (this.settings.dicts || []).find((d) => d && this.normalizeFolder(d.folder) === f);
-    const p = ((row && row.template) || this.settings.newWordTemplate || "").trim();
+    const p = (row ? (row.template || "") : (this.settings.newWordTemplate || "")).trim();
     return this.readTemplatePath(p);
   }
   isVocabFile(file) {
@@ -1307,7 +1321,8 @@ module.exports = class LexisPlugin extends Plugin {
     if (f instanceof TFile) { try { return await this.app.vault.read(f); } catch (_e) {} }
     return null;
   }
-  minimalSkeleton() { return "---\ntags:\n---\n\n#### 意思\n\n#### 词根\n\n"; }
+  // 无模板时的空白骨架:只留最简 frontmatter(供标签/别名/复习数据),正文空白,不硬塞小节标题
+  minimalSkeleton() { return "---\ntags:\n---\n\n"; }
   getSelectionSentence(editor) {
     try { const from = editor.getCursor("from"); const line = editor.getLine(from.line) || ""; return this.extractSentence(line, from.ch || 0); } catch (_e) { return ""; }
   }
@@ -1922,7 +1937,7 @@ class LexisSettingTab extends PluginSettingTab {
     const tagSuggest = (comp, apply) => { if (hasSuggest) new PathSuggest(this.app, comp.inputEl, () => allTags, (v) => { comp.setValue(v); apply(v); }, { multi: true }); };
 
     new Setting(containerEl).setName("词典(文件夹 → 模板)").setHeading();
-    new Setting(containerEl).setDesc(`每行一个词典:文件夹(含子文件夹)里每个笔记标题都算一个词条,各词典可指定自己的新词模板(留空=用下方默认模板)。新词默认落到第一行。已有文件夹:${folders.slice(0, 8).join("、") || "(无)"}${folders.length > 8 ? "…" : ""}`);
+    new Setting(containerEl).setDesc(`每行一个词典:文件夹(含子文件夹)里每个笔记标题都算一个词条,各词典可指定自己的新词模板(留空=建空白笔记,不套任何模板)。新词默认落到第一行。已有文件夹:${folders.slice(0, 8).join("、") || "(无)"}${folders.length > 8 ? "…" : ""}`);
     const dictsWrap = containerEl.createDiv();
     const renderDicts = () => {
       dictsWrap.empty();
@@ -1935,7 +1950,7 @@ class LexisSettingTab extends PluginSettingTab {
         const onFolder = async (v) => { d.folder = (v || "").trim(); await save(); this.plugin.rebuildIndex(false); this.renderStats(); };
         fIn.onChange(onFolder);
         const tIn = new obsidian.TextComponent(row);
-        tIn.setPlaceholder("模板路径,留空=默认").setValue(d.template || "");
+        tIn.setPlaceholder("模板路径,留空=空白笔记").setValue(d.template || "");
         tIn.inputEl.style.flex = "1.4";
         const onTpl = async (v) => { d.template = (v || "").trim(); await save(); };
         tIn.onChange(onTpl);
@@ -2022,7 +2037,7 @@ class LexisSettingTab extends PluginSettingTab {
       .addText((t) => t.setPlaceholder("留空=全库").setValue(this.plugin.settings.occurrenceFolders).onChange(async (v) => { this.plugin.settings.occurrenceFolders = v.trim(); await save(); this.plugin._occCache.clear(); }));
 
     containerEl.createEl("h4", { text: "划词添加" });
-    new Setting(containerEl).setName("默认模板").setDesc("词典没单独指定模板时用它建新词;留空=极简骨架。模板里可用 {{word}} {{date}} 占位。")
+    new Setting(containerEl).setName("默认模板(兜底)").setDesc("仅当新词落到没在上面列出的文件夹时才用(正常都会命中某个词典,用不到);词典模板留空 = 空白笔记,不再回退到这里。模板里可用 {{word}} {{date}} 占位。")
       .addText((t) => {
         t.setPlaceholder("template/单词模板.md").setValue(this.plugin.settings.newWordTemplate);
         const onTpl = async (v) => { this.plugin.settings.newWordTemplate = (v || "").trim(); await save(); };
