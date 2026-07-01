@@ -304,7 +304,13 @@ module.exports = class LexisPlugin extends Plugin {
     const reqFolder = this.normalizeFolder((payload && payload.folder) || "");
     const folder = (reqFolder && this.dictFolders().includes(reqFolder)) ? reqFolder : this.primaryVocabFolder();
     const targetPath = (folder ? folder + "/" : "") + name + ".md";
-    const existing = this.app.vault.getAbstractFileByPath(targetPath);
+    let existing = this.app.vault.getAbstractFileByPath(targetPath);
+    // 加别名时:若目标词(word)本身已是某词条的标题或别名(可能在别的文件夹),
+    // 就并入那个词条文件,而不是按路径新建重复文件。(和 ob 内"设为别名"一致)
+    if (alias && !(existing instanceof TFile)) {
+      const hit = this.index.get(word.toLowerCase());
+      if (hit && hit.file instanceof TFile) existing = hit.file;
+    }
     const injectAlias = (data) => {
       const re = /^---\r?\n([\s\S]*?)\r?\n---/;
       const fm = re.exec(data);
@@ -335,7 +341,7 @@ module.exports = class LexisPlugin extends Plugin {
           else await this.app.vault.modify(existing, apply(cur));
         }
         if (!alias) this.scheduleRebuild();
-        return { ok: true, created: false, word, alias: alias || undefined, file: existing.path };
+        return { ok: true, created: false, word: existing.basename, alias: alias || undefined, file: existing.path };
       }
       await this.ensureFolder(folder);
       const tpl = await this.templateForFolder(folder);
