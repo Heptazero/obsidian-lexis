@@ -1488,20 +1488,30 @@ module.exports = class LexisPlugin extends Plugin {
     this.removeSelPill();
     const known = this.index.has(text.toLowerCase());
     const pill = document.body.createDiv({ cls: "lexis-sel-pill" });
-    pill.setText(known ? "📖 已有,打开" : "➕ 加入词库");
-    // 阻止 mousedown 收起选区/夺焦
+    // 阻止 mousedown 收起选区/夺焦(事件冒泡到 pill 即可覆盖子按钮)
     pill.addEventListener("mousedown", (ev) => ev.preventDefault());
-    pill.addEventListener("click", (ev) => {
-      ev.preventDefault(); ev.stopPropagation();
-      const dicts = this.dictFolders();
-      if (!known && dicts.length > 1) {
-        const menu = new obsidian.Menu();
-        for (const f of dicts) menu.addItem((it) => it.setTitle(f || "(库根目录)").setIcon("book-plus").onClick(() => this.addFromPill(text, f)));
-        menu.showAtPosition({ x: ev.clientX, y: ev.clientY });
-      } else {
-        this.addFromPill(text);
-      }
-    });
+    if (known) {
+      const b = pill.createSpan({ cls: "lexis-sel-pill-btn", text: "📖 已有,打开" });
+      b.addEventListener("click", (ev) => { ev.preventDefault(); ev.stopPropagation(); this.addFromPill(text); });
+    } else {
+      const addB = pill.createSpan({ cls: "lexis-sel-pill-btn", text: "➕ 加入词库" });
+      addB.addEventListener("click", (ev) => {
+        ev.preventDefault(); ev.stopPropagation();
+        const dicts = this.dictFolders();
+        if (dicts.length > 1) {
+          const menu = new obsidian.Menu();
+          for (const f of dicts) menu.addItem((it) => it.setTitle(f || "(库根目录)").setIcon("book-plus").onClick(() => this.addFromPill(text, f)));
+          menu.showAtPosition({ x: ev.clientX, y: ev.clientY });
+        } else this.addFromPill(text);
+      });
+      // 设为别名:选一个已有词条(标题或别名都行),把当前选中的词并入它的 aliases
+      const aliasB = pill.createSpan({ cls: "lexis-sel-pill-btn", text: "🔗 设为别名" });
+      aliasB.addEventListener("click", (ev) => {
+        ev.preventDefault(); ev.stopPropagation();
+        this.removeSelPill();
+        new LexisAliasPicker(this.app, this, text, (entry) => this.attachAlias(text, entry.file)).open();
+      });
+    }
     // 定位:选区下方略偏左;贴边时夹回视口
     const top = Math.min(rect.bottom + 6, window.innerHeight - 36);
     const left = Math.max(6, Math.min(rect.left, window.innerWidth - pill.offsetWidth - 6));
@@ -1514,6 +1524,36 @@ module.exports = class LexisPlugin extends Plugin {
     const editor = (view && view.getMode && view.getMode() === "source" && view.editor) ? view.editor : null;
     this.removeSelPill();
     this.addWordFromSelection(text, editor, view, folder);
+  }
+  // 把 alias 写进某词条文件的 frontmatter aliases(已存在则跳过,幂等)
+  async addAliasToFile(file, alias) {
+    if (!(file instanceof TFile) || !alias) return;
+    const inject = (data) => {
+      const re = /^---\r?\n([\s\S]*?)\r?\n---/;
+      const fm = re.exec(data);
+      const line = `  - ${alias}\n`;
+      if (!fm) return `---\naliases:\n${line}---\n` + data;
+      const body = fm[1];
+      // 已列出该别名(整词匹配)就不重复加
+      if (new RegExp(`(^|\\n)\\s*-\\s*["']?${escapeRe(alias)}["']?\\s*($|\\n)`).test(body)) return data;
+      if (/^aliases:/m.test(body)) return data.slice(0, fm.index) + `---\n` + body.replace(/^(aliases:.*)$/m, `$1\n${line}`) + `\n---` + data.slice(fm.index + fm[0].length);
+      return data.slice(0, fm.index) + `---\n${body}\naliases:\n${line}---` + data.slice(fm.index + fm[0].length);
+    };
+    if (this.app.vault.process) await this.app.vault.process(file, inject);
+    else await this.app.vault.modify(file, inject(await this.app.vault.cachedRead(file)));
+  }
+  // 把当前选中的词并入目标词条(标题或别名解析到的同一个文件)的 aliases
+  async attachAlias(aliasText, file) {
+    aliasText = (aliasText || "").trim();
+    if (!aliasText || !(file instanceof TFile)) return;
+    if (aliasText.toLowerCase() === file.basename.toLowerCase()) { new Notice(`Lexis:「${aliasText}」就是这个词本身`); return; }
+    try {
+      await this.addAliasToFile(file, aliasText);
+      this.rebuildIndex(false);
+      const ak = aliasText.toLowerCase();
+      if (!this.index.has(ak)) this.index.set(ak, { display: aliasText, file, isAlias: true, tags: this.getTags(file) });
+      new Notice(`Lexis:已把「${aliasText}」加为「${file.basename}」的别名`);
+    } catch (err) { new Notice("Lexis 加别名失败:" + (err?.message || err)); }
   }
   openAndClose(file) { this.app.workspace.getLeaf(false).openFile(file); this.removePopover(); }
   async openOccurrence(file, word) {
@@ -1666,6 +1706,30 @@ module.exports = class LexisPlugin extends Plugin {
     pop.style.left = left + "px"; pop.style.top = top + "px";
   }
 };
+
+// ---------- 别名选择器:给"设为别名"选目标词条(标题或别名都可搜到) ----------
+class LexisAliasPicker extends (obsidian.FuzzySuggestModal || class {}) {
+  constructor(app, plugin, aliasText, onPick) {
+    super(app);
+    this.plugin = plugin;
+    this.aliasText = aliasText;
+    this.onPick = onPick;
+    if (this.setPlaceholder) this.setPlaceholder(`把「${aliasText}」设为谁的别名(搜标题或已有别名)`);
+  }
+  getItems() {
+    const seen = new Set(), out = [];
+    for (const e of this.plugin.index.values()) {
+      if (!e || !e.file) continue;
+      const k = e.file.path + "|" + (e.display || "");
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(e);
+    }
+    return out;
+  }
+  getItemText(e) { return e.isAlias ? `${e.display}  —「${e.file.basename}」的别名` : e.display; }
+  onChooseItem(e) { if (e && e.file) this.onPick(e); }
+}
 
 // ---------- 背单词复习视图 ----------
 class LexisReviewView extends ItemView {

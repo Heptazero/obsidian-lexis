@@ -482,20 +482,28 @@ body.is-phone
 .lexis-sel-pill {
     position: fixed;
     z-index: var(--layer-popover, 50);
-    padding: 4px 10px;
+    display: flex;
+    align-items: stretch;
     border-radius: 999px;
+    overflow: hidden;
     background: var(--interactive-accent);
     color: var(--text-on-accent);
     font-size: 12px;
     font-weight: 600;
     line-height: 1.4;
     white-space: nowrap;
-    cursor: pointer;
     user-select: none;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
 }
-.lexis-sel-pill:hover {
-    filter: brightness(1.08);
+.lexis-sel-pill-btn {
+    padding: 4px 11px;
+    cursor: pointer;
+}
+.lexis-sel-pill-btn + .lexis-sel-pill-btn {
+    border-left: 1px solid color-mix(in srgb, var(--text-on-accent) 35%, transparent);
+}
+.lexis-sel-pill-btn:hover {
+    background: color-mix(in srgb, var(--text-on-accent) 18%, transparent);
 }
 
 /* PDF 高亮独立层:叠在 Canvas 上、textLayer 下,不沾 textLayer 的 opacity */
