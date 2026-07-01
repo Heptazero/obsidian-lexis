@@ -745,7 +745,10 @@ module.exports = class LexisPlugin extends Plugin {
   }
   buildMatcher() {
     // 英文单字母(a/I)噪声大,过滤;但单个汉字等非 ASCII 字符常是有意义的词,保留
-    const keys = [...this.index.keys()].filter((k) => k.length >= 2 || /[^\x00-\x7f]/.test(k));
+    let keys = [...this.index.keys()].filter((k) => k.length >= 2 || /[^\x00-\x7f]/.test(k));
+    // 排除标签:打了任一此标签的词,库内也不高亮(和网页端一致)
+    const exc = this.excludeTagSet();
+    if (exc.size) keys = keys.filter((k) => { const e = this.index.get(k); return !(e && e.tags && [...e.tags].some((t) => exc.has(t))); });
     keys.sort((a, b) => b.length - a.length);
     if (!keys.length) { this._pattern = null; return; }
     this._pattern = keys.map(boundedSource).join("|");
@@ -998,6 +1001,7 @@ module.exports = class LexisPlugin extends Plugin {
   parseFolders(text) { return (text || "").split(/[,，\n]/).map((s) => this.normalizeFolder(s)).filter(Boolean); }
   parseTags(text) { return (text || "").split(/[,，;；\s]+/).map((s) => s.trim().replace(/^#/, "").toLowerCase()).filter(Boolean); }
   vocabTagSet() { return new Set(this.parseTags(this.settings.vocabTags)); }
+  excludeTagSet() { return new Set(this.parseTags(this.settings.excludeTags)); }
   // 词典表的文件夹列表 = 文件夹来源的单一真相
   dictFolders() { return (this.settings.dicts || []).map((d) => this.normalizeFolder(d && d.folder)).filter(Boolean); }
   // 一条词的最终高亮色(优先级:标签规则 > 词典色 > 全局兜底),返回解析后的真实 hex —— 网页和 ob 同一套优先级
@@ -2117,10 +2121,10 @@ class LexisSettingTab extends PluginSettingTab {
     containerEl.createEl("p", { cls: "setting-item-description", text: "在本机开一个只监听 127.0.0.1 的小服务,供 Chrome 扩展拉词库高亮、划词加词。数据不出本机。Obsidian 关掉后服务也停。" });
     // 排除标签:带任一此标签的单词不会在网页高亮
     const vocabTagsHint = this.plugin.collectVocabTags().slice(0, 10).join("、");
-    new Setting(containerEl).setName("排除标签").setDesc(`带任一此标签的单词不在网页高亮(Obsidian 里不受影响),逗号或空格分隔。留空=不排除。词库标签:${vocabTagsHint || "(无)"}`)
+    new Setting(containerEl).setName("排除标签").setDesc(`带任一此标签的单词:网页和 Obsidian 里都不高亮(仍是词条,照常出现在库里/可复习),逗号或空格分隔。留空=不排除。词库标签:${vocabTagsHint || "(无)"}`)
       .addText((t) => {
         t.setPlaceholder("已掌握 暂缓").setValue(this.plugin.settings.excludeTags);
-        const apply = async (v) => { this.plugin.settings.excludeTags = v; await save(); };
+        const apply = async (v) => { this.plugin.settings.excludeTags = v; await save(); this.plugin.rebuildIndex(false); };
         t.onChange(apply); tagSuggest(t, apply);
       });
     new Setting(containerEl).setName("划词 pill 显示词典选择").setDesc("开启后,网页划词加新词的小条上会多一个文件夹下拉,可当场选落到哪个词典(需多个词典)。关闭则新词进第一个词典,之后在悬浮卡里点文件夹小标可改。")
