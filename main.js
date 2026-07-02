@@ -665,6 +665,8 @@ module.exports = class LexisPlugin extends Plugin {
   normalizeFolder(p) { return (p || "").trim().replace(/^\/+|\/+$/g, ""); }
   // 单一真相:rebuildIndex 算出的命中路径集合。支持"文件夹∪标签"两种收录,且 14 处调用点签名不变。
   inVocabFolder(path) { return this.vocabPaths ? this.vocabPaths.has(path) : false; }
+  // 词条自身的标题/别名 key 集合:该词条笔记内文出现自己的标题时不高亮自己,但别的词库词照常高亮。
+  selfKeysFor(path) { return (this._selfKeysByPath && this._selfKeysByPath.get(path)) || null; }
   maybeRebuild(file, oldPath) {
     const p = (file && file.path) || "";
     this._occCache.clear();
@@ -710,6 +712,7 @@ module.exports = class LexisPlugin extends Plugin {
   }
   rebuildIndex(notify) {
     const index = new Map();
+    const selfKeysByPath = new Map();
     const today = todayStr();
     let words = 0, aliases = 0, due = 0;
     const files = this.app.vault.getMarkdownFiles().filter((f) => this.isVocabFile(f));
@@ -720,16 +723,20 @@ module.exports = class LexisPlugin extends Plugin {
       const tags = this.getTags(file);
       const display = file.basename;
       const key = display.toLowerCase();
+      const own = new Set([key]);
       if (!index.has(key)) { index.set(key, { display, file, isAlias: false, tags }); words++; }
       if (this.settings.includeAliases) {
         for (const a of this.extractAliases(file)) {
           const ak = a.toLowerCase();
+          own.add(ak);
           if (!index.has(ak)) { index.set(ak, { display: a, file, isAlias: true, tags }); aliases++; }
         }
       }
+      selfKeysByPath.set(file.path, own);
       if (fm["lexis-s"] == null || !fm["lexis-due"] || String(fm["lexis-due"]).slice(0, 10) <= today) due++;
     }
     this.index = index;
+    this._selfKeysByPath = selfKeysByPath;
     this.stats = { words, aliases, due };
     this._occCache.clear();
     this.buildMatcher();
@@ -813,12 +820,13 @@ module.exports = class LexisPlugin extends Plugin {
   highlightElement(el, ctx) {
     if (!this.settings.enableHighlight || !this._pattern || !this.index.size) return;
     if (el.closest && el.closest(".lexis-popover")) return;
-    if (ctx && ctx.sourcePath && this.inVocabFolder(ctx.sourcePath)) return;
-    this.wrapMatchesInElement(el, "code,pre,a,.lexis-hl,.lexis-popover,.math,.tag");
+    const selfKeys = ctx && ctx.sourcePath ? this.selfKeysFor(ctx.sourcePath) : null;
+    this.wrapMatchesInElement(el, "code,pre,a,.lexis-hl,.lexis-popover,.math,.tag", null, selfKeys);
   }
   // 把 el 内文本节点里命中词库的片段包成 <span class="lexis-hl">(供阅读模式 + PDF 复用)。
   // rejectSelector:父元素命中则跳过该文本节点(避免重复包/包进代码块等)。
-  wrapMatchesInElement(el, rejectSelector, styleOpts) {
+  // excludeKeys:命中这些 key 时只留纯文本不高亮(词条笔记里不高亮自己的标题/别名,但别的词照常高亮)。
+  wrapMatchesInElement(el, rejectSelector, styleOpts, excludeKeys) {
     if (!this._pattern || !this.index.size) return;
     const regex = new RegExp(this._pattern, "gi");
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
@@ -841,11 +849,18 @@ module.exports = class LexisPlugin extends Plugin {
       let last = 0, m;
       while ((m = regex.exec(text))) {
         if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
-        const entry = this.index.get(m[0].toLowerCase());
+        const key = m[0].toLowerCase();
+        if (excludeKeys && excludeKeys.has(key)) {
+          frag.appendChild(document.createTextNode(m[0]));
+          last = m.index + m[0].length;
+          if (m[0].length === 0) regex.lastIndex++;
+          continue;
+        }
+        const entry = this.index.get(key);
         const span = document.createElement("span");
         span.className = "lexis-hl";
         span.textContent = m[0];
-        span.dataset.lexisKey = m[0].toLowerCase();
+        span.dataset.lexisKey = key;
         span.setAttribute("style", this.inlineStyleForEntry(entry, styleOpts));
         frag.appendChild(span);
         last = m.index + m[0].length;
@@ -969,8 +984,9 @@ module.exports = class LexisPlugin extends Plugin {
           build(view) {
             const builder = new RangeSetBuilder();
             if (!plugin.settings.enableHighlight || !plugin.settings.enableLivePreview || !plugin._pattern) return builder.finish();
+            let selfKeys = null;
             if (editorInfoField) {
-              try { const info = view.state.field(editorInfoField, false); if (info?.file?.path && plugin.inVocabFolder(info.file.path)) return builder.finish(); } catch (_e) {}
+              try { const info = view.state.field(editorInfoField, false); if (info?.file?.path) selfKeys = plugin.selfKeysFor(info.file.path); } catch (_e) {}
             }
             const regex = new RegExp(plugin._pattern, "gi");
             for (const { from, to } of view.visibleRanges) {
@@ -978,9 +994,11 @@ module.exports = class LexisPlugin extends Plugin {
               regex.lastIndex = 0;
               let m;
               while ((m = regex.exec(text))) {
+                const key = m[0].toLowerCase();
+                if (selfKeys && selfKeys.has(key)) { if (m[0].length === 0) regex.lastIndex++; continue; }
                 const start = from + m.index, end = start + m[0].length;
-                const entry = plugin.index.get(m[0].toLowerCase());
-                builder.add(start, end, Decoration.mark({ class: "lexis-hl", attributes: { "data-lexis-key": m[0].toLowerCase(), style: plugin.inlineStyleForEntry(entry) } }));
+                const entry = plugin.index.get(key);
+                builder.add(start, end, Decoration.mark({ class: "lexis-hl", attributes: { "data-lexis-key": key, style: plugin.inlineStyleForEntry(entry) } }));
                 if (m[0].length === 0) regex.lastIndex++;
               }
             }
@@ -1200,7 +1218,7 @@ module.exports = class LexisPlugin extends Plugin {
       const curated = await this.getCuratedSourcePaths(wordFile);
       if (curated.has(sourceFile.basename.toLowerCase())) { new Notice("Lexis:这条已经在例句里了"); return true; }
     }
-    const link = sourceFile ? ` —— [[${sourceFile.path}|${sourceFile.basename}]]` : "";
+    const link = sourceFile ? ` —— [[${sourceFile.basename}]]` : "";
     const line = `> ${(sentence || "").trim()}${link}`;
     const apply = (data) => /####\s*例句/.test(data) ? data.replace(/(####\s*例句[^\n]*\n)/, `$1${line}\n`) : data.replace(/\s*$/, "") + `\n\n#### 例句\n${line}\n`;
     try {
@@ -1374,7 +1392,7 @@ module.exports = class LexisPlugin extends Plugin {
           const pg = this.currentPdfPage();
           if (pg) { sub = `#page=${pg}`; disp = `${srcFile.basename} p.${pg}`; }
         }
-        const link = srcFile ? ` —— [[${srcFile.path}${sub}|${disp}]]` : "";
+        const link = srcFile ? (sub ? ` —— [[${srcFile.basename}${sub}|${disp}]]` : ` —— [[${srcFile.basename}]]`) : "";
         content = content.replace(/\s*$/, "") + `\n\n#### 例句\n> ${sentence || ""}${link}\n`;
       }
       const file = await this.app.vault.create(targetPath, content);

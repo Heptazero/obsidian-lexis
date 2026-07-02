@@ -1,7 +1,7 @@
 {
   "id": "lexis",
   "name": "Lexis",
-  "version": "1.0.26",
+  "version": "1.0.28",
   "minAppVersion": "1.4.0",
   "description": "Turn note titles in a folder into your word bank: in-text highlighting, hover definitions, FSRS spaced-repetition review, auto-collected occurrences, and a review heatmap.",
   "author": "Hz & Claude",
