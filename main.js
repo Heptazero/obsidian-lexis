@@ -910,13 +910,14 @@ module.exports = class LexisPlugin extends Plugin {
     this.wrapMatchesInElement(layer, ".lexis-hl,.lexis-popover", { pdf: true });
     // 2. 建独立高亮 overlay,叠在 Canvas 上、textLayer 下(不沾 textLayer 的 opacity)
     const page = layer.parentElement;
-    let hl = page.querySelector(".lexis-pdf-hl-layer");
+    // pdf.js 的 canvas 实际包在 .canvasWrapper 里,插到 canvas 后面会落进那层容器,
+    // 定位/裁切都跟着 canvasWrapper 走,容易跟 textLayer 对不齐——直接挂在 .page 下、textLayer 前面最稳。
+    if (getComputedStyle(page).position === "static") page.style.position = "relative";
+    let hl = page.querySelector(":scope > .lexis-pdf-hl-layer");
     if (!hl) {
       hl = document.createElement("div");
       hl.className = "lexis-pdf-hl-layer";
-      const canvas = page.querySelector("canvas");
-      if (canvas) canvas.insertAdjacentElement("afterend", hl);
-      else layer.insertAdjacentElement("beforebegin", hl);
+      layer.insertAdjacentElement("beforebegin", hl);
     }
     const hlBB = layer.getBoundingClientRect();
     const pageBB = page.getBoundingClientRect();
