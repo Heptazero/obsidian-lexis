@@ -505,11 +505,3 @@ body.is-phone
 .lexis-sel-pill-btn:hover {
     background: color-mix(in srgb, var(--text-on-accent) 18%, transparent);
 }
-
-/* PDF 高亮独立层:叠在 Canvas 上、textLayer 下,不沾 textLayer 的 opacity */
-.lexis-pdf-hl-layer {
-    pointer-events: none;
-}
-.lexis-pdf-hl {
-    cursor: pointer;
-}
