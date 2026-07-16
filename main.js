@@ -879,6 +879,9 @@ module.exports = class LexisPlugin extends Plugin {
   setupPdfHighlight() {
     if (this._pdfObserver) { this._pdfObserver.disconnect(); this._pdfObserver = null; }
     if (this._pdfRaf) { window.cancelAnimationFrame(this._pdfRaf); this._pdfRaf = 0; }
+    if (this._pdfResizeObserver) { try { this._pdfResizeObserver.disconnect(); } catch (_e) {} this._pdfResizeObserver = null; }
+    if (this._pdfResizeTimer) { window.clearTimeout(this._pdfResizeTimer); this._pdfResizeTimer = 0; }
+    this._pdfObservedLayers = new WeakSet();
     if (!this.settings.enablePdfHighlight || typeof MutationObserver === "undefined") return;
     this._pdfPending = new Set();
     const flush = () => {
@@ -886,6 +889,27 @@ module.exports = class LexisPlugin extends Plugin {
       const items = [...this._pdfPending]; this._pdfPending.clear();
       for (const layer of items) { try { if (layer.isConnected) this.scanPdfLayer(layer); } catch (_e) {} }
     };
+    const scheduleFlush = (delay) => {
+      if (delay) {
+        window.clearTimeout(this._pdfResizeTimer);
+        this._pdfResizeTimer = window.setTimeout(() => {
+          this._pdfResizeTimer = 0;
+          if (!this._pdfRaf) this._pdfRaf = window.requestAnimationFrame(flush);
+        }, delay);
+      } else if (this._pdfPending.size && !this._pdfRaf) this._pdfRaf = window.requestAnimationFrame(flush);
+    };
+    if (typeof ResizeObserver !== "undefined") {
+      this._pdfResizeObserver = new ResizeObserver((entries) => {
+        try {
+          for (const ent of entries) {
+            const t = ent && ent.target;
+            const layer = t && (t.classList?.contains("textLayer") ? t : t.querySelector?.(".textLayer"));
+            if (layer) this._pdfPending.add(layer);
+          }
+        } catch (_e) {}
+        if (this._pdfPending.size) scheduleFlush(180);
+      });
+    }
     this._pdfObserver = new MutationObserver((muts) => {
       try {
         for (const mu of muts) {
@@ -898,14 +922,23 @@ module.exports = class LexisPlugin extends Plugin {
           }
         }
       } catch (_e) {}
-      if (this._pdfPending.size && !this._pdfRaf) this._pdfRaf = window.requestAnimationFrame(flush);
+      scheduleFlush(0);
     });
     this._pdfObserver.observe(document.body, { childList: true, subtree: true });
     // 首次:扫描已经打开的 PDF
     try { document.querySelectorAll(".textLayer").forEach((l) => this.scanPdfLayer(l)); } catch (_e) {}
   }
+  observePdfLayer(layer) {
+    if (!this._pdfResizeObserver || !layer || this._pdfObservedLayers?.has(layer)) return;
+    try {
+      this._pdfObservedLayers.add(layer);
+      this._pdfResizeObserver.observe(layer);
+      if (layer.parentElement) this._pdfResizeObserver.observe(layer.parentElement);
+    } catch (_e) {}
+  }
   scanPdfLayer(layer) {
     if (!this.settings.enablePdfHighlight || !this.settings.enableHighlight) return;
+    this.observePdfLayer(layer);
     // 1. 在 textLayer 里注入隐形 .lexis-hl(仅事件代理,无视觉样式)
     this.wrapMatchesInElement(layer, ".lexis-hl,.lexis-popover", { pdf: true });
     // 2. 建独立高亮 overlay,叠在 Canvas 上、textLayer 下(不沾 textLayer 的 opacity)
@@ -920,8 +953,11 @@ module.exports = class LexisPlugin extends Plugin {
       layer.insertAdjacentElement("beforebegin", hl);
     }
     const hlBB = layer.getBoundingClientRect();
-    const pageBB = page.getBoundingClientRect();
-    hl.style.cssText = `position:absolute;left:${hlBB.left - pageBB.left}px;top:${hlBB.top - pageBB.top}px;width:${hlBB.width}px;height:${hlBB.height}px;z-index:1;pointer-events:none;`;
+    const layerW = layer.offsetWidth || layer.clientWidth || hlBB.width || 1;
+    const layerH = layer.offsetHeight || layer.clientHeight || hlBB.height || 1;
+    const scaleX = hlBB.width ? hlBB.width / layerW : 1;
+    const scaleY = hlBB.height ? hlBB.height / layerH : 1;
+    hl.style.cssText = `position:absolute;left:${layer.offsetLeft}px;top:${layer.offsetTop}px;width:${layerW}px;height:${layerH}px;z-index:1;pointer-events:none;`;
     hl.innerHTML = "";
     // 3. 遍历内联 .lexis-hl,在 overlay 层画出对应荧光笔矩形
     const spans = layer.querySelectorAll(".lexis-hl");
@@ -939,18 +975,23 @@ module.exports = class LexisPlugin extends Plugin {
         })();
         const o = this.settings.highlightOpacity;
         const alpha = Math.max(0.15, Math.min(0.6, (o == null ? 1 : o) * 0.6));
-        const rect = s.getBoundingClientRect();
-        const d = document.createElement("div");
-        d.className = "lexis-pdf-hl";
-        d.dataset.lexisKey = key;
-        d.style.cssText = `position:absolute;left:${rect.left - hlBB.left}px;top:${rect.top - hlBB.top}px;width:${rect.width}px;height:${rect.height}px;background:${this.applyAlpha(color, alpha)};border-radius:2px;pointer-events:auto;`;
-        hl.appendChild(d);
+        const rects = Array.from(s.getClientRects()).filter((r) => r.width && r.height);
+        for (const rect of rects.length ? rects : [s.getBoundingClientRect()]) {
+          const d = document.createElement("div");
+          d.className = "lexis-pdf-hl";
+          d.dataset.lexisKey = key;
+          d.style.cssText = `position:absolute;left:${(rect.left - hlBB.left) / scaleX}px;top:${(rect.top - hlBB.top) / scaleY}px;width:${rect.width / scaleX}px;height:${rect.height / scaleY}px;background:${this.applyAlpha(color, alpha)};border-radius:2px;pointer-events:auto;`;
+          hl.appendChild(d);
+        }
       } catch (_e) {}
     }
   }
   teardownPdfHighlight() {
     if (this._pdfObserver) { this._pdfObserver.disconnect(); this._pdfObserver = null; }
     if (this._pdfRaf) { window.cancelAnimationFrame(this._pdfRaf); this._pdfRaf = 0; }
+    if (this._pdfResizeObserver) { try { this._pdfResizeObserver.disconnect(); } catch (_e) {} this._pdfResizeObserver = null; }
+    if (this._pdfResizeTimer) { window.clearTimeout(this._pdfResizeTimer); this._pdfResizeTimer = 0; }
+    this._pdfObservedLayers = null;
     try { document.querySelectorAll(".lexis-pdf-hl-layer").forEach((l) => l.remove()); } catch (_e) {}
     try {
       document.querySelectorAll(".textLayer .lexis-hl").forEach((s) => {
@@ -1371,13 +1412,18 @@ module.exports = class LexisPlugin extends Plugin {
     const reqFolder = this.normalizeFolder(targetFolder || "");
     const folder = (reqFolder && this.dictFolders().includes(reqFolder)) ? reqFolder : this.primaryVocabFolder();
     const targetPath = (folder ? folder + "/" : "") + fileName + ".md";
-    const existing = this.app.vault.getAbstractFileByPath(targetPath);
+    let existing = this.app.vault.getAbstractFileByPath(targetPath);
+    // 路径不同名也可能已经是某词条的标题或别名(比如刚被"设为别名"并入了别的文件)——按索引兜底查,别重复建
+    if (!(existing instanceof TFile)) {
+      const hit = this.index.get(clean.toLowerCase());
+      if (hit && hit.file instanceof TFile) existing = hit.file;
+    }
     const srcFile = (view && view.file) || this.app.workspace.getActiveFile();
     const sentence = editor ? this.getSelectionSentence(editor) : this.getReadingSentence();
     // 从 PDF 划词加词时,新词笔记开到新标签页,免得把正在读的 PDF 顶掉
     const fromPdf = srcFile && srcFile.extension === "pdf" && !editor;
     if (existing) {
-      new Notice(`Lexis:「${fileName}」已存在,打开它`);
+      new Notice(`Lexis:「${existing.basename}」已存在,打开它`);
       this.app.workspace.getLeaf(fromPdf ? "tab" : false).openFile(existing);
       return;
     }
