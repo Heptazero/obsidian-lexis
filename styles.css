@@ -330,6 +330,28 @@
     background: var(--background-secondary);
 }
 
+/* ```lexis-home``` 笔记内嵌主页摘要块 */
+.lexis-home-block {
+    padding: 10px 12px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    background: var(--background-primary-alt);
+}
+.lexis-home-block-hm {
+    cursor: pointer;
+    border-radius: 6px;
+    padding: 4px;
+    margin: 0 -4px;
+}
+.lexis-home-block-hm:hover {
+    background: var(--background-modifier-hover);
+}
+.lexis-home-block-btns {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+}
+
 /* 复习卡标签 pill */
 .lexis-rv-tags {
     display: flex;

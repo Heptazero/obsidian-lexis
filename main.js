@@ -137,6 +137,7 @@ module.exports = class LexisPlugin extends Plugin {
     this.registerMarkdownPostProcessor((el, ctx) => this.highlightElement(el, ctx));
     this.registerMarkdownCodeBlockProcessor("lexis", (src, el, ctx) => this.renderLexisBlock(el, ctx, src));
     this.registerMarkdownCodeBlockProcessor("lexis-heatmap", (src, el) => this.renderHeatmap(el));
+    this.registerMarkdownCodeBlockProcessor("lexis-home", (src, el) => this.renderHomeBlock(el));
     this.setupLiveExtension();
     this.setupPdfHighlight();
 
@@ -1682,6 +1683,24 @@ module.exports = class LexisPlugin extends Plugin {
       }
     }
     el.createDiv({ cls: "lexis-hm-caption", text: `近 ${weeks} 周 · 共 ${total} 次复习` });
+  }
+  // ```lexis-home``` 代码块:笔记里内嵌一份主页摘要(统计 + 热力图),点热力图或按钮跳到真正的主页/开始复习
+  renderHomeBlock(el) {
+    el.addClass("lexis-home-block");
+    const st = this.computeStats();
+    const stats = el.createDiv({ cls: "lexis-home-stats" });
+    stats.createDiv({ cls: "lexis-stat", text: `⏰ 待复习 ${st.due}` });
+    stats.createDiv({ cls: "lexis-stat", text: `✨ 新词 ${st.fresh}` });
+    stats.createDiv({ cls: "lexis-stat", text: `📚 总计 ${st.total}` });
+    const hmWrap = el.createDiv({ cls: "lexis-hm-wrap lexis-home-block-hm" });
+    hmWrap.setAttribute("title", "点击打开 Lexis 主页");
+    this.renderHeatmap(hmWrap);
+    hmWrap.addEventListener("click", () => this.openHome());
+    const btnRow = el.createDiv({ cls: "lexis-home-block-btns" });
+    const reviewBtn = btnRow.createEl("button", { cls: "mod-cta", text: "▶ 开始复习" });
+    reviewBtn.addEventListener("click", (e) => { e.stopPropagation(); this.openReview(); });
+    const homeBtn = btnRow.createEl("button", { text: "📕 打开主页" });
+    homeBtn.addEventListener("click", (e) => { e.stopPropagation(); this.openHome(); });
   }
   // 把 el 内命中 word 的文本包一层 <b>(渲染完的 DOM 上原地操作,供例句预览统一复用)
   boldMatchesInPlace(el, word) {
