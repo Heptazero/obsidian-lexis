@@ -186,6 +186,9 @@
 .lexis-rv-word {
     cursor: pointer;
 }
+.lexis-rv-word p {
+    margin: 0;
+}
 .lexis-rv-word:hover {
     text-decoration: underline;
     text-decoration-thickness: 1px;

@@ -8,7 +8,7 @@
  */
 
 const obsidian = require("obsidian");
-const { Plugin, PluginSettingTab, Setting, Notice, TFolder, TFile, Component, MarkdownRenderer, ItemView } = obsidian;
+const { Plugin, PluginSettingTab, Setting, Notice, TFolder, TFile, Component, MarkdownRenderer, ItemView, finishRenderMath } = obsidian;
 
 const LEXIS_REVIEW_VIEW = "lexis-review-view";
 const LEXIS_HOME_VIEW = "lexis-home-view";
@@ -305,9 +305,10 @@ module.exports = class LexisPlugin extends Plugin {
     const folder = (reqFolder && this.dictFolders().includes(reqFolder)) ? reqFolder : this.primaryVocabFolder();
     const targetPath = (folder ? folder + "/" : "") + name + ".md";
     let existing = this.app.vault.getAbstractFileByPath(targetPath);
-    // 加别名时:若目标词(word)本身已是某词条的标题或别名(可能在别的文件夹),
-    // 就并入那个词条文件,而不是按路径新建重复文件。(和 ob 内"设为别名"一致)
-    if (alias && !(existing instanceof TFile)) {
+    // 按路径没找到,不代表这个词不存在——它可能落在别的词典文件夹里(网页端加例句不带 folder 参数,
+    // 拼出来的 targetPath 只会落在 primaryVocabFolder)。所以不管是不是在加别名,都按索引(标题或别名)兜底查一遍,
+    // 找到就并入那个文件,而不是在错误的文件夹里新建重复笔记。(和 ob 内"设为别名"一致)
+    if (!(existing instanceof TFile)) {
       const hit = this.index.get(word.toLowerCase());
       if (hit && hit.file instanceof TFile) existing = hit.file;
     }
@@ -593,6 +594,10 @@ module.exports = class LexisPlugin extends Plugin {
       }
       for (const h of rm) h.remove();
     })(div);
+    // MarkdownRenderer.render() resolve 时,LaTeX 的 MathJax 排版还在异步队列里没跑完;
+    // 这里要把渲染好的 HTML 序列化发给浏览器扩展(扩展自己没有 MathJax),必须先等排版队列清空,
+    // 不然抓到的还是没转换的公式源码,发过去以后就永远定格在那个状态了。
+    if (finishRenderMath) { try { await finishRenderMath(); } catch (_e) {} }
     this.bridgePostProcess(div);
     const out = div.innerHTML;
     comp.unload();
@@ -605,12 +610,6 @@ module.exports = class LexisPlugin extends Plugin {
     const typeArg = parts.slice(1).join(" ");
     const olink = (p, b) => this.bridgeOlink(p, b);
     const relMap = (bags, types) => { const map = new Map(); for (const t of types) for (const r of (bags[t] || [])) map.set(r.path, r.basename); return map; };
-    const boldWord = (sentence) => {
-      const re = new RegExp("(" + escapeRe(display) + ")", "ig");
-      let out = "", last = 0, mm; re.lastIndex = 0;
-      while ((mm = re.exec(sentence))) { if (mm.index > last) out += escHtml(sentence.slice(last, mm.index)); out += "<b>" + escHtml(mm[0]) + "</b>"; last = mm.index + mm[0].length; if (mm[0].length === 0) re.lastIndex++; }
-      return out + escHtml(sentence.slice(last));
-    };
     // 派生词
     if (m === "derived" || m === "派生") {
       const resolved = this.app.metadataCache.resolvedLinks || {};
@@ -655,7 +654,23 @@ module.exports = class LexisPlugin extends Plugin {
         const fresh = list.filter((o) => !curated.has(o.file.basename.toLowerCase()));
         html += `<div class="lexis-web-sec">📍 出现过的地方 (${fresh.length})</div>`;
         if (!fresh.length) html += `<div class="lexis-web-occ lexis-web-dim">(没有未收藏的新出处)</div>`;
-        else for (const o of fresh) html += `<div class="lexis-web-occ">${boldWord(o.sentence)} <span class="lexis-web-occ-src">— ${olink(o.file.path, o.file.basename)}</span></div>`;
+        else {
+          // 例句走 Markdown 渲染(不然 LaTeX 只会是原始 $...$ 文本),同批渲染完再统一 flush 一次数学排版队列
+          const comp = new Component(); comp.load();
+          const rendered = [];
+          for (const o of fresh) {
+            const d = document.createElement("div");
+            if (MarkdownRenderer.render) await MarkdownRenderer.render(this.app, o.sentence, d, file.path, comp);
+            else await MarkdownRenderer.renderMarkdown(o.sentence, d, file.path, comp);
+            rendered.push({ d, o });
+          }
+          if (finishRenderMath) { try { await finishRenderMath(); } catch (_e) {} }
+          for (const { d, o } of rendered) {
+            this.boldMatchesInPlace(d, display);
+            html += `<div class="lexis-web-occ">${d.innerHTML} <span class="lexis-web-occ-src">— ${olink(o.file.path, o.file.basename)}</span></div>`;
+          }
+          comp.unload();
+        }
       } catch (_e) {}
     }
     return html;
@@ -1513,9 +1528,10 @@ module.exports = class LexisPlugin extends Plugin {
       const det = el.createEl("details", { cls: "lexis-occ-details" });
       const sum = det.createEl("summary", { text: `📍 出现过的地方 (${list.length})` });
       const occWrap = det.createDiv();
+      const comp = new Component(); comp.load();
       for (const o of list) {
         const dd = occWrap.createDiv({ cls: "lexis-occ" });
-        this.renderSentence(dd, o.sentence, word);
+        await this.renderSentence(dd, o.sentence, word, comp);
         const add = dd.createSpan({ cls: "lexis-occ-add", text: " ➕" });
         add.setAttribute("title", "收藏到例句");
         add.addEventListener("click", async () => {
@@ -1667,16 +1683,40 @@ module.exports = class LexisPlugin extends Plugin {
     }
     el.createDiv({ cls: "lexis-hm-caption", text: `近 ${weeks} 周 · 共 ${total} 次复习` });
   }
-  renderSentence(el, sentence, word) {
-    const re = new RegExp("(" + escapeRe(word) + ")", "ig");
-    let last = 0, m; re.lastIndex = 0;
-    while ((m = re.exec(sentence))) {
-      if (m.index > last) el.appendChild(document.createTextNode(sentence.slice(last, m.index)));
-      el.createEl("b", { text: m[0] });
-      last = m.index + m[0].length;
-      if (m[0].length === 0) re.lastIndex++;
+  // 把 el 内命中 word 的文本包一层 <b>(渲染完的 DOM 上原地操作,供例句预览统一复用)
+  boldMatchesInPlace(el, word) {
+    const re = new RegExp(boundedSource(word), "ig");
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const targets = [];
+    let n;
+    while ((n = walker.nextNode())) targets.push(n);
+    for (const node of targets) {
+      const text = node.nodeValue;
+      re.lastIndex = 0;
+      if (!re.test(text)) continue;
+      re.lastIndex = 0;
+      const frag = document.createDocumentFragment();
+      let last = 0, m;
+      while ((m = re.exec(text))) {
+        if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+        const b = document.createElement("b");
+        b.textContent = m[0];
+        frag.appendChild(b);
+        last = m.index + m[0].length;
+        if (m[0].length === 0) re.lastIndex++;
+      }
+      if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+      node.parentNode.replaceChild(frag, node);
     }
-    if (last < sentence.length) el.appendChild(document.createTextNode(sentence.slice(last)));
+  }
+  // 例句预览:走 Markdown 渲染管线(LaTeX/加粗斜体等才能正常显示),渲染完再把命中词包一层 <b>
+  async renderSentence(el, sentence, word, comp) {
+    el.empty();
+    const useComp = comp || new Component();
+    if (!comp) useComp.load();
+    if (MarkdownRenderer.render) await MarkdownRenderer.render(this.app, sentence, el, "", useComp);
+    else await MarkdownRenderer.renderMarkdown(sentence, el, "", useComp);
+    this.boldMatchesInPlace(el, word);
   }
   compactSections(md) { return md.replace(/^#{2,6}[ \t].*\n(?:[ \t]*\n)*(?=#{1,6}[ \t]|$)/gm, "").trim(); }
   stripForPreview(content) {
@@ -1753,7 +1793,7 @@ module.exports = class LexisPlugin extends Plugin {
           if (!list.length) occWrap.createDiv({ cls: "lexis-occ", text: "(没有未收藏的新出处)" });
           else for (const o of list) {
             const d = occWrap.createDiv({ cls: "lexis-occ" });
-            this.renderSentence(d, o.sentence, entry.display);
+            await this.renderSentence(d, o.sentence, entry.display, this._popoverComp);
             const add = d.createSpan({ cls: "lexis-occ-add", text: " ➕" });
             add.setAttribute("title", "收藏到例句");
             add.addEventListener("click", async () => {
@@ -1813,7 +1853,7 @@ class LexisReviewView extends ItemView {
   getDisplayText() { return "Lexis 背单词"; }
   getIcon() { return "brain"; }
   async onOpen() { this.registerDomEvent(window, "keydown", (e) => this.onKey(e)); this.refresh(); }
-  onClose() { if (this._comp) this._comp.unload(); }
+  onClose() { if (this._comp) this._comp.unload(); if (this._frontComp) this._frontComp.unload(); }
   refresh() { this.queue = this.plugin.buildQueue(this.options); this.pos = 0; this.reviewed = 0; this.revealed = false; this.undoStack = []; this.render(); }
 
   render() {
@@ -1941,7 +1981,13 @@ class LexisReviewView extends ItemView {
     const ex = await this.plugin.getFirstExample(item.file);
     if (!ex || this.currentItem !== item) return; // 无例句则保持单词;卡片已切走则放弃
     wordEl.addClass("lexis-rv-cloze");
-    wordEl.setText(this.plugin.buildCloze(ex, item.file.basename));
+    wordEl.empty();
+    if (this._frontComp) this._frontComp.unload();
+    this._frontComp = new Component(); this._frontComp.load();
+    const cloze = this.plugin.buildCloze(ex, item.file.basename);
+    // 走 Markdown 渲染管线(而不是 setText),例句里的 LaTeX/加粗/斜体等格式才能正常显示
+    if (MarkdownRenderer.render) await MarkdownRenderer.render(this.app, cloze, wordEl, item.file.path, this._frontComp);
+    else await MarkdownRenderer.renderMarkdown(cloze, wordEl, item.file.path, this._frontComp);
   }
   skip() {
     if (this.pos >= this.queue.length) return;

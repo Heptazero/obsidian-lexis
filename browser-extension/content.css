@@ -64,6 +64,7 @@
 .lexis-web-rel a, .lexis-web-occ-src a, .lexis-web-ilink { color: var(--lexis-web-color); text-decoration: none; }
 .lexis-web-rel a:hover { text-decoration: underline; }
 .lexis-web-occ { margin: 8px 0; }
+.lexis-web-occ p { display: inline; margin: 0; }
 .lexis-web-occ b { color: var(--lexis-web-color); }
 .lexis-web-occ-src { opacity: 0.6; font-size: 11px; }
 .lexis-web-dim { opacity: 0.55; }
