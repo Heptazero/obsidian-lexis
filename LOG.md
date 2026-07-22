@@ -544,3 +544,29 @@
 
 ## v1.0.21 (2026-07-01)
 - **PDF 高亮架构重写**:不再内嵌 textLayer(被 opacity 0.2 压缩不可见),改为独立 overlay 层叠在 Canvas 上、textLayer 下。textLayer 内保留隐形 `.lexis-hl` 仅做事件代理(悬浮卡+跳转),视觉高亮用独立 div 画荧光笔矩形,透明度完全可控、选中不受影响。
+
+## 修复:例句内链带路径 + 词条笔记高亮自己(插件 v1.0.27~1.0.28)
+- **内链改标题**:`addExampleToWord`/`addWordFromSelection` 写出处链接原本是 `[[路径/标题|标题]]`。Hz 指出 Obsidian 里标题本来就唯一,不需要靠路径消歧。改成纯 `[[标题]]`(PDF 页码锚点场景保留 `[[标题#page=N|标题 p.N]]` 这种别名写法,因为锚点需要路径外的 `#page=` 后缀)。
+- **词条笔记内不高亮自己**:Hz 发现被选为词典文件的笔记里,自己反而不高亮——根因是 `highlightElement` 一发现当前文件在词典文件夹里就**整篇跳过高亮**(`inVocabFolder` 判断),导致这类笔记提到的其他词库词也全部失效。改法:`rebuildIndex` 时顺手收集每个文件"自己拥有的 key 集合"(标题+别名)存进 `_selfKeysByPath`;`wrapMatchesInElement`/实时预览扩展改成只排除**命中自己 key** 的那次匹配(渲染成纯文本),别的词库词照常高亮。阅读模式、实时预览两处都改了。
+
+## 修复:滑词"设为别名"仍会重复建文件(插件 v1.0.30)
+- **现象**:Hz 用 Obsidian 内滑词"设为别名"合并到已有词条,别名确实写进去了,但还是新建了一个文件。
+- **根因**:`addWordFromSelection`(➕加入词库路径)判断"是否已存在"只按拼出来的精确文件路径(`folder/词.md`),不像 `bridgeAddWord` 那样有索引兜底——如果这个词其实已经是(或刚被设成)另一文件夹里某文件的别名,路径对不上就会被当成全新词创建。
+- **修法**:`addWordFromSelection` 补上跟 `bridgeAddWord` 一致的索引兜底:路径没找到,再查 `this.index.get(clean.toLowerCase())`,命中就直接打开已有文件,不新建。两条路径判重逻辑统一。
+- 同批:README 改成英文在前、中文引用在后(四个小节包括之前完全没英文版的"功能"一节都补齐);新增 `SECURITY.md`(引导到 GitHub 私密漏洞报告,而不是公开 issue),因为插件带一个本机 HTTP 桥接服务,值得单独写清楚威胁面。
+
+## 修复:浏览器扩展"+ 例句"按钮在错误文件夹建重复文件(插件 v1.0.33)
+- **现象**:Hz 在网页点"+ 例句"给已存在的词加出处,笔记里什么都没加。
+- **根因**:`bridgeAddWord` 里"按索引兜底查目标词在哪"这段代码**只在 `alias` 存在时才跑**(`if (alias && !(existing instanceof TFile))`)。而网页"+ 例句"按钮点击时根本不带 `folder` 参数,拼路径永远落在 `primaryVocabFolder()`(第一个词典)——如果这个词其实存在于**别的**词典文件夹,路径判重失败,又因为没有 alias 所以兜底也不跑,于是在错误的默认文件夹里新建了一个同名重复笔记,例句写进了那个新文件里,Hz 打开的还是原来那篇,看着"什么都没加"。
+- **修法**:把索引兜底检查从"只在加别名时"改成"不管加不加别名都跑"。这是这条判重逻辑第二次因为"只在某个分支里生效"被绕过(上面 v1.0.30 是 Obsidian 端,这次是桥接端的同一类根因),提醒:以后新加"判断词是否已存在"的代码,默认应该走统一的索引兜底,不要按场景选择性跳过。
+
+## 修复:cloze 卡 / 悬浮卡出处列表 / 桥接悬浮卡的 LaTeX 都显示不出来(插件 v1.0.31~1.0.34)
+连续三次被 Hz 追问"这个卡片为什么没有 LaTeX",每次都是不同的代码路径没走 Markdown 渲染管线,统一修完:
+- **背单词 cloze 卡正面**(`applyClozeFront`):之前 `wordEl.setText(buildCloze(...))` 纯文本塞进去,LaTeX/加粗斜体全部原样显示成源码。改成走 `MarkdownRenderer.render`(挂一个 `_frontComp` 生命周期,`onClose` 一并 unload)。
+- **悬浮卡"出现过的地方"例句预览**(`renderSentence`):原本手写 TreeWalker 拼「纯文本 + 命中词包 `<b>`」,压根没渲染 Markdown。改成先 `MarkdownRenderer.render(sentence)`,渲染完再用抽出来的 `boldMatchesInPlace(el, word)` helper 包命中词——**这个 helper 现在被 `renderSentence` 和 `lexisBlockHtml`(桥接给浏览器扩展用)共用**,统一了两条本来分叉的实现。
+- **发给浏览器扩展的悬浮卡 HTML**(`bridgeFullHtml`):就算正文用了 `MarkdownRenderer.render`,LaTeX 的 MathJax 排版是**异步排队**的,`render()` 的 Promise resolve 时公式可能还没排完版——`div.innerHTML` 抓到的是没转换的公式源码,序列化发给扩展后就永远定格在那个状态(扩展自己没有 MathJax,没法事后补救)。修法:渲染完之后、序列化之前,**`await finishRenderMath()`**(`obsidian` 包导出的公共 API,flush 全局 MathJax 排队)。`lexisBlockHtml` 里桥接端的出处列表(原来是 `boldWord` 纯字符串拼接)也同步改成走渲染管线 + 同一次 flush,批量渲染完统一 flush 一次,不是每条出处各 flush 一次。
+- 配套 CSS:`.lexis-rv-word p`/`.lexis-web-occ p` 都补了 `margin` 重置,不然 `MarkdownRenderer` 包出来的 `<p>` 自带外边距会把原本单行的卡片挤出多余空隙。
+
+## feat:```lexis-home``` 代码块(插件 v1.1.0)
+- Hz 想要"主页摘要能直接嵌进笔记里,还能点进去看"。新增 `renderHomeBlock(el)`:复用现成的 `computeStats()`/`renderHeatmap()`,渲染统计(待复习/新词/总计)+ 热力图;整块热力图区域可点击直接 `openHome()`(跳真正的 Lexis 主页),外加「▶ 开始复习」「📕 打开主页」两个按钮。跟已有的 `​```lexis-heatmap`(只出热力图,无统计无按钮)并存,不冲突。
+- 这是本轮唯一的 **feat**(新功能),其余都是 fix——按新定下的版本号规范,MINOR 归零 PATCH:`1.0.34 → 1.1.0`。
