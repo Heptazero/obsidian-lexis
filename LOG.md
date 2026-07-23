@@ -585,3 +585,99 @@
 - 这次是**另一个并行的 Claude 会话**(署名 Fable 5,用 Hz 自己的 GitHub 账号身份提交)独立做的,和上面 Sonnet 5 那次 HANDOFF.md 改动是同一时间窗口里两边分头进行、Hz 事后手动 merge 到 main 的——**这个项目第二次出现类似的并行会话情况**(上一次是 v1.0.20/1.0.21 的 PDF overlay 重写),记一笔提醒以后接手的会话:如果 git log 里出现自己不认识的提交,先 `git log`/`git diff` 看清楚再动,不要冒然覆盖。
 - 内容对应四阶段路线图里"阶段 4"的文档那一半:README 重新定位为「个人词典」(不再局限于背单词),补了一节双语设计论证——延展心智(随身词典=记忆本身)、注意假说(高亮让人注意到但不代表记住)、偶然习得(靠反复相遇,不靠查一次)、FSRS 提取练习补上高亮做不到的那一半,每条都带文献/项目链接。
 - **代码那一半(网页被动相遇记账)还没做**——阶段 4 目前只完成了文档部分。
+
+## feat:四阶段路线图·阶段 1——高亮渐隐 + 生命周期(归档/常驻)+「例句」改名「出处」(插件 v1.2.0,浏览器扩展 v1.0.16)
+
+### 高亮渐隐
+- 高亮强度不再是恒定的 `highlightOpacity`,改成 `fadeAlphaFor(entry)`:按 FSRS **stability**(不是 retrievability)算一条 `progress = s/(s+K)` 的曲线(K=20 天,内置常量不开放设置),`alpha = 1 - progress*(1-floor)`。
+- **为什么用 stability 不用 retrievability**:retrievability 是"现在还记得多少",哪怕不复习也会随日历时间天天往下掉——用它做渐隐会导致高亮"没事自己变淡/变浓",不满足"复习几轮才肉眼可见变淡"这个验收标准的直觉。stability 只在真实复习事件后才变(`applySchedule` 写入),两次复习之间完全稳定,渐隐只由"你复习了没有"驱动,不受"你今天有没有打开 Obsidian"影响。
+- 从未复习过的新词(`cardS` 为 null)固定全强度,归档的词单独处理(见下)。设置里只暴露"最淡不低于"(`fadeFloor`)这一个下限参数,曲线形状本身按规格"你决定",不开放成设置,避免选项爆炸。
+- **性能设计**:`rebuildIndex` 时把每个文件的 `cardS`/`archived`/`pinned` 算好缓存进 index entry(标题和别名共用同一份,一个文件只读一次 frontmatter),但渲染时(`inlineStyleForEntry`、PDF 的 `scanPdfLayer`)才拿这些缓存值 + **实时读取** `fadeByMemory`/`fadeFloor` 设置来算最终 alpha——好处是改渐隐开关/下限这两个设置不用 `rebuildIndex`,调用 `refreshAllViews()` 立刻生效。这是吸取了这轮会话前面"排除标签设置忘了触发 rebuild"那个坑的教训,这次直接设计成不需要 rebuild。
+
+### 生命周期(归档/常驻)
+- frontmatter 新增 `lexis-status`(值 `archived`,默认省略=`active`)和独立布尔 `lexis-pinned`。**只叠加在 FSRS 结果之上**:`setArchived`/`setPinned` 只碰这两个字段,从不touch `lexis-s/d/due/last/reps/lapses`。
+- **归档的视觉处理跟 PDF 隐形代理层是同一个思路**:`.lexis-hl` span 照样包(不然 hover/click 的事件代理机制就没了),但 `inlineStyleForEntry` 对 `entry.archived` 直接返回 `text-decoration:none`——视觉上完全不显示,但悬停/点击还能用,满足"退出高亮但悬停查询仍然可用"。一开始设计想的是"整个从 buildMatcher 排除"(压根不包 span),后来想清楚那样连 hover 都没了,不满足验收标准,改成现在这个"隐形代理"方案。
+- PDF 端:`scanPdfLayer` 对归档词直接 `continue` 跳过,不画 overlay 荧光笔矩形(内联 span 保留)。浏览器扩展端更简单粗暴:`bridgeWordList` 直接不把归档词发过去——扩展自己没有渐隐/归档这套概念,不发等于不高亮,最省事。
+- `buildQueue`(复习队列)、`computeStats`(主页统计的 due/fresh)都排除归档词;`computeStats` 的 `total` 仍然计入(词还在库里,只是不参与复习)。
+- **入口三处**:悬浮卡标题栏按钮(`.lexis-popover-archive`,归档词显示"↩ 恢复"、活跃词显示"🎓 归档")、命令面板(`archive-word`/`restore-word`/`toggle-pin-word`,都用 `checkCallback` 按当前笔记状态决定要不要出现)、文件右键菜单(`file-menu` 事件,同时给归档和常驻两个菜单项)。
+- **恢复的二选一**:直接取消归档默认保留原有 FSRS 进度(`setArchived(file, false)`);但用户可能想"重新当新词学",所以做了 `LexisRestoreModal`——两个按钮"保留原有进度"/"重置为新词",后者顺手清空 `lexis-s/d/due/last/reps/lapses`。这是唯一需要用户二选一的地方,其余操作(标归档、切换常驻)都是一键直接生效,不额外弹窗。
+- 迁移命令 `migrate-familiar-tag-to-archived`:把带 `#熟悉` 标签、还没归档的词批量置为 `archived`,兼容老用户之前手动打标签的习惯。
+
+### 文案统一:「例句」→「出处」
+- UI、设置、悬浮卡按钮/提示、README 里所有"例句"字样改成"出处";cloze 卡面"例句填空"改名"出处填空",机制不变。浏览器扩展的"+ 例句"按钮和相关提示语同步改成"+ 出处"。
+- **笔记正文里的实际标题不强制迁移**:`insertUnderHeading` 加了 `legacyNames` 参数,识别小节时会**同时认**"例句"(老笔记留下的)和"出处"(新名字),但新建小节永远用"出处"。也就是说老笔记里的 `#### 例句` 标题会一直被正常识别、正常追加内容,不会被插件自动重写——避免不请自来地批量改用户已有笔记的文字。`template/单词模板.md`(vault 根目录的默认模板)的标题改成了"出处"。
+- **顺带把"批注"小节标题也做成可配置**(Hz 审查这轮改动时追加的要求,原话:"不一定叫批注,自己写一个样子到时候替换"):新设置「批注小节标题」,可以只填文字(比如"引用",默认按 `####` 级别新建),也可以带上级别(比如"## 引用")——`insertUnderHeading` 的 `heading` 参数因此从"标题文字"改成了"完整标题行"(`insertExampleLine` 等其它调用点同步改成传 `"#### 出处"` 这种完整行)。跟"出处"同一个思路:改名不强制迁移旧笔记,`annotationHeadingText()`/`annotationHeadingLine()` 两个 helper 统一衍生当前设置值,所有识别批注小节的地方(`isScaffoldOnly`、`bridgeMoveWord` 迁移批注、`bridgeAnnotate` 写入)都改成**同时认当前自定义名字 + 旧默认"批注"**,顺手把 `extractSection(md, name)` 也泛化成支持传数组。这次没有把"近义词/同根词/形近词/辨析"这套关系分类也做成可配置——那是一整套分类体系(用户手写在 `​```lexis rel <类型>` 代码块参数里,还有固定的展示顺序),改动量和"批注"这种单一标题名完全不是一个量级,不认识的类型现在会兜底归进"相关"分组(链接本身不会丢),这个降级已经算合理,先不动。
+
+- **术语改名**:Hz 审查时反馈"毕业/重新入学/钉住"这几个名字不好听,统一改成**归档/恢复/常驻**——`lexis-status` 的值也从 `graduated` 同步改成 `archived`(还没提交发布,不存在旧数据迁移问题,直接全量改名,不留兼容层)。相关标识符也一起改了:`setGraduated`→`setArchived`、`LexisReenrollModal`→`LexisRestoreModal`、CSS `.lexis-popover-grad`→`.lexis-popover-archive`、命令 id `graduate-word`/`reenroll-word`→`archive-word`/`restore-word`、迁移命令 id 同步改成 `migrate-familiar-tag-to-archived`。悬浮卡按钮 emoji 从 🎓 改成 📦,右键菜单图标从 `medal`/`rotate-ccw` 换成 Lucide 自带的 `archive`/`archive-restore`,语义更贴切。**注意**:HANDOFF.md 里锁死的阶段 2/3/4 原始 prompt 引用块里仍然写的是"毕业/钉住/graduated"这些旧词——那是 Hz 自己的原话,没有改动(不该改),阶段 2/3 提到 `lexis-status`/`lexis-pinned` 时心里换算成 `archived`/`pinned` 现在的叫法即可,概念完全一致,只是字面用词还没更新。
+
+### 约束核对
+- `node --check main.js`、`node --check browser-extension/content.js` 都过。
+- 桥接服务端改了(`bridgeWordList` 过滤归档词),`manifest.json` 按"新功能"规则 MINOR 归零 PATCH:`1.1.0 → 1.2.0`;`/ping` 直接读 `this.manifest.version`,不用单独改代码。浏览器扩展 `content.js` 改了文案,`browser-extension/manifest.json`:`1.0.15 → 1.0.16`。
+
+## feat:四阶段路线图·阶段 2——相遇记账 + 悬停回流 FSRS 排期(插件 v1.3.0)
+
+### 相遇记账
+- 只记"强相遇"三种事件,全部是**现成代码路径上加一行记账**,没有新增任何计时器/停留时长/滚动/点击深度采集:
+  1. **悬停查释义**:Obsidian 端 `showPopover` 和浏览器扩展端 `bridgeWordDetail`(扩展的 detail 请求打到这个接口)都调 `recordEncounter(file, "hover")`,顺带触发 `hoverFeedback`(见下)。
+  2. **划词加出处**:`addWordFromSelection`(vault 内滑词"➕加入词库")、`addExampleToWord`(悬浮卡"➕收藏出处")、`bridgeAddWord`(网页端 POST /add,新建和追加两条分支都记)都调 `recordEncounter(file, "add")`。
+  3. **打开词条笔记本身**:新增 `file-open` 工作区事件监听,命中词典文件夹就记 `recordEncounter(file, "open")`。
+  - FSRS 排期弹出的复习不算相遇——那是算法推的,不是生活里自然遇到的,`buildQueue`/`LexisReviewView` 完全没碰这套记账。
+- **存储位置**:不写 frontmatter——悬停很频繁,写 frontmatter 会不停刷新笔记 mtime、污染 git 历史(如果笔记本身在别的 git 仓库里的话)。改成在插件自己的 data 目录下建一个 sidecar 文件 `encounters.json`(跟 `data.json` 同级,`this.app.vault.configDir + "/plugins/" + manifest.id`),已加进 `.gitignore`(和 `data.json` 一样是个人数据,不进公开仓库)。
+- **计账粒度**:按**词条文件的标题**(`file.basename.toLowerCase()`)记,不是按命中它的具体别名/拼法——不然同一个词条,标题和别名会分裂成两条独立计数,数据就碎了。存的结构是 `{ hoverCount, encounterCount, lastEncounter(YYYY-MM-DD) }`。
+- **内存攒批、防抖落盘**:`recordEncounter` 只改内存里的 `this._encounters`,然后 `setTimeout` 1.5 秒后落盘(`saveEncounters`),期间连续多次相遇只会触发一次磁盘写入;`onunload` 时如果还有没落盘的改动,补一次即时保存,不然插件关掉/重载那一下的最后几条记账会丢。
+
+### 悬停回流 FSRS 排期
+- **设计**:悬停 = 一次失败的提取(没想起来才要点开查)。如果这个词已经背过(`lexis-s` 不是 null)且当前 `lexis-due` 比"今天 + N 天"还远(N 默认 3,设置可调 `hoverFeedbackDays`),就直接把 `lexis-due` 拉到今天——让它尽快出现在复习队列里。
+- **N 的作用是触发阈值,不是目标值**:不是把 due 挪到"今天+N天",而是"只要现在比 N 天后还远,就直接拉到今天"。这样已经快到期的词(due 在 N 天以内)悬停不会有任何多余动作,只有明显偏远的词才会被拉近,拉近后就是"下次打开复习就能看到",不用等。
+- **红线核对**:整个过程只写 `lexis-due` 一个字段,`lexis-s`/`lexis-d`(stability/difficulty)完全不碰,也**没有调用 `applySchedule`**——不会被误记成一次真实复习(不加复习次数、不进 `reviewLog` 热力图)。这是设计里明确要求的两条约束之一(另一条是阶段 3 的候选筛选不能是加权评分),写代码时特意把 `hoverFeedback` 和 `applySchedule` 完全分开,没有复用同一条写入路径,避免以后有人"顺手"把两者合并出 bug。
+- 已归档的词:悬停只走 `recordEncounter`(仍然记账,方便阶段 3 判断"这词最近有没有人翻"),不触发 `hoverFeedback`(归档词本来就退出复习队列了,拉 due 没有意义)。
+- 两个新设置(开关 + 阈值滑块)放进"背单词 (FSRS)"区块,紧跟在"开始背单词"按钮后面。
+- **实测反馈修复**:Hz 测试时发现鼠标在同一个词上晃出晃入,短时间内连续弹好几次悬浮卡,`encounterCount` 也跟着涨好几下——不合理,应该算一次相遇。给 `recordEncounter` 加了个 (词+类型) 维度的 60 秒冷却:同一个词同一种相遇类型,60 秒内的重复触发直接跳过不计数。冷却窗口是代码里的常量,没有开放成设置(避免为这种实现细节增加选项)。
+
+### 约束核对
+- `node --check main.js` 过;浏览器扩展这轮**没有改任何 js 文件**(相遇记账和悬停回流全部是服务端逻辑,扩展本来就是通过 `/word` 和 `/add` 两个已有接口触发,不需要扩展自己新增代码),所以 `browser-extension/manifest.json` 版本号不变。
+- 服务端改了(`bridgeWordDetail`/`bridgeAddWord` 都插入了记账调用),`manifest.json` 按"新功能"规则 MINOR 归零 PATCH:`1.2.0 → 1.3.0`。
+
+## feat:四阶段路线图·阶段 3——淘汰法庭(插件 v1.4.0)
+
+### 新生命周期状态:retired(淘汰)
+- 在归档(`archived`)、常驻(`pinned`)之外新增第三个终态 `lexis-status: retired`。跟归档的关键区别:归档词还留一个隐形代理 `.lexis-hl` span 在文中(悬停仍可查,只是不显示),淘汰更彻底——`buildMatcher()` 直接把 `retired` 的词从匹配模式里剔除,连 span 都不包,所以**悬停也不会触发**(没有 span 就没有 mouseover 事件源)。这个差异是 spec 原文明确要求的("退出高亮与复习,词条文件保留(悬停不再触发)"),不是我自己加的限制。
+- `readLifecycle`/`rebuildIndex`/`bridgeWordList`/`buildQueue`/`computeStats` 里所有原来判断 `archived` 的地方,都同步加上了 `retired` 的判断——两者在"要不要参与复习/统计/发给浏览器扩展"这几件事上处理完全一样,只有"要不要保留隐形 hover 代理"这一点不同。
+- `setRetired(file, retired)` 跟 `setArchived`/`setPinned` 结构完全对称,写 `lexis-status`/删 `lexis-status`,写完 `rebuildIndex(false)`。目前只有"淘汰候选"列表的按钮会调它,没有单独开命令面板/右键菜单入口——候选列表本身已经是唯一入口,没必要重复开路径(跟阶段 1 的归档/恢复不一样,那个需要在没有候选列表的情况下也能随手操作)。
+
+### 淘汰候选:硬条件筛子,不是加权评分
+- `buildRetireCandidates()` 三个条件全部满足才入列(spec 原话强调"不做加权评分公式,只做硬条件筛子",这是两个高风险点之一,没有妥协):
+  1. `lexis-pinned` 非 true,且 `lexis-status` 不是 `archived`/`retired`(spec 原文只写了"不是 graduated",我把"不是 retired"也加了进去——淘汰过的词不应该又跑回候选列表里,这是显然的补全,不是重新设计)。
+  2. 入库天数 ≥ 阈值:入库时间直接用 `file.stat.ctime`(文件创建时间),没有另外发明一套"入库日期"字段。
+  3. 距上次自然相遇天数 ≥ 阈值:取 `encounters.json` 里这个词的 `lastEncounter`;从来没被 `recordEncounter` 记过的词,退回用入库日期当基准(这样"入库很久但压根没人翻过"的词也进得了候选,不会因为没有相遇记录就被漏掉)。
+  - spec 原文两个"≥ N 天"条件都写的 N,没有分别给默认值——按"用同一个阈值管两个条件"处理,新设置 `retireCandidateDays`(默认 90)。
+- 候选按"距上次相遇天数"降序排列,每行展示证据:入库日期、相遇次数、悬停次数(细分出来,因为悬停是"没记住才查"的强信号)、vault 内出处数(复用现成的 `findOccurrences`,不是重新统计)、距上次相遇天数。
+- 三个操作按钮,**判决权明确交给用户,不是算法自动执行**:🗑️ 淘汰(`setRetired`)、📌 留下(直接复用阶段 1 已有的 `setPinned`,不是重新写一套)、📦 已掌握(复用阶段 1 的 `setArchived`)。支持勾选多个 + 底部批量操作栏,内部就是对选中的文件依次跑同一个单条操作函数。
+- **入口**:`LexisHomeView.render()` 末尾追加 `renderRetireCandidates()`,整个计算是 `async` 的(要等 `findOccurrences` 逐个候选查出处数),用"计算中…" 占位,算完再填。**完全被动**:不主动弹 `Notice`,不在状态栏/图标加角标,只有用户自己打开或点"刷新"才会重新计算——这是 spec 明确要求的第三点("平时不打扰")。
+- **实测反馈**:Hz 问阈值能不能直接在主页调,不用跑设置页。在候选区顶部加了个滑块(`Setting().addSlider(...)`),拖动时写 `this.plugin.settings.retireCandidateDays` 并防抖 400ms 后 `this.render()` 重算——候选计算要挨个查出处数不便宜,不能每拖一格就重算一次。设置页里原来那个同名滑块保留没删,两处改的是同一个设置值,互不冲突,图快就在主页调,想要全局默认值就去设置页。
+
+### 约束核对
+- `node --check main.js` 过。这轮浏览器扩展没有改代码,`browser-extension/manifest.json` 版本号不变。
+- `manifest.json` 按"新功能"规则 MINOR 归零 PATCH:`1.3.0 → 1.4.0`。
+
+## feat:四阶段路线图·阶段 4——网页被动相遇 + README 设计论证补章(插件 v1.5.0,浏览器扩展 v1.0.17)
+
+至此四阶段路线图**全部落地**,阶段 4 本身是两件独立的小事:
+
+### 被动相遇:高亮渲染出来就算一次
+- **Obsidian 端**:新增 `passiveEncounter(file)`,按"文件+当天"去重(`_passiveSeenToday` Set,`file.path + "|" + todayStr()` 当 key),命中就调 `recordEncounter(file, "passive")`(不计入 `hoverCount`,只计 `encounterCount`/`lastEncounter`——被动出现和主动悬停不是一回事,后者是"没记住才查",前者只证明"出现过")。挂点是两处高亮渲染的热路径:`wrapMatchesInElement`(阅读模式 + PDF 共用这一个函数)里 `entry = this.index.get(key)` 之后,以及 `setupLiveExtension` 的 CodeMirror 装饰构建器 `build(view)` 里——这两处每次渲染/每次编辑都会重新跑一遍,所以去重检查必须够便宜:一次 `Set.has()`,不做任何更重的事,踩中 spec 明确写的"记账不得拖慢渲染"这条红线。
+- **浏览器扩展端**:`content.js` 的 `wrap(textNode)` 在真正命中高亮词的地方调 `queuePassiveEncounter(key)`,内部也是"词+当天"去重(`passiveSeen` Set),去重后进 `passiveQueue`,2 秒防抖后 `flushPassiveEncounters()` 批量发一次(不是每命中一个词就发一次请求)。新增消息类型 `encounter`(`background.js`)→ `POST /encounter`(新桥接路由)→ 服务端 `bridgeEncounter(payload)` 批量解析 key 并调用同一个 `passiveEncounter`。**离线就静默丢弃,不排队重试**——这跟 `/add` 的离线队列机制不一样,因为被动相遇是弱信号,丢几条不影响正确性,不值得为它引入排队复杂度。
+- **两边都去重不是重复劳动**:扩展端的 `passiveSeen` 只在当前这一次页面加载的生命周期内有效(标签页一关或刷新就清空),挡的是"同一个页面反复扫描/滚动触发 MutationObserver 重扫"这种同会话内的重复;服务端的 `_passiveSeenToday` 是插件整个运行期间常驻的,挡的是"今天换个标签页/换一次浏览会话又访问了同一个页面"这种跨会话重复。少了任何一边,验收标准"同一词同一天重复访问不重复计数"都不成立。
+
+### README 设计论证补章
+- 新增"Why it fades, why it asks, why it eventually lets a word go"一节(中英双语),紧跟在原有"Why a personal dictionary"后面,风格照抄:每条论据都诚实说清楚"支持什么、不支持什么",不夸大。四条对应四阶段已经做的功能:
+  1. **渐隐**:类比界面研究里的 [banner blindness](https://en.wikipedia.org/wiki/Banner_blindness)(对重复视觉提示的习惯化)——高亮要保持有意义,显著性就得是稀缺资源,词典的终点是消失,不是永远占着地方。
+  2. **悬停回流**:接 [testing effect](https://en.wikipedia.org/wiki/Testing_effect) 和 [desirable difficulty](https://en.wikipedia.org/wiki/Desirable_difficulty) 的框架——"尝试回忆"本身有信息量,专门的复习软件只能在自己的复习环节里观察你,Lexis 能在你真实阅读、当场卡壳的那一刻观察到,这是背单词软件天然拿不到的信号。
+  3. **淘汰法庭**:词的重要性没法在添加时预测,只能靠"长期没有自然相遇"这个事实倒推——但这是拿出来给用户看的证据,不是算法自己下的判决,呼应候选列表"不做加权评分"的设计。
+  4. **出处**:类比 [牛津英语词典](https://en.wikipedia.org/wiki/Oxford_English_Dictionary) 最初靠志愿者寄"引文卡片"(citation slips)蒸馏出释义的阅读计划——个人词典的出处列表是同一套模式,自动化给一个人用。
+  - 每条都用真实存在、可以点开验证的 Wikipedia 链接(不是编的),跟原有小节引用 Clark & Chalmers / Schmidt 注意假说的那种"够权威但不算太学术"的引用力度保持一致。
+
+### 约束核对
+- `node --check main.js`、`node --check browser-extension/content.js`、`node --check browser-extension/background.js` 都过。
+- 服务端加了新路由 `/encounter`,`manifest.json` 按"新功能"规则 MINOR 归零 PATCH:`1.4.0 → 1.5.0`;浏览器扩展这次真的改了代码(`content.js` + `background.js`),`browser-extension/manifest.json`:`1.0.16 → 1.0.17`。
+- 四阶段路线图到这里全部完成,HANDOFF.md 的路线图小节和各阶段标题都已标注 ✅。

@@ -78,7 +78,7 @@
       } else {
         detailCache.delete((word || "").toLowerCase());
         if (alias) detailCache.delete(alias.toLowerCase());
-        toast(r.dup ? "这条已经在例句里了" : r.created ? alias ? `已将「${alias}」归入「${r.word}」` : `已新建单词「${r.word}」` : `已给「${r.word}」加例句`, true);
+        toast(r.dup ? "这条已经在出处里了" : r.created ? alias ? `已将「${alias}」归入「${r.word}」` : `已新建单词「${r.word}」` : `已给「${r.word}」加出处`, true);
         if (r.created && alias) {
           // 本地即刻高亮别名,不等 sync 来回
           const ak = alias.toLowerCase();
@@ -201,6 +201,25 @@
     return false;
   }
 
+  // ---- 被动相遇:页面上扫到高亮词就算"出现过一次",按"词+当天"去重,批量报给桥接(不追踪停留时长/滚动) ----
+  const passiveSeen = new Set(); // 本页会话内已经报过的词(word|日期),同一页反复重扫/滚动不会重复发
+  let passiveQueue = new Set();
+  let passiveTimer = null;
+  function queuePassiveEncounter(key) {
+    const dayKey = key + "|" + new Date().toISOString().slice(0, 10);
+    if (passiveSeen.has(dayKey)) return;
+    passiveSeen.add(dayKey);
+    passiveQueue.add(key);
+    clearTimeout(passiveTimer);
+    passiveTimer = setTimeout(flushPassiveEncounters, 2000);
+  }
+  async function flushPassiveEncounters() {
+    if (!passiveQueue.size) return;
+    const keys = [...passiveQueue];
+    passiveQueue = new Set();
+    try { await chrome.runtime.sendMessage({ type: "encounter", payload: { keys } }); } catch (_e) {}
+  }
+
   function wrap(textNode) {
     const text = textNode.nodeValue;
     regex.lastIndex = 0;
@@ -210,6 +229,7 @@
       const key = m[0].toLowerCase();
       if (!keySet.has(key)) continue;
       found = true;
+      queuePassiveEncounter(key);
       if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
       const span = document.createElement("span");
       span.className = HL;
@@ -409,11 +429,11 @@
       }
       titleEl.appendChild(b);
     }
-    // ➕ 给这个词加例句(抓页面上它所在的那句)
+    // ➕ 给这个词加出处(抓页面上它所在的那句)
     const addBtn = document.createElement("button");
     addBtn.className = "lexis-web-addbtn";
-    addBtn.textContent = "+ 例句";
-    addBtn.title = "把这个词在本页所在的句子加进它的例句";
+    addBtn.textContent = "+ 出处";
+    addBtn.title = "把这个词在本页所在的句子加进它的出处";
     const targetWord = data.base || data.word;
     addBtn.addEventListener("click", async (ev) => {
       ev.preventDefault();

@@ -87,6 +87,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         sendResponse(await r.json());
         return;
       }
+      if (msg.type === "encounter") {
+        // 被动相遇:低价值信号,离线就静默丢弃,不排队重试(跟 add 不一样,这个不算真数据丢失)
+        const u = new URL(base(cfg) + "/encounter");
+        if (cfg.token) u.searchParams.set("token", cfg.token);
+        try {
+          const r = await fetch(u.toString(), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(msg.payload || {}) });
+          sendResponse(await r.json());
+        } catch (e) { sendResponse({ ok: false, error: "offline" }); }
+        return;
+      }
       if (msg.type === "add") {
         const u = new URL(base(cfg) + "/add");
         if (cfg.token) u.searchParams.set("token", cfg.token);

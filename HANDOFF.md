@@ -4,20 +4,25 @@
 
 ## 一句话背景
 
-用户(Hz)的 Obsidian 单词学习库在 `/Users/heptazero/Documents/2en`,自建插件 **Lexis**(`.obsidian/plugins/lexis/`,GitHub: https://github.com/Heptazero/obsidian-lexis)。当前版本:**插件 v1.1.0** / **浏览器扩展 v1.0.15**(两个 `manifest.json` 版本号独立,互不绑定)。
+用户(Hz)的 Obsidian 单词学习库在 `/Users/heptazero/Documents/2en`,自建插件 **Lexis**(`.obsidian/plugins/lexis/`,GitHub: https://github.com/Heptazero/obsidian-lexis)。当前版本:**插件 v1.5.0** / **浏览器扩展 v1.0.17**(两个 `manifest.json` 版本号独立,互不绑定)。
 
 项目定位已经从"背单词工具"扩展为**「全方位个人词典」**——词典文件夹里的笔记标题可以是任何语言的单词、术语、概念,不局限于英语背诵这一件事。这个定位决定了很多设计取舍(比如高亮匹配必须语言无关、复习卡不该叫"例句"该叫"出处")。
 
-## 现状总览(v1.1.0 有什么,cold-start 先看这个再去翻 LOG.md 细节)
+## 现状总览(v1.5.0 有什么,cold-start 先看这个再去翻 LOG.md 细节)
 
 - **文件夹即词典**:可配多个"词典"文件夹,每个笔记标题就是一个词条(支持 frontmatter `aliases` 别名)。
 - **高亮**:阅读模式 + 实时预览 + Obsidian 内置 PDF 阅读器(pdf.js `.textLayer`)三处都高亮。匹配语言无关:`boundedSource(word)` 只在词首/尾是 `[A-Za-z0-9_]` 时才加 ASCII 词边界,中日韩不加(JS 原生 `\b` 只认 ASCII,不加边界会漏配非英文词)。词条笔记内文里出现**自己**的标题/别名不会高亮自己(`_selfKeysByPath`,rebuildIndex 时按文件收集),但提到别的词库词照常高亮。
-- **PDF 高亮架构**:`.textLayer` 内只注入隐形 `.lexis-hl`(纯做 hover/click 事件代理,视觉上 `text-decoration:none`);真正的荧光笔矩形画在独立的 `.lexis-pdf-hl-layer` 层,**必须挂在 `.page` 下、`.textLayer` 前面**(直接 `layer.insertAdjacentElement("beforebegin", hl)`)——挂进 `.canvasWrapper`(canvas 的父容器)会导致裁切/定位跟着 canvasWrapper 走,是这轮刚修的坑,别重犯。按 `getBoundingClientRect` 逐 span 定位画矩形。
-- **悬浮卡**:hover `.lexis-hl` 弹卡片,内容 = 整篇笔记按文档顺序渲染的 HTML + 相关词 + 出处列表。出处/例句预览现在**统一走 `MarkdownRenderer.render`**(不再是纯文本拼字符串),LaTeX/加粗斜体能正常显示;渲染完再用 `boldMatchesInPlace(el, word)` 把命中词包一层 `<b>`。
-- **FSRS 背单词**:翻卡复习,进度写进 `lexis-*` frontmatter;两种卡面——单词→整篇 / 例句填空(cloze),cloze 卡正面现在也走 Markdown 渲染管线(以前是 `setText` 纯文本,LaTeX 显示不出来)。
-- **Lexis 主页**:统计(待复习/新词/总计)+ 热力图 + 按标签/词频/随机选集合开始复习。新增两个可嵌笔记的代码块:`​```lexis-home`(统计+热力图摘要,点击跳真正主页或直接开始复习)、`​```lexis-heatmap`(只嵌热力图)。
+- **高亮渐隐 + 生命周期(v1.2.0 新增,四阶段路线图阶段 1)**:高亮强度不再恒定,`fadeAlphaFor(entry)` 按 FSRS `stability`(不是 retrievability——后者哪怕不复习也随日历时间天天变,会让高亮"没事自己变淡/变浓")算一条 `progress = s/(s+K)` 单调曲线,新词(`cardS` 为 null)全强度,淡到设置里的 `fadeFloor` 下限为止;`rebuildIndex` 时把 `cardS`/`archived`/`pinned` 缓存进每个 index entry(标题和别名共用同一份,按文件算一次),渲染时(`inlineStyleForEntry`/PDF `scanPdfLayer`)实时读取,改设置不用重建索引。词条生命周期:frontmatter `lexis-status: archived`(归档)+ 独立布尔 `lexis-pinned`(常驻),都只叠加在 FSRS 结果之上,**从不直接改 `lexis-s/d/due` 等内部字段**(`readLifecycle`/`setArchived`/`setPinned`)。归档词的处理思路和 PDF 隐形代理层一样:`.lexis-hl` span 照样包(hover/click 事件代理不丢),`inlineStyleForEntry` 对归档词直接返回 `text-decoration:none`,视觉上完全不显示;`buildQueue`/`computeStats` 跳过归档词;`bridgeWordList` 直接不发给浏览器扩展(扩展没有渐隐/归档概念,不高亮最省事)。归档/恢复入口三处:悬浮卡按钮(`.lexis-popover-archive`)、命令面板(`archive-word`/`restore-word`/`toggle-pin-word`)、文件右键菜单;恢复是否重置 FSRS 走 `LexisRestoreModal` 二选一确认。一次性迁移命令 `migrate-familiar-tag-to-archived` 把带 `#熟悉` 标签的词批量转成归档。
+- **PDF 高亮架构**:`.textLayer` 内只注入隐形 `.lexis-hl`(纯做 hover/click 事件代理,视觉上 `text-decoration:none`);真正的荧光笔矩形画在独立的 `.lexis-pdf-hl-layer` 层,**必须挂在 `.page` 下、`.textLayer` 前面**(直接 `layer.insertAdjacentElement("beforebegin", hl)`)——挂进 `.canvasWrapper`(canvas 的父容器)会导致裁切/定位跟着 canvasWrapper 走,是这轮刚修的坑,别重犯。按 `getBoundingClientRect` 逐 span 定位画矩形;已归档的词直接 `continue` 跳过,不画矩形。
+- **悬浮卡**:hover `.lexis-hl` 弹卡片,内容 = 整篇笔记按文档顺序渲染的 HTML + 相关词 + 出处列表。出处预览统一走 `MarkdownRenderer.render`(不是纯文本拼字符串),LaTeX/加粗斜体能正常显示;渲染完再用 `boldMatchesInPlace(el, word)` 把命中词包一层 `<b>`。标题栏右侧有个归档/恢复按钮。
+- **FSRS 背单词**:翻卡复习,进度写进 `lexis-*` frontmatter;两种卡面——单词→整篇 / 出处填空(cloze,原名"例句填空"),cloze 卡正面走 Markdown 渲染管线(不是 `setText` 纯文本)。已归档的词不进复习队列。
+- **Lexis 主页**:统计(待复习/新词/总计,归档词不计入待复习/新词但计入总计)+ 热力图 + 按标签/词频/随机选集合开始复习。两个可嵌笔记的代码块:`​```lexis-home`(统计+热力图摘要,点击跳真正主页或直接开始复习)、`​```lexis-heatmap`(只嵌热力图)。
 - **划词加词**:普通笔记 + PDF 里都有"选词药丸";新词判重**统一走索引**(标题或别名任一匹配即可,不再只按拼出来的文件路径判断),避免在错文件夹里建重复文件;支持"设为别名"直接并入已有词条(`LexisAliasPicker` 模糊搜标题+别名)。
-- **浏览器扩展**:`content.js` 高亮网页 + 悬浮卡。悬浮卡 HTML **由 Obsidian 端 `bridgeFullHtml` 渲染好再发过去**(扩展自己没有 MarkdownRenderer/MathJax)——发送前必须 `await finishRenderMath()` flush 一次 MathJax 排版队列,不然序列化抓到的是还没转换的公式源码,发过去就永远定格在那个状态。划词加词/设别名/批注、标签管理全部经本机桥接。
+- **浏览器扩展**:`content.js` 高亮网页 + 悬浮卡。悬浮卡 HTML **由 Obsidian 端 `bridgeFullHtml` 渲染好再发过去**(扩展自己没有 MarkdownRenderer/MathJax)——发送前必须 `await finishRenderMath()` flush 一次 MathJax 排版队列,不然序列化抓到的是还没转换的公式源码,发过去就永远定格在那个状态。划词加词/设别名/批注、标签管理全部经本机桥接。已归档的词不在 `/words` 列表里,扩展端完全不知道它存在。
+- **文案**:笔记里的"例句"小节已改名"出处"(`#### 出处`);写入逻辑对旧笔记留下的 `#### 例句` 标题仍然识别兼容(`insertUnderHeading` 的 `legacyNames` 参数),但新建小节永远用"出处",不会自动重写用户已有笔记的标题文字。批注小节标题也做成了设置项(`annotationHeading`,可以只填文字或带级别如 `## 引用`),同样的兼容思路——`insertUnderHeading` 现在第二个参数是"完整标题行"而不是纯文字。"近义词/同根词/形近词/辨析"这套关系分类还是硬编码的固定五项(`main.js` 里搜 `KNOWN`/`order`),没做成可配置——那是一整套分类体系(用户手写在代码块参数里 + 固定展示顺序),改动量比单一标题名大得多,目前没有需求驱动就没动。
+- **相遇记账 + 悬停回流(v1.3.0 新增,四阶段路线图阶段 2)**:只记"强相遇"三种事件——悬停查释义(`showPopover`/`bridgeWordDetail` 都调 `recordEncounter(file, "hover")`)、划词加出处(`addWordFromSelection`/`addExampleToWord`/`bridgeAddWord` 都调 `recordEncounter(file, "add")`)、打开词条笔记(`file-open` 工作区事件,`recordEncounter(file, "open")`)。数据存进插件 data 目录下的 `encounters.json`(跟 `data.json` 同级,已加进 `.gitignore`),不写进 frontmatter——按**文件标题**(不是命中的具体别名 key)记 `{hoverCount, encounterCount, lastEncounter}`,内存里改、`setTimeout` 防抖 1.5s 落盘(`recordEncounter`/`saveEncounters`),`onunload` 时补一次即时保存。悬停会额外触发 `hoverFeedback(file)`:如果这个词已经背过且 `lexis-due` 比设置的天数(默认 3,`hoverFeedbackDays`)还远,就把 `lexis-due` 直接拉到今天——只改 due,绝不碰 `lexis-s`/`lexis-d`,也不算一次复习(不经过 `applySchedule`);已归档的词悬停只记账不回流。两个新设置开关/滑块都在"背单词 (FSRS)"区块。`recordEncounter` 带 (词+类型) 60 秒冷却,鼠标在同一个词上短时间反复晃出晃入只算一次。
+- **淘汰法庭(v1.4.0 新增,四阶段路线图阶段 3)**:Lexis 主页新增"🗑️ 淘汰候选"区,`buildRetireCandidates()` 硬条件筛子(不是加权评分):`lexis-pinned` 非 true 且不是 `archived`/`retired`,入库天数(`file.stat.ctime`)和距上次自然相遇天数(取 `encounters.json` 的 `lastEncounter`,从没相遇过就用入库日期)都要 ≥ 设置里的阈值(默认 90 天,`retireCandidateDays`,两个条件共用同一个阈值)。候选按"距上次相遇天数"降序,每行展示入库日期/相遇次数/悬停次数/出处数(`findOccurrences`)/距上次相遇天数,三个按钮:🗑️淘汰(`setRetired`,新状态值 `lexis-status: retired`)/📌留下(复用阶段 1 的 `setPinned`)/📦已掌握(复用阶段 1 的 `setArchived`),支持勾选多个批量操作。"淘汰"比"归档"更彻底:归档词还留一个隐形代理 span(悬停仍可查),淘汰词直接从 `buildMatcher()` 的匹配模式里剔除,连 span 都不包,悬停自然也不会触发——`buildQueue`/`computeStats`/`bridgeWordList` 对 `retired` 的处理和 `archived` 完全一样(都排除)。整个候选区完全被动:只有用户自己打开/刷新主页才会计算和显示,不弹通知、不加角标;阈值滑块现在主页和设置页都能调(同一个设置值,拖动主页那个会防抖 400ms 后重算候选)。
+- **网页被动相遇 + README 设计论证(v1.5.0 新增,四阶段路线图阶段 4)**:高亮装饰实际渲染出来就算一次被动相遇(`passiveEncounter(file)`),按"文件+当天"去重(`_passiveSeenToday` Set),挂在 `wrapMatchesInElement`(阅读模式/PDF)和实时预览的 CodeMirror 装饰构建器(`setupLiveExtension`)这两个高亮渲染热路径上——去重检查只是一次 `Set.has`,足够便宜。浏览器扩展这边同样在 `wrap()` 里按"词+当天"去重(`passiveSeen`),攒批 2 秒防抖后经新的 `encounter` 消息类型 → `POST /encounter` → `bridgeEncounter` 批量落到服务端(离线就静默丢弃,不像 `/add` 那样排队重试,毕竟只是弱信号)。两边(浏览器 + Obsidian)都各自去重,不是叠床架屋:扩展端只挡"同一页反复扫描",挡不住"今天换个 tab 又开了同一个页面",这靠服务端按天去重的 Set 兜底。README 新增"Why it fades, why it asks, why it eventually lets a word go"一节(中英双语),分别给渐隐(banner blindness/习惯化)、悬停回流(testing effect/desirable difficulty)、淘汰法庭(重要性无法预测,算法只摆证据)、出处(OED reading programme 的 citation slips)四条设计依据配了真实可点的 Wikipedia 链接,风格和第一节"Why a personal dictionary"保持一致(诚实、每条都说清不支持什么)。
 
 完整编年史(每个版本号改了什么、为什么、踩过什么坑)在 `LOG.md` 里,按时间顺序追加,**不要图省事跳过不读**——很多"看起来很直觉的实现"背后是踩过坑才定下来的(比如 PDF 高亮不能用行内 `text-decoration`、`\b` 不能直接用于 CJK、词典下拉必须挂 `document.body` 而不是父容器)。
 
@@ -87,13 +92,13 @@ occ
 
 ---
 
-## 下一步:四阶段路线图(2026-07-22 定案,尚未开工)
+## 下一步:四阶段路线图(2026-07-22 定案;阶段 1~4 全部已落地,见下方各阶段标注和 LOG.md——路线图完整走完)
 
 Hz 已经把四段完整规格写死,**每段是一次独立会话的完整 prompt,按依赖顺序做,一阶段一验收再开下一段**。设计已定案,接手的会话不应该重新讨论或"优化"这些决定——尤其是下面标出的两个高风险点。
 
 原始 prompt 全文如下(未来直接把对应阶段整段喂给新会话即可,不用再手动拼提示词):
 
-### 阶段 1:高亮渐隐 + 生命周期(毕业/钉住)+「例句」改名「出处」
+### 阶段 1:高亮渐隐 + 生命周期(毕业/钉住)+「例句」改名「出处」 —— ✅ 已完成(v1.2.0,见上面"现状总览"和 LOG.md)
 
 ```
 先读仓库根目录的 HANDOFF.md 和 LOG.md 了解 Lexis 现状。本次任务给插件加「渐隐 + 生命周期」，并做一次文案统一。所有设计决定已定案，不要重新讨论,按规格实现:
@@ -115,7 +120,7 @@ Hz 已经把四段完整规格写死,**每段是一次独立会话的完整 prom
 验收:新词全强度高亮;复习几轮后同一词肉眼可见变淡;点毕业后正文无高亮但悬停有卡;#熟悉 迁移命令可用。
 ```
 
-### 阶段 2:相遇记账 + hover 回流
+### 阶段 2:相遇记账 + hover 回流 —— ✅ 已完成(v1.3.0,见上面"现状总览"和 LOG.md)
 
 ```
 先读 HANDOFF.md 和 LOG.md。前置:阶段 1(渐隐+生命周期)已合入。本次给 Lexis 加「相遇记账」,并让悬停行为反哺 FSRS。设计已定案:
@@ -134,7 +139,7 @@ Hz 已经把四段完整规格写死,**每段是一次独立会话的完整 prom
 验收:悬停后 sidecar JSON 里对应词计数与日期变化;悬停一个远期到期词后它出现在近期复习队列;关闭开关后行为恢复;性能上高亮渲染无可感知变慢。
 ```
 
-### 阶段 3:淘汰法庭(待淘汰候选列表)
+### 阶段 3:淘汰法庭(待淘汰候选列表) —— ✅ 已完成(v1.4.0,见上面"现状总览"和 LOG.md)
 
 ```
 先读 HANDOFF.md 和 LOG.md。前置:阶段 1、2 已合入(依赖 lexis-status/lexis-pinned 和 sidecar 相遇数据)。本次在 Lexis 主页加「淘汰候选」区。设计已定案——注意:不做加权评分公式,只做硬条件筛子 + 证据展示,判决权在用户:
@@ -157,7 +162,7 @@ Hz 已经把四段完整规格写死,**每段是一次独立会话的完整 prom
 验收:构造一个 90 天前入库、零相遇的测试词能出现在候选列;三个按钮各自生效且状态写入 frontmatter;钉住的词永久消失于候选;retired 词正文无高亮、悬停无卡、文件仍在。
 ```
 
-### 阶段 4(可选):网页被动相遇 + README 设计论证补章
+### 阶段 4(可选):网页被动相遇 + README 设计论证补章 —— ✅ 已完成(v1.5.0,见上面"现状总览"和 LOG.md)
 
 ```
 先读 HANDOFF.md 和 LOG.md。前置:阶段 1-3 已合入。两件独立小事:

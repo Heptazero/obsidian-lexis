@@ -8,7 +8,7 @@
  */
 
 const obsidian = require("obsidian");
-const { Plugin, PluginSettingTab, Setting, Notice, TFolder, TFile, Component, MarkdownRenderer, ItemView, finishRenderMath } = obsidian;
+const { Plugin, PluginSettingTab, Setting, Notice, TFolder, TFile, Component, MarkdownRenderer, ItemView, Modal, finishRenderMath } = obsidian;
 
 const LEXIS_REVIEW_VIEW = "lexis-review-view";
 const LEXIS_HOME_VIEW = "lexis-home-view";
@@ -24,6 +24,14 @@ const DEFAULT_SETTINGS = {
   highlightStyle: "wavy",
   highlightColor: "",
   highlightOpacity: 1,
+  // 高亮渐隐:强度随 FSRS stability 单调变淡,归档词完全不高亮(见 fadeAlphaFor)
+  fadeByMemory: true,
+  fadeFloor: 0.25, // 淡到最后不低于这个透明度(0~1)
+  // 悬停回流:悬停查释义时,如果到期日比 N 天后还远,拉近到今天,提醒尽快复习(只挪 due,不碰 stability)
+  hoverFeedback: true,
+  hoverFeedbackDays: 3,
+  // 淘汰候选:入库满这么多天、且这么多天没自然相遇过,才会进候选列表(同一个阈值管两个条件)
+  retireCandidateDays: 90,
   tagRules: [],
   showRelated: true,
   showOccurrences: true,
@@ -36,7 +44,9 @@ const DEFAULT_SETTINGS = {
   reviewLog: {}, // { "YYYY-MM-DD": count } 供热力图(Stage 5)
   // Stage 4
   newWordTemplate: "template/单词模板.md",
-  // 卡片正面:note=单词→整篇;cloze=例句填空
+  // 批注小节标题:可以只填文字(默认按 #### 级别),也可以带级别(比如 "## 引用");留空用默认 "#### 批注"
+  annotationHeading: "",
+  // 卡片正面:note=单词→整篇;cloze=出处填空
   cardFront: "note",
   // 移动端/桌面端 评分按钮底部间距(px)
   reviewBottomSpace: 70,
@@ -114,6 +124,14 @@ module.exports = class LexisPlugin extends Plugin {
     this._hideTimer = null;
     this._occCache = new Map();
     this.liveAvailable = false;
+    this._encounters = {};
+    this._encSaveTimer = 0;
+    this._encounterDedup = {};
+    this._passiveSeenToday = new Set();
+    await this.loadEncounters();
+    this.registerEvent(this.app.workspace.on("file-open", (file) => {
+      if (file instanceof TFile && this.inVocabFolder(file.path)) this.recordEncounter(file, "open");
+    }));
 
     this.statusBarEl = this.addStatusBarItem();
     if (this.statusBarEl) {
@@ -128,6 +146,64 @@ module.exports = class LexisPlugin extends Plugin {
     this.addCommand({ id: "open-home", name: "打开 Lexis 主页", callback: () => this.openHome() });
     this.addRibbonIcon("graduation-cap", "Lexis 主页", () => this.openHome());
     this.addRibbonIcon("brain", "Lexis 背单词", () => this.openReview());
+
+    // ---------- 生命周期命令(归档/恢复/常驻),只对当前打开的词条笔记生效 ----------
+    this.addCommand({
+      id: "archive-word",
+      name: "标为已掌握(归档)",
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file || !this.inVocabFolder(file.path) || this.readLifecycle(file).archived) return false;
+        if (checking) return true;
+        this.setArchived(file, true).then(() => new Notice(`Lexis:「${file.basename}」已标为归档`));
+        return true;
+      },
+    });
+    this.addCommand({
+      id: "restore-word",
+      name: "恢复(取消归档)",
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file || !this.inVocabFolder(file.path) || !this.readLifecycle(file).archived) return false;
+        if (checking) return true;
+        new LexisRestoreModal(this.app, this, file).open();
+        return true;
+      },
+    });
+    this.addCommand({
+      id: "toggle-pin-word",
+      name: "切换常驻状态",
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file || !this.inVocabFolder(file.path)) return false;
+        if (checking) return true;
+        const pinned = this.readLifecycle(file).pinned;
+        this.setPinned(file, !pinned).then(() => new Notice(`Lexis:「${file.basename}」${!pinned ? "已常驻" : "已取消常驻"}`));
+        return true;
+      },
+    });
+    this.addCommand({
+      id: "migrate-familiar-tag-to-archived",
+      name: "迁移:把 #熟悉 标签的词批量标为已归档",
+      callback: async () => {
+        const files = this.app.vault.getMarkdownFiles().filter((f) => this.inVocabFolder(f.path) && this.getTags(f).has("熟悉") && !this.readLifecycle(f).archived && !this.readLifecycle(f).retired);
+        if (!files.length) { new Notice("Lexis:没有找到带 #熟悉 标签、且还没归档的词"); return; }
+        for (const f of files) await this.app.fileManager.processFrontMatter(f, (fm) => { fm["lexis-status"] = "archived"; });
+        this.rebuildIndex(false);
+        new Notice(`Lexis:已把 ${files.length} 个带 #熟悉 标签的词标为已归档`);
+      },
+    });
+    this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => {
+      if (!(file instanceof TFile) || !this.inVocabFolder(file.path)) return;
+      const { archived, pinned } = this.readLifecycle(file);
+      menu.addItem((it) => it.setTitle(archived ? "Lexis:恢复" : "Lexis:标为已掌握(归档)").setIcon(archived ? "archive-restore" : "archive").onClick(() => {
+        if (archived) new LexisRestoreModal(this.app, this, file).open();
+        else this.setArchived(file, true).then(() => new Notice(`Lexis:「${file.basename}」已标为归档`));
+      }));
+      menu.addItem((it) => it.setTitle(pinned ? "Lexis:取消常驻" : "Lexis:常驻(不参与淘汰候选)").setIcon(pinned ? "pin-off" : "pin").onClick(() => {
+        this.setPinned(file, !pinned).then(() => new Notice(`Lexis:「${file.basename}」${!pinned ? "已常驻" : "已取消常驻"}`));
+      }));
+    }));
 
     this.registerView(LEXIS_REVIEW_VIEW, (leaf) => new LexisReviewView(leaf, this));
     this.registerView(LEXIS_HOME_VIEW, (leaf) => new LexisHomeView(leaf, this));
@@ -195,6 +271,7 @@ module.exports = class LexisPlugin extends Plugin {
   onunload() {
     window.clearTimeout(this._rebuildTimer);
     window.clearTimeout(this._hideTimer);
+    if (this._encSaveTimer) { window.clearTimeout(this._encSaveTimer); this.saveEncounters(); }
     this.removePopover();
     this.removeSelPill();
     this.teardownPdfHighlight();
@@ -278,6 +355,7 @@ module.exports = class LexisPlugin extends Plugin {
     if (path === "/tag" && req.method === "POST") return send(200, await this.bridgeTagWord(await this.readBody(req)));
     if (path === "/note" && req.method === "POST") return send(200, await this.bridgeAnnotate(await this.readBody(req)));
     if (path === "/move" && req.method === "POST") return send(200, await this.bridgeMoveWord(await this.readBody(req)));
+    if (path === "/encounter" && req.method === "POST") return send(200, await this.bridgeEncounter(await this.readBody(req)));
     return send(404, { ok: false, error: "not-found" });
   }
   readBody(req) {
@@ -288,7 +366,7 @@ module.exports = class LexisPlugin extends Plugin {
       req.on("error", () => resolve({}));
     });
   }
-  // 网页划词/加例句:词不在库→新建,在库→加例句。来源是网址链接 [标题](url),不是 [[内链]]
+  // 网页划词/加出处:词不在库→新建,在库→加出处。来源是网址链接 [标题](url),不是 [[内链]]
   async bridgeAddWord(payload) {
     const word = String((payload && payload.word) || "").trim();
     if (!word) return { ok: false, error: "empty-word" };
@@ -306,7 +384,7 @@ module.exports = class LexisPlugin extends Plugin {
     const folder = (reqFolder && this.dictFolders().includes(reqFolder)) ? reqFolder : this.primaryVocabFolder();
     const targetPath = (folder ? folder + "/" : "") + name + ".md";
     let existing = this.app.vault.getAbstractFileByPath(targetPath);
-    // 按路径没找到,不代表这个词不存在——它可能落在别的词典文件夹里(网页端加例句不带 folder 参数,
+    // 按路径没找到,不代表这个词不存在——它可能落在别的词典文件夹里(网页端加出处不带 folder 参数,
     // 拼出来的 targetPath 只会落在 primaryVocabFolder)。所以不管是不是在加别名,都按索引(标题或别名)兜底查一遍,
     // 找到就并入那个文件,而不是在错误的文件夹里新建重复笔记。(和 ob 内"设为别名"一致)
     if (!(existing instanceof TFile)) {
@@ -341,6 +419,7 @@ module.exports = class LexisPlugin extends Plugin {
           const apply = (data) => this.insertExampleLine(data, line);
           if (this.app.vault.process) await this.app.vault.process(existing, apply);
           else await this.app.vault.modify(existing, apply(cur));
+          this.recordEncounter(existing, "add");
         }
         if (!alias) this.scheduleRebuild();
         return { ok: true, created: false, word: existing.basename, alias: alias || undefined, file: existing.path };
@@ -352,6 +431,7 @@ module.exports = class LexisPlugin extends Plugin {
       // 别名注入到 frontmatter 再建文件,保证 metadataCache 第一时间就包含别名
       if (alias) content = injectAlias(content);
       const file = await this.app.vault.create(targetPath, content);
+      this.recordEncounter(file, "add");
       this.rebuildIndex(false);
       // 保险:metadataCache 偶尔延迟,手动确保别名进索引
       if (alias) { const ak = alias.toLowerCase(); if (!this.index.has(ak)) this.index.set(ak, { display: alias, file, isAlias: true, tags: new Set() }); }
@@ -398,16 +478,20 @@ module.exports = class LexisPlugin extends Plugin {
       return { ok: true, key, tag, action: action === "remove" ? "removed" : "added", tags: resultTags };
     } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
   }
-  // 把一条例句插到「#### 例句」段的末尾(已有例句之后、```lexis occ``` 代码块之前);没有该段就在文末新建
-  // 把 line 追加到指定 #### 标题小节末尾(在子标题/代码块之前);没这个标题就在文末新建。
-  insertUnderHeading(data, heading, line) {
-    const re = new RegExp("(^|\\n)#{2,6}[ \\t]*" + escapeRe(heading) + "[^\\n]*\\n");
+  // 把一条出处插到「#### 出处」段的末尾(已有出处之后、```lexis occ``` 代码块之前);没有该段就在文末新建
+  // 把 line 追加到指定标题小节末尾(在子标题/代码块之前);没这个标题就在文末新建。
+  // headingLine:完整标题行(级别 + 文字,比如 "#### 出处",可以是用户在设置里自定义的任意级别/文字);
+  // legacyNames:识别时额外认的旧标题文字(不认级别,只认文字,比如"例句"改名"出处"前的老笔记),但新建小节永远用 headingLine。
+  insertUnderHeading(data, headingLine, line, legacyNames) {
+    const headingText = headingLine.replace(/^#{1,6}[ \t]*/, "").trim() || headingLine;
+    const names = [headingText, ...(legacyNames || [])].map(escapeRe).join("|");
+    const re = new RegExp("(^|\\n)#{1,6}[ \\t]*(?:" + names + ")[^\\n]*\\n");
     const m = re.exec(data);
     if (!m) {
-      // 没这个标题就新建:优先插在末尾的 ```lexis 代码块之前(让批注紧跟正文/例句,而非落在出处热力图之后),否则文末
+      // 没这个标题就新建:优先插在末尾的 ```lexis 代码块之前(让批注紧跟正文/出处,而非落在出处热力图之后),否则文末
       const block = data.search(/\n```lexis\b/);
-      if (block >= 0) return data.slice(0, block).replace(/\s*$/, "") + `\n\n#### ${heading}\n${line}\n` + data.slice(block);
-      return data.replace(/\s*$/, "") + `\n\n#### ${heading}\n${line}\n`;
+      if (block >= 0) return data.slice(0, block).replace(/\s*$/, "") + `\n\n${headingLine}\n${line}\n` + data.slice(block);
+      return data.replace(/\s*$/, "") + `\n\n${headingLine}\n${line}\n`;
     }
     const headEnd = m.index + m[0].length;
     const after = data.slice(headEnd);
@@ -420,8 +504,15 @@ module.exports = class LexisPlugin extends Plugin {
     const tailFixed = /^\n*```/.test(tail) ? "\n" + tail.replace(/^\n+/, "") : tail;
     return data.slice(0, headEnd) + newSection + tailFixed;
   }
-  insertExampleLine(data, line) { return this.insertUnderHeading(data, "例句", line); }
-  // 网页悬浮卡批注:纯文字写进已有词笔记的 #### 批注 小节(词笔记里它自然落在例句等段附近)
+  insertExampleLine(data, line) { return this.insertUnderHeading(data, "#### 出处", line, ["例句"]); }
+  // 批注小节标题行:设置里可以填完整一行(级别+文字,比如 "## 引用"),也可以只填文字(默认按 #### 级别);留空用默认 "#### 批注"
+  annotationHeadingLine() {
+    const v = (this.settings.annotationHeading || "").trim();
+    if (!v) return "#### 批注";
+    return /^#{1,6}[ \t]/.test(v) ? v : `#### ${v}`;
+  }
+  annotationHeadingText() { return this.annotationHeadingLine().replace(/^#{1,6}[ \t]*/, "").trim() || "批注"; }
+  // 网页悬浮卡批注:纯文字写进已有词笔记的批注小节(词笔记里它自然落在出处等段附近)
   async bridgeAnnotate(payload) {
     const text = String((payload && (payload.note ?? payload.text)) || "").trim().replace(/\r?\n+/g, " ");
     if (!text) return { ok: false, error: "empty-note" };
@@ -430,7 +521,7 @@ module.exports = class LexisPlugin extends Plugin {
     if (!e || !e.file) return { ok: false, error: "not-found" };
     const line = `> ${text}`;
     try {
-      const apply = (data) => this.insertUnderHeading(data, "批注", line);
+      const apply = (data) => this.insertUnderHeading(data, this.annotationHeadingLine(), line, ["批注"]);
       if (this.app.vault.process) await this.app.vault.process(e.file, apply);
       else await this.app.vault.modify(e.file, apply(await this.app.vault.cachedRead(e.file)));
       this._occCache.clear();
@@ -448,12 +539,13 @@ module.exports = class LexisPlugin extends Plugin {
   isScaffoldOnly(content) {
     let s = this.splitFrontmatter(content).body;
     s = s.replace(/```[\s\S]*?```/g, "");                                    // 围栏代码块(lexis/heatmap 等)
-    s = s.replace(/(^|\n)#{2,6}[ \t][^\n]*批注[\s\S]*?(?=\n#{1,6}[ \t]|$)/g, "\n"); // 批注小节(另行保留)
+    const annotNames = [this.annotationHeadingText(), "批注"].map(escapeRe).join("|");
+    s = s.replace(new RegExp("(^|\\n)#{1,6}[ \\t][^\\n]*(?:" + annotNames + ")[\\s\\S]*?(?=\\n#{1,6}[ \\t]|$)", "g"), "\n"); // 批注小节(另行保留)
     s = s.replace(/^#{1,6}[ \t].*$/gm, "");                                  // 所有标题(模板骨架)
     return !/[A-Za-z0-9一-鿿]/.test(s);                      // 没有任何字母/数字/汉字 = 只是骨架
   }
-  // 把已有词移动到另一个词典文件夹。默认只移动文件(正文/批注/例句全保留);
-  // 但若该词笔记是空骨架且目标词典有自己的模板,则顺手重套模板——并把 #### 批注 内容迁移过去。
+  // 把已有词移动到另一个词典文件夹。默认只移动文件(正文/批注/出处全保留);
+  // 但若该词笔记是空骨架且目标词典有自己的模板,则顺手重套模板——并把批注小节内容迁移过去。
   async bridgeMoveWord(payload) {
     const key = String((payload && (payload.key ?? payload.word)) || "").trim().toLowerCase();
     const folder = this.normalizeFolder((payload && payload.folder) || "");
@@ -472,12 +564,12 @@ module.exports = class LexisPlugin extends Plugin {
       await this.app.fileManager.renameFile(e.file, target);
       let reTemplated = false;
       if (retemplate) {
-        const annot = this.extractSection(oldContent, "批注").replace(/```[\s\S]*?```/g, "").trim(); // 迁移批注(去掉尾随的 lexis 代码块)
+        const annot = this.extractSection(oldContent, [this.annotationHeadingText(), "批注"]).replace(/```[\s\S]*?```/g, "").trim(); // 迁移批注(去掉尾随的 lexis 代码块)
         const oldFm = this.splitFrontmatter(oldContent).fm;             // 保留原 frontmatter(标签/别名/复习数据)
         const filled = tplRaw.replace(/\{\{word\}\}/g, e.display).replace(/\{\{date\}\}/g, todayStr());
         const tplBody = this.splitFrontmatter(filled).body.replace(/^\s+/, "");
         let nc = (oldFm ? oldFm.replace(/\s*$/, "\n") : "") + (oldFm ? "\n" : "") + tplBody;
-        if (annot) nc = this.insertUnderHeading(nc, "批注", annot);
+        if (annot) nc = this.insertUnderHeading(nc, this.annotationHeadingLine(), annot, ["批注"]);
         const fileNow = this.app.vault.getAbstractFileByPath(target);
         if (fileNow instanceof TFile) {
           if (this.app.vault.process) await this.app.vault.process(fileNow, () => nc);
@@ -489,9 +581,21 @@ module.exports = class LexisPlugin extends Plugin {
       return { ok: true, key, file: target, folder, moved: true, reTemplated };
     } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
   }
+  // 网页被动相遇:扩展按「词+当天」去重后批量报过来的 key 列表,这边再按同样的 (文件+当天) 去重记一次
+  // (两边都去重不是多余——扩展端只挡"同一页反复扫描",挡不住"今天换个 tab 又开了同一个页面")。
+  async bridgeEncounter(payload) {
+    const keys = Array.isArray(payload && payload.keys) ? payload.keys : [];
+    let recorded = 0;
+    for (const k of keys) {
+      const e = this.index.get(String(k || "").toLowerCase());
+      if (e && e.file instanceof TFile) { this.passiveEncounter(e.file); recorded++; }
+    }
+    return { ok: true, recorded };
+  }
   bridgeWordList() {
     const words = [];
-    for (const [key, e] of this.index) words.push({ key, word: e.display, alias: !!e.isAlias, tags: [...(e.tags || [])], file: e.file && e.file.path, color: this.colorForEntry(e), wstyle: this.styleKindForEntry(e) });
+    // 已归档/已淘汰的词不发给浏览器扩展——扩展自己没有这套生命周期概念,最简单的处理是压根不让它高亮
+    for (const [key, e] of this.index) { if (e.archived || e.retired) continue; words.push({ key, word: e.display, alias: !!e.isAlias, tags: [...(e.tags || [])], file: e.file && e.file.path, color: this.colorForEntry(e), wstyle: this.styleKindForEntry(e) }); }
     return {
       ok: true, version: this.manifest.version, count: words.length, words,
       styleConfig: {
@@ -506,8 +610,10 @@ module.exports = class LexisPlugin extends Plugin {
       },
     };
   }
+  // name 可以是单个标题文字,也可以是一个数组(比如当前自定义名字 + 旧的默认名字,任一命中都算)
   extractSection(md, name) {
-    const re = new RegExp("^#{2,6}[ \\t].*" + escapeRe(name) + ".*$", "m");
+    const names = (Array.isArray(name) ? name : [name]).map(escapeRe).join("|");
+    const re = new RegExp("^#{1,6}[ \\t].*(?:" + names + ").*$", "m");
     const m = re.exec(md || "");
     if (!m) return "";
     const rest = md.slice(m.index + m[0].length);
@@ -518,6 +624,8 @@ module.exports = class LexisPlugin extends Plugin {
     const k = String(key || "").toLowerCase();
     const e = this.index.get(k);
     if (!e) return { ok: false, error: "not-found" };
+    this.recordEncounter(e.file, "hover");
+    this.hoverFeedback(e.file);
     let body = "";
     try {
       const raw = await this.app.vault.cachedRead(e.file);
@@ -529,7 +637,7 @@ module.exports = class LexisPlugin extends Plugin {
       ok: true, word: e.display, base: e.file && e.file.basename, file: e.file && e.file.path,
       vault: this.app.vault.getName(),
       alias: !!e.isAlias, tags: [...(e.tags || [])],
-      meaning: this.extractSection(body, "意思") || this.extractSection(body, "意义") || "",
+      meaning: this.extractSection(body, ["意思", "意义"]),
       markdown: body, html,
     };
   }
@@ -656,7 +764,7 @@ module.exports = class LexisPlugin extends Plugin {
         html += `<div class="lexis-web-sec">📍 出现过的地方 (${fresh.length})</div>`;
         if (!fresh.length) html += `<div class="lexis-web-occ lexis-web-dim">(没有未收藏的新出处)</div>`;
         else {
-          // 例句走 Markdown 渲染(不然 LaTeX 只会是原始 $...$ 文本),同批渲染完再统一 flush 一次数学排版队列
+          // 出处走 Markdown 渲染(不然 LaTeX 只会是原始 $...$ 文本),同批渲染完再统一 flush 一次数学排版队列
           const comp = new Component(); comp.load();
           const rendered = [];
           for (const o of fresh) {
@@ -740,16 +848,22 @@ module.exports = class LexisPlugin extends Plugin {
       const display = file.basename;
       const key = display.toLowerCase();
       const own = new Set([key]);
-      if (!index.has(key)) { index.set(key, { display, file, isAlias: false, tags }); words++; }
+      // 生命周期(归档/常驻/淘汰)+ FSRS stability 缓存,供高亮渐隐/淘汰候选复用;都是每文件算一次,标题和别名共用
+      const archived = fm["lexis-status"] === "archived";
+      const retired = fm["lexis-status"] === "retired";
+      const pinned = !!fm["lexis-pinned"];
+      const sRaw = Number(fm["lexis-s"]);
+      const cardS = fm["lexis-s"] == null || isNaN(sRaw) ? null : sRaw;
+      if (!index.has(key)) { index.set(key, { display, file, isAlias: false, tags, archived, retired, pinned, cardS }); words++; }
       if (this.settings.includeAliases) {
         for (const a of this.extractAliases(file)) {
           const ak = a.toLowerCase();
           own.add(ak);
-          if (!index.has(ak)) { index.set(ak, { display: a, file, isAlias: true, tags }); aliases++; }
+          if (!index.has(ak)) { index.set(ak, { display: a, file, isAlias: true, tags, archived, retired, pinned, cardS }); aliases++; }
         }
       }
       selfKeysByPath.set(file.path, own);
-      if (fm["lexis-s"] == null || !fm["lexis-due"] || String(fm["lexis-due"]).slice(0, 10) <= today) due++;
+      if (!archived && !retired && (fm["lexis-s"] == null || !fm["lexis-due"] || String(fm["lexis-due"]).slice(0, 10) <= today)) due++;
     }
     this.index = index;
     this._selfKeysByPath = selfKeysByPath;
@@ -772,6 +886,8 @@ module.exports = class LexisPlugin extends Plugin {
     // 排除标签:打了任一此标签的词,库内也不高亮(和网页端一致)
     const exc = this.excludeTagSet();
     if (exc.size) keys = keys.filter((k) => { const e = this.index.get(k); return !(e && e.tags && [...e.tags].some((t) => exc.has(t))); });
+    // 已淘汰的词:比归档更彻底,连隐形代理 span 都不留,悬停也不再触发
+    keys = keys.filter((k) => { const e = this.index.get(k); return !(e && e.retired); });
     keys.sort((a, b) => b.length - a.length);
     if (!keys.length) { this._pattern = null; return; }
     this._pattern = keys.map(boundedSource).join("|");
@@ -789,6 +905,19 @@ module.exports = class LexisPlugin extends Plugin {
     if (alpha == null || alpha >= 1) return color;
     const pct = Math.max(0, Math.min(100, Math.round(alpha * 100)));
     return `color-mix(in srgb, ${color} ${pct}%, transparent)`;
+  }
+  // 高亮渐隐:强度是 FSRS stability 的单调函数,不用 retrievability——后者哪怕不复习也会随日历时间天天变,
+  // 会导致高亮"没事自己变淡/变浓",违反"复习几轮才肉眼可见变淡"的直觉;stability 只在真实复习事件后才变,足够稳定。
+  // progress = s/(s+K) 是个 0→1、单调递增、边际递减的曲线(K 是"淡一半"所需的天数,先内置常量,不开放成设置——
+  // 用户只需要控制"最淡到哪"这个下限,具体曲线形状留给实现)。从未复习过的新词(cardS 为 null)固定全强度。
+  fadeAlphaFor(entry) {
+    if (!this.settings.fadeByMemory) return 1;
+    const s = entry && entry.cardS;
+    if (s == null) return 1;
+    const K = 20;
+    const progress = s / (s + K);
+    const floor = Math.max(0, Math.min(1, this.settings.fadeFloor ?? 0.25));
+    return 1 - progress * (1 - floor);
   }
   // 某文件所属词典(文件夹)的专属色;子文件夹归父词典,取最长匹配。网页和 ob 内共用同一份 dictColorMap
   dictColorForFile(file) {
@@ -818,7 +947,10 @@ module.exports = class LexisPlugin extends Plugin {
     // PDF:文字层 opacity 0.2,内嵌高亮不可见 → 单独建一层叠在 Canvas 之上、textLayer 之下,
     // 用内联 .lexis-hl 隐形做事件代理,视觉高亮画在独立 overlay 层里。
     if (opts && opts.pdf) return "text-decoration:none;";
-    const c = this.applyAlpha(color, this.settings.highlightOpacity);
+    // 已归档:span 照样包(hover/click 事件代理不能丢),但视觉上完全不显示——跟 PDF 那层"隐形代理"是同一个思路。
+    if (entry && entry.archived) return "text-decoration:none;";
+    const alpha = (this.settings.highlightOpacity ?? 1) * this.fadeAlphaFor(entry);
+    const c = this.applyAlpha(color, alpha);
     if (styleKind === "background") return `background-color:${c};border-radius:3px;padding:0 1px;text-decoration:none;`;
     const line = styleKind === "underline" ? "solid" : "wavy";
     return `text-decoration:underline ${line} ${c};text-underline-offset:3px;`;
@@ -873,6 +1005,7 @@ module.exports = class LexisPlugin extends Plugin {
           continue;
         }
         const entry = this.index.get(key);
+        if (entry) this.passiveEncounter(entry.file);
         const span = document.createElement("span");
         span.className = "lexis-hl";
         span.textContent = m[0];
@@ -982,6 +1115,7 @@ module.exports = class LexisPlugin extends Plugin {
       if (!key) continue;
       const entry = this.index.get(key);
       if (!entry) continue;
+      if (entry.archived) continue; // 已归档:内联 span 保留(hover 代理),但 overlay 荧光笔矩形不画
       try {
         const color = (() => {
           const dc = this.dictColorForFile(entry.file);
@@ -989,8 +1123,8 @@ module.exports = class LexisPlugin extends Plugin {
           if (this.settings.highlightColor) return this.settings.highlightColor;
           return "var(--text-accent)";
         })();
-        const o = this.settings.highlightOpacity;
-        const alpha = Math.max(0.15, Math.min(0.6, (o == null ? 1 : o) * 0.6));
+        const o = (this.settings.highlightOpacity ?? 1) * this.fadeAlphaFor(entry);
+        const alpha = Math.max(0.15, Math.min(0.6, o * 0.6));
         const rects = Array.from(s.getClientRects()).filter((r) => r.width && r.height);
         for (const rect of rects.length ? rects : [s.getBoundingClientRect()]) {
           const d = document.createElement("div");
@@ -1056,6 +1190,7 @@ module.exports = class LexisPlugin extends Plugin {
                 if (selfKeys && selfKeys.has(key)) { if (m[0].length === 0) regex.lastIndex++; continue; }
                 const start = from + m.index, end = start + m[0].length;
                 const entry = plugin.index.get(key);
+                if (entry) plugin.passiveEncounter(entry.file);
                 builder.add(start, end, Decoration.mark({ class: "lexis-hl", attributes: { "data-lexis-key": key, style: plugin.inlineStyleForEntry(entry) } }));
                 if (m[0].length === 0) regex.lastIndex++;
               }
@@ -1262,7 +1397,7 @@ module.exports = class LexisPlugin extends Plugin {
   async getCuratedSourcePaths(wordFile) {
     try {
       const raw = await this.app.vault.cachedRead(wordFile);
-      const m = /####\s*例句([\s\S]*?)(?=\n#{1,6}\s|\n```|$)/.exec(raw);
+      const m = /####\s*(?:例句|出处)([\s\S]*?)(?=\n#{1,6}\s|\n```|$)/.exec(raw);
       if (!m) return new Set();
       const set = new Set();
       const re = /\[\[([^\]|#]+)(?:\|[^\]]*)?\]\]/g;
@@ -1274,17 +1409,107 @@ module.exports = class LexisPlugin extends Plugin {
   async addExampleToWord(wordFile, sentence, sourceFile) {
     if (sourceFile) {
       const curated = await this.getCuratedSourcePaths(wordFile);
-      if (curated.has(sourceFile.basename.toLowerCase())) { new Notice("Lexis:这条已经在例句里了"); return true; }
+      if (curated.has(sourceFile.basename.toLowerCase())) { new Notice("Lexis:这条已经在出处里了"); return true; }
     }
     const link = sourceFile ? ` —— [[${sourceFile.basename}]]` : "";
     const line = `> ${(sentence || "").trim()}${link}`;
-    const apply = (data) => /####\s*例句/.test(data) ? data.replace(/(####\s*例句[^\n]*\n)/, `$1${line}\n`) : data.replace(/\s*$/, "") + `\n\n#### 例句\n${line}\n`;
+    // 检测同时认「例句」(旧笔记留下的标题)和「出处」(新命名),但新建小节永远用「出处」
+    const apply = (data) => /####\s*(?:例句|出处)/.test(data) ? data.replace(/(####\s*(?:例句|出处)[^\n]*\n)/, `$1${line}\n`) : data.replace(/\s*$/, "") + `\n\n#### 出处\n${line}\n`;
     try {
       if (this.app.vault.process) await this.app.vault.process(wordFile, apply);
       else { const d = await this.app.vault.read(wordFile); await this.app.vault.modify(wordFile, apply(d)); }
-      new Notice("Lexis:已收藏到例句");
+      this.recordEncounter(wordFile, "add");
+      new Notice("Lexis:已收藏到出处");
       return true;
     } catch (err) { new Notice("Lexis 收藏失败:" + (err?.message || err)); return false; }
+  }
+
+  // ---------- 生命周期(归档/常驻/淘汰) ----------
+  // 只叠加在算法结果之上:这里不碰 lexis-s/d/due 等 FSRS 内部字段,那些只由真实复习事件驱动(applySchedule)。
+  readLifecycle(file) {
+    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter || {};
+    const status = fm["lexis-status"];
+    return { archived: status === "archived", retired: status === "retired", pinned: !!fm["lexis-pinned"] };
+  }
+  // 归档 = 退出高亮 + 暂停复习队列,悬停仍可查;取消归档("恢复")默认走这条,FSRS 进度原样保留。
+  // 重置为新词是恢复时的另一个选项,见 LexisRestoreModal,不在这个函数里做。
+  async setArchived(file, archived) {
+    await this.app.fileManager.processFrontMatter(file, (fm) => {
+      if (archived) fm["lexis-status"] = "archived";
+      else delete fm["lexis-status"];
+    });
+    this.rebuildIndex(false);
+  }
+  async setPinned(file, pinned) {
+    await this.app.fileManager.processFrontMatter(file, (fm) => {
+      if (pinned) fm["lexis-pinned"] = true;
+      else delete fm["lexis-pinned"];
+    });
+    this.rebuildIndex(false);
+  }
+  // 淘汰 = 归档而非删除:退出高亮与复习,文件保留,但比"归档"更彻底——悬停也不再触发(不像归档还留一个隐形代理 span)。
+  // 只从"淘汰法庭"候选列表的操作按钮触发,没有独立的命令/右键菜单入口(候选判定本身已经是入口了)。
+  async setRetired(file, retired) {
+    await this.app.fileManager.processFrontMatter(file, (fm) => {
+      if (retired) fm["lexis-status"] = "retired";
+      else delete fm["lexis-status"];
+    });
+    this.rebuildIndex(false);
+  }
+
+  // ---------- 相遇记账(阶段 2) ----------
+  // 只做"强相遇"记账:悬停查释义 / 划词加出处 / 打开词条笔记本身,都是现成代码路径上加一行记账,
+  // 不额外采集停留时长/滚动/点击深度。数据存进插件自己 data 目录下的 sidecar JSON,不写 frontmatter——
+  // 悬停很频繁,写 frontmatter 会不停刷新笔记 mtime 和 git 历史。
+  encountersPath() { return `${this.app.vault.configDir}/plugins/${this.manifest.id}/encounters.json`; }
+  async loadEncounters() {
+    try { this._encounters = JSON.parse(await this.app.vault.adapter.read(this.encountersPath())) || {}; }
+    catch (_e) { this._encounters = {}; }
+  }
+  // key 用词条文件的标题(不是命中它的具体别名/拼法)——别名和标题指向同一个文件,相遇次数要合并,不能按 key 分裂计数
+  // 短时间内反复触发同一类相遇(比如鼠标在同一个词上晃出晃入,连续弹好几次悬浮卡)只算一次,靠 (词+类型) 的冷却时间去重
+  recordEncounter(file, type) {
+    if (!(file instanceof TFile)) return;
+    const k = file.basename.toLowerCase();
+    const now = Date.now();
+    const dedupKey = k + ":" + type;
+    if (!this._encounterDedup) this._encounterDedup = {};
+    const last = this._encounterDedup[dedupKey];
+    if (last && now - last < 60000) return; // 60 秒内的重复相遇不重复计数
+    this._encounterDedup[dedupKey] = now;
+    const e = this._encounters[k] || (this._encounters[k] = { hoverCount: 0, encounterCount: 0, lastEncounter: "" });
+    e.encounterCount = (e.encounterCount || 0) + 1;
+    if (type === "hover") e.hoverCount = (e.hoverCount || 0) + 1;
+    e.lastEncounter = todayStr();
+    if (this._encSaveTimer) window.clearTimeout(this._encSaveTimer);
+    this._encSaveTimer = window.setTimeout(() => this.saveEncounters(), 1500); // 内存攒批、防抖落盘,不是每次相遇都写一次盘
+  }
+  // 被动相遇(阶段 4):高亮装饰在打开的文件里实际渲染出来,就算词出现在你面前过一次——比悬停更弱的信号,
+  // 只证明"出现过",不证明"注意到了"。按「词+当天」去重,不是每次重渲染(滚动/切标签页/实时预览重算)都记一次。
+  // 这个检查要挂在高亮渲染的热路径上(每个匹配到的 span 都会过一遍),所以只用一次 Set.has,不做更重的事。
+  passiveEncounter(file) {
+    if (!(file instanceof TFile)) return;
+    const dayKey = file.path + "|" + todayStr();
+    if (this._passiveSeenToday.has(dayKey)) return;
+    this._passiveSeenToday.add(dayKey);
+    this.recordEncounter(file, "passive");
+  }
+  async saveEncounters() {
+    this._encSaveTimer = 0;
+    try { await this.app.vault.adapter.write(this.encountersPath(), JSON.stringify(this._encounters)); } catch (_e) {}
+  }
+  // 悬停 = 一次失败的提取(没想起来才要查)。这个词的到期日如果还很远,说明"排期偏晚了",拉近一点提醒尽快复习——
+  // 只挪 lexis-due,绝不碰 stability/difficulty,也不伪造一次复习评分(FSRS 内部状态只能由真实复习事件驱动)。
+  async hoverFeedback(file) {
+    if (!this.settings.hoverFeedback || !(file instanceof TFile)) return;
+    if (this.readLifecycle(file).archived) return; // 已归档:悬停只记账,不回流
+    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter || {};
+    if (fm["lexis-s"] == null || !fm["lexis-due"]) return; // 还没背过/没有到期日可提前
+    const today = todayStr();
+    const due = String(fm["lexis-due"]).slice(0, 10);
+    const threshold = addDaysStr(today, this.settings.hoverFeedbackDays ?? 3);
+    if (due <= threshold) return; // 本来就不算远,不用管
+    await this.app.fileManager.processFrontMatter(file, (fm2) => { fm2["lexis-due"] = today; });
   }
 
   // ---------- FSRS 调度 ----------
@@ -1327,7 +1552,7 @@ module.exports = class LexisPlugin extends Plugin {
   async getFirstExample(file) {
     try {
       const raw = await this.app.vault.cachedRead(file);
-      const m = /####\s*例句([\s\S]*?)(?=\n#{1,6}\s|\n```|$)/.exec(raw);
+      const m = /####\s*(?:例句|出处)([\s\S]*?)(?=\n#{1,6}\s|\n```|$)/.exec(raw);
       if (!m) return "";
       const line = m[1].split("\n").map((s) => s.trim()).find((s) => s.startsWith(">"));
       if (!line) return "";
@@ -1350,6 +1575,7 @@ module.exports = class LexisPlugin extends Plugin {
       if (!this.inVocabFolder(f.path)) continue;
       total++;
       const fm = this.app.metadataCache.getFileCache(f)?.frontmatter || {};
+      if (fm["lexis-status"] === "archived" || fm["lexis-status"] === "retired") continue; // 已归档/已淘汰:计入总数,但不计入待复习/新词(复习队列已暂停)
       if (fm["lexis-s"] == null) { fresh++; due++; }
       else if (!fm["lexis-due"] || String(fm["lexis-due"]).slice(0, 10) <= today) due++;
     }
@@ -1358,7 +1584,7 @@ module.exports = class LexisPlugin extends Plugin {
   buildQueue(options) {
     options = options || {};
     const today = todayStr();
-    let files = this.app.vault.getMarkdownFiles().filter((f) => this.inVocabFolder(f.path));
+    let files = this.app.vault.getMarkdownFiles().filter((f) => { if (!this.inVocabFolder(f.path)) return false; const lc = this.readLifecycle(f); return !lc.archived && !lc.retired; });
     if (options.tag) { const tl = options.tag.toLowerCase(); files = files.filter((f) => this.getTags(f).has(tl)); }
     const due = [], fresh = [];
     for (const f of files) { const card = this.readCard(f); if (card.s == null || isNaN(Number(card.s))) fresh.push({ file: f, card }); else if (!card.due || String(card.due).slice(0, 10) <= today) due.push({ file: f, card }); }
@@ -1367,6 +1593,34 @@ module.exports = class LexisPlugin extends Plugin {
     else if (options.order === "random") { queue = due.concat(fresh); for (let i = queue.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [queue[i], queue[j]] = [queue[j], queue[i]]; } }
     else { due.sort((a, b) => String(a.card.due || "").localeCompare(String(b.card.due || ""))); queue = due.concat(fresh.slice(0, this.settings.newPerDay || 20)); }
     return queue.slice(0, this.settings.maxReviewsPerSession || 200);
+  }
+  // ---------- 淘汰法庭(阶段 3) ----------
+  // 硬条件筛子,不做加权评分:全部满足才入列,判决权在用户(淘汰/留下/已掌握三个按钮,见 LexisHomeView)。
+  async buildRetireCandidates() {
+    const days = this.settings.retireCandidateDays ?? 90;
+    const today = todayStr();
+    const files = this.app.vault.getMarkdownFiles().filter((f) => this.inVocabFolder(f.path));
+    const out = [];
+    for (const f of files) {
+      const lc = this.readLifecycle(f);
+      if (lc.pinned || lc.archived || lc.retired) continue; // 常驻/已归档/已淘汰:永远不进候选
+      const created = fmtDate(new Date(f.stat.ctime));
+      if (daysBetween(created, today) < days) continue; // 入库不够久
+      const enc = this._encounters[f.basename.toLowerCase()];
+      const lastEncounter = (enc && enc.lastEncounter) || created; // 从没相遇过就用入库日期当基准
+      const sinceLast = daysBetween(lastEncounter, today);
+      if (sinceLast < days) continue; // 最近还自然相遇过,不算候选
+      let occCount = 0;
+      try { occCount = (await this.findOccurrences(f.basename)).length; } catch (_e) {}
+      out.push({
+        file: f, display: f.basename, created, lastEncounter, sinceLast,
+        encounterCount: (enc && enc.encounterCount) || 0,
+        hoverCount: (enc && enc.hoverCount) || 0,
+        occCount,
+      });
+    }
+    out.sort((a, b) => b.sinceLast - a.sinceLast);
+    return out;
   }
   async openReview(options) {
     let leaf = this.app.workspace.getLeavesOfType(LEXIS_REVIEW_VIEW)[0];
@@ -1456,9 +1710,10 @@ module.exports = class LexisPlugin extends Plugin {
           if (pg) { sub = `#page=${pg}`; disp = `${srcFile.basename} p.${pg}`; }
         }
         const link = srcFile ? (sub ? ` —— [[${srcFile.basename}${sub}|${disp}]]` : ` —— [[${srcFile.basename}]]`) : "";
-        content = content.replace(/\s*$/, "") + `\n\n#### 例句\n> ${sentence || ""}${link}\n`;
+        content = content.replace(/\s*$/, "") + `\n\n#### 出处\n> ${sentence || ""}${link}\n`;
       }
       const file = await this.app.vault.create(targetPath, content);
+      this.recordEncounter(file, "add");
       if (fromPdf) {
         // 从 PDF 加词:留在 PDF 页面,不打开新词笔记;立刻重建索引→当场高亮
         new Notice(`Lexis:已加入「${fileName}」,已在 PDF 高亮`);
@@ -1534,7 +1789,7 @@ module.exports = class LexisPlugin extends Plugin {
         const dd = occWrap.createDiv({ cls: "lexis-occ" });
         await this.renderSentence(dd, o.sentence, word, comp);
         const add = dd.createSpan({ cls: "lexis-occ-add", text: " ➕" });
-        add.setAttribute("title", "收藏到例句");
+        add.setAttribute("title", "收藏到出处");
         add.addEventListener("click", async () => {
           if (add.dataset.done) return;
           add.dataset.done = "1";
@@ -1702,7 +1957,7 @@ module.exports = class LexisPlugin extends Plugin {
     const homeBtn = btnRow.createEl("button", { text: "📕 打开主页" });
     homeBtn.addEventListener("click", (e) => { e.stopPropagation(); this.openHome(); });
   }
-  // 把 el 内命中 word 的文本包一层 <b>(渲染完的 DOM 上原地操作,供例句预览统一复用)
+  // 把 el 内命中 word 的文本包一层 <b>(渲染完的 DOM 上原地操作,供出处预览统一复用)
   boldMatchesInPlace(el, word) {
     const re = new RegExp(boundedSource(word), "ig");
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
@@ -1728,7 +1983,7 @@ module.exports = class LexisPlugin extends Plugin {
       node.parentNode.replaceChild(frag, node);
     }
   }
-  // 例句预览:走 Markdown 渲染管线(LaTeX/加粗斜体等才能正常显示),渲染完再把命中词包一层 <b>
+  // 出处预览:走 Markdown 渲染管线(LaTeX/加粗斜体等才能正常显示),渲染完再把命中词包一层 <b>
   async renderSentence(el, sentence, word, comp) {
     el.empty();
     const useComp = comp || new Component();
@@ -1772,6 +2027,8 @@ module.exports = class LexisPlugin extends Plugin {
     const entry = this.index.get(key);
     if (!entry) return;
     if (this._popover && this._popover.dataset.lexisKey === key) { window.clearTimeout(this._hideTimer); return; }
+    this.recordEncounter(entry.file, "hover");
+    this.hoverFeedback(entry.file);
     this.removePopover();
     const pop = document.createElement("div");
     pop.className = "lexis-popover";
@@ -1780,6 +2037,14 @@ module.exports = class LexisPlugin extends Plugin {
     title.createSpan({ text: entry.display });
     if (entry.isAlias) title.createSpan({ cls: "lexis-popover-alias", text: `别名 → ${entry.file.basename}` });
     title.addEventListener("click", () => this.openAndClose(entry.file));
+    const archiveBtn = title.createSpan({ cls: "lexis-popover-archive", text: entry.archived ? "↩ 恢复" : "📦 归档" });
+    archiveBtn.setAttribute("title", entry.archived ? "取消归档,重新收进复习队列" : "退出高亮 + 暂停复习,悬停仍可查");
+    archiveBtn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      if (entry.archived) new LexisRestoreModal(this.app, this, entry.file).open();
+      else this.setArchived(entry.file, true).then(() => new Notice(`Lexis:「${entry.file.basename}」已标为归档`));
+      this.removePopover();
+    });
     const body = pop.createDiv({ cls: "lexis-popover-body" });
     body.setText("加载中…");
     pop.addEventListener("mouseenter", () => window.clearTimeout(this._hideTimer));
@@ -1814,7 +2079,7 @@ module.exports = class LexisPlugin extends Plugin {
             const d = occWrap.createDiv({ cls: "lexis-occ" });
             await this.renderSentence(d, o.sentence, entry.display, this._popoverComp);
             const add = d.createSpan({ cls: "lexis-occ-add", text: " ➕" });
-            add.setAttribute("title", "收藏到例句");
+            add.setAttribute("title", "收藏到出处");
             add.addEventListener("click", async () => {
               if (add.dataset.done) return;
               add.dataset.done = "1";
@@ -1863,6 +2128,40 @@ class LexisAliasPicker extends (obsidian.FuzzySuggestModal || class {}) {
   }
   getItemText(e) { return e.isAlias ? `${e.display}  —「${e.file.basename}」的别名` : e.display; }
   onChooseItem(e) { if (e && e.file) this.onPick(e); }
+}
+
+// ---------- 恢复:归档词要不要保留 FSRS 进度,二选一 ----------
+class LexisRestoreModal extends Modal {
+  constructor(app, plugin, file) {
+    super(app);
+    this.plugin = plugin;
+    this.file = file;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.addClass("lexis-restore-modal");
+    contentEl.createEl("h3", { text: `恢复「${this.file.basename}」` });
+    contentEl.createEl("p", { text: "这个词已经归档。重新收进复习队列时,原来的 FSRS 记忆进度要保留还是重置?" });
+    const row = contentEl.createDiv({ cls: "lexis-modal-btns" });
+    const keepBtn = row.createEl("button", { cls: "mod-cta", text: "保留原有进度" });
+    keepBtn.addEventListener("click", async () => {
+      await this.plugin.setArchived(this.file, false);
+      new Notice(`Lexis:「${this.file.basename}」已恢复(保留进度)`);
+      this.close();
+    });
+    const resetBtn = row.createEl("button", { text: "重置为新词" });
+    resetBtn.addEventListener("click", async () => {
+      await this.app.fileManager.processFrontMatter(this.file, (fm) => {
+        delete fm["lexis-status"];
+        delete fm["lexis-s"]; delete fm["lexis-d"]; delete fm["lexis-due"];
+        delete fm["lexis-last"]; delete fm["lexis-reps"]; delete fm["lexis-lapses"];
+      });
+      this.plugin.rebuildIndex(false);
+      new Notice(`Lexis:「${this.file.basename}」已恢复(重置为新词)`);
+      this.close();
+    });
+  }
+  onClose() { this.contentEl.empty(); }
 }
 
 // ---------- 背单词复习视图 ----------
@@ -1998,13 +2297,13 @@ class LexisReviewView extends ItemView {
   }
   async applyClozeFront(wordEl, item) {
     const ex = await this.plugin.getFirstExample(item.file);
-    if (!ex || this.currentItem !== item) return; // 无例句则保持单词;卡片已切走则放弃
+    if (!ex || this.currentItem !== item) return; // 无出处则保持单词;卡片已切走则放弃
     wordEl.addClass("lexis-rv-cloze");
     wordEl.empty();
     if (this._frontComp) this._frontComp.unload();
     this._frontComp = new Component(); this._frontComp.load();
     const cloze = this.plugin.buildCloze(ex, item.file.basename);
-    // 走 Markdown 渲染管线(而不是 setText),例句里的 LaTeX/加粗/斜体等格式才能正常显示
+    // 走 Markdown 渲染管线(而不是 setText),出处里的 LaTeX/加粗/斜体等格式才能正常显示
     if (MarkdownRenderer.render) await MarkdownRenderer.render(this.app, cloze, wordEl, item.file.path, this._frontComp);
     else await MarkdownRenderer.renderMarkdown(cloze, wordEl, item.file.path, this._frontComp);
   }
@@ -2049,6 +2348,54 @@ class LexisHomeView extends ItemView {
     new Setting(c).setName("顺序").addDropdown((dd) => { dd.addOption("due", "到期优先").addOption("frequency", "词频(高频先)").addOption("random", "随机").setValue(selOrder); dd.onChange((v) => { selOrder = v; }); });
     new Setting(c).addButton((b) => b.setButtonText("▶ 开始复习").setCta().onClick(() => this.plugin.openReview({ tag: selTag, order: selOrder })))
       .addExtraButton((b) => b.setIcon("refresh-cw").setTooltip("刷新").onClick(() => this.render()));
+
+    this.renderRetireCandidates(c);
+  }
+  // 淘汰法庭:硬条件筛出来的候选,证据摆出来,判决权在用户——平时不主动打扰,只有打开主页才会看到。
+  async renderRetireCandidates(c) {
+    const days = this.plugin.settings.retireCandidateDays ?? 90;
+    const wrap = c.createDiv({ cls: "lexis-retire-wrap" });
+    wrap.createEl("h4", { text: "🗑️ 淘汰候选" });
+    // 阈值直接在主页调,不用跑去设置页;拖动时防抖,别每挪一格就重算一遍(候选计算要挨个查出处数,不便宜)
+    new Setting(wrap).setName("入库/未相遇天数阈值").setDesc("入库满这么多天、且这么多天没自然相遇过的词才会入列。")
+      .addSlider((s) => s.setLimits(14, 365, 1).setValue(days).setDynamicTooltip().onChange((v) => {
+        this.plugin.settings.retireCandidateDays = v;
+        this.plugin.saveSettings();
+        if (this._retireRenderTimer) window.clearTimeout(this._retireRenderTimer);
+        this._retireRenderTimer = window.setTimeout(() => this.render(), 400);
+      }));
+    const listWrap = wrap.createDiv();
+    listWrap.setText("计算中…");
+    let candidates;
+    try { candidates = await this.plugin.buildRetireCandidates(); } catch (_e) { candidates = []; }
+    if (!listWrap.isConnected) return; // 算的过程中视图已经关掉/刷新了,別再画
+    listWrap.empty();
+    if (!candidates.length) { listWrap.createDiv({ cls: "lexis-dim", text: "暂时没有候选。" }); return; }
+    const selected = new Set();
+    const rowByPath = new Map();
+    const removeRows = (paths) => { for (const p of paths) { const row = rowByPath.get(p); if (row) row.remove(); rowByPath.delete(p); selected.delete(p); } };
+    for (const cand of candidates) {
+      const row = listWrap.createDiv({ cls: "lexis-retire-row" });
+      rowByPath.set(cand.file.path, row);
+      const cb = row.createEl("input", { type: "checkbox", cls: "lexis-retire-cb" });
+      cb.addEventListener("change", () => { if (cb.checked) selected.add(cand.file.path); else selected.delete(cand.file.path); });
+      const info = row.createDiv({ cls: "lexis-retire-info" });
+      const nameEl = info.createEl("a", { text: cand.display, href: "#", cls: "lexis-retire-name" });
+      nameEl.addEventListener("click", (e) => { e.preventDefault(); this.plugin.app.workspace.getLeaf(false).openFile(cand.file); });
+      info.createDiv({ cls: "lexis-retire-meta", text: `入库 ${cand.created} · 相遇 ${cand.encounterCount} 次(悬停 ${cand.hoverCount})· 出处 ${cand.occCount} 条 · 距上次相遇 ${cand.sinceLast} 天` });
+      const btns = row.createDiv({ cls: "lexis-retire-btns" });
+      const evictBtn = btns.createEl("button", { text: "🗑️ 淘汰" });
+      evictBtn.addEventListener("click", async () => { await this.plugin.setRetired(cand.file, true); removeRows([cand.file.path]); });
+      const pinBtn = btns.createEl("button", { text: "📌 留下" });
+      pinBtn.addEventListener("click", async () => { await this.plugin.setPinned(cand.file, true); removeRows([cand.file.path]); });
+      const archiveBtn = btns.createEl("button", { text: "📦 已掌握" });
+      archiveBtn.addEventListener("click", async () => { await this.plugin.setArchived(cand.file, true); removeRows([cand.file.path]); });
+    }
+    const bulk = wrap.createDiv({ cls: "lexis-retire-bulk" });
+    const bulkRun = async (fn) => { const paths = [...selected]; for (const p of paths) { const f = this.plugin.app.vault.getAbstractFileByPath(p); if (f) await fn(f); } removeRows(paths); };
+    bulk.createEl("button", { text: "批量淘汰" }).addEventListener("click", () => bulkRun((f) => this.plugin.setRetired(f, true)));
+    bulk.createEl("button", { text: "批量留下" }).addEventListener("click", () => bulkRun((f) => this.plugin.setPinned(f, true)));
+    bulk.createEl("button", { text: "批量已掌握" }).addEventListener("click", () => bulkRun((f) => this.plugin.setArchived(f, true)));
   }
   onClose() {}
 }
@@ -2196,6 +2543,10 @@ class LexisSettingTab extends PluginSettingTab {
       .addExtraButton((b) => b.setIcon("reset").setTooltip("恢复主题色").onClick(async () => { this.plugin.settings.highlightColor = ""; if (this._colorComp) this._colorComp.setValue(accentHex); await save(); refresh(); }));
     new Setting(containerEl).setName("透明度").setDesc("对所有颜色(含主题色)都生效。")
       .addSlider((s) => s.setLimits(0.1, 1, 0.05).setValue(this.plugin.settings.highlightOpacity).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.highlightOpacity = v; await save(); refresh(); }));
+    new Setting(containerEl).setName("按记忆强度渐隐高亮").setDesc("新词全强度高亮;随复习 FSRS stability 上升,透明度单调变淡;归档的词完全不高亮(仍可悬停查)。")
+      .addToggle((t) => t.setValue(this.plugin.settings.fadeByMemory).onChange(async (v) => { this.plugin.settings.fadeByMemory = v; await save(); refresh(); }));
+    new Setting(containerEl).setName("最淡不低于").setDesc("渐隐的下限透明度,防止熟词彻底看不见。")
+      .addSlider((s) => s.setLimits(0, 0.9, 0.05).setValue(this.plugin.settings.fadeFloor).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.fadeFloor = v; await save(); refresh(); }));
 
     containerEl.createEl("h4", { text: "按标签着色" });
     containerEl.createEl("p", { cls: "setting-item-description", text: "给某标签的单词指定专属颜色/线型。命中单词笔记 tags 的第一条规则。" });
@@ -2241,11 +2592,17 @@ class LexisSettingTab extends PluginSettingTab {
       .addSlider((s) => s.setLimits(0.8, 0.97, 0.01).setValue(this.plugin.settings.requestRetention).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.requestRetention = v; await save(); }));
     new Setting(containerEl).setName("每天新词上限").addSlider((s) => s.setLimits(0, 100, 5).setValue(this.plugin.settings.newPerDay).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.newPerDay = v; await save(); }));
     new Setting(containerEl).setName("每轮最多复习").addSlider((s) => s.setLimits(10, 500, 10).setValue(this.plugin.settings.maxReviewsPerSession).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.maxReviewsPerSession = v; await save(); }));
-    new Setting(containerEl).setName("卡片正面").setDesc("整篇=正面单词、背面笔记;填空=正面例句挖空、背面笔记(需先收藏例句,没有则退回显示单词)。")
-      .addDropdown((dd) => dd.addOption("note", "单词 → 整篇").addOption("cloze", "例句填空").setValue(this.plugin.settings.cardFront).onChange(async (v) => { this.plugin.settings.cardFront = v; await save(); }));
+    new Setting(containerEl).setName("卡片正面").setDesc("整篇=正面单词、背面笔记;填空=正面出处挖空、背面笔记(需先收藏出处,没有则退回显示单词)。")
+      .addDropdown((dd) => dd.addOption("note", "单词 → 整篇").addOption("cloze", "出处填空").setValue(this.plugin.settings.cardFront).onChange(async (v) => { this.plugin.settings.cardFront = v; await save(); }));
     new Setting(containerEl).setName("评分按钮底部间距").setDesc("答案区下方评分按钮与底部的距离(px)。移动端需留出导航栏空间,默认 70。")
       .addSlider((s) => s.setLimits(0, 200, 5).setValue(this.plugin.settings.reviewBottomSpace).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.reviewBottomSpace = v; await save(); }));
     new Setting(containerEl).setName("开始背单词").addButton((b) => b.setButtonText("打开复习").setCta().onClick(() => this.plugin.openReview()));
+    new Setting(containerEl).setName("悬停回流复习排期").setDesc("悬停查一个词的释义(Obsidian 内或网页扩展都算),如果它的到期日比设置的天数还远,就把到期日拉近到今天——只挪排期,不影响 stability/难度,也不算一次复习评分。")
+      .addToggle((t) => t.setValue(this.plugin.settings.hoverFeedback).onChange(async (v) => { this.plugin.settings.hoverFeedback = v; await save(); }));
+    new Setting(containerEl).setName("回流阈值(天)").setDesc("到期日超过这个天数才会被悬停拉近。")
+      .addSlider((s) => s.setLimits(1, 30, 1).setValue(this.plugin.settings.hoverFeedbackDays).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.hoverFeedbackDays = v; await save(); }));
+    new Setting(containerEl).setName("淘汰候选阈值(天)").setDesc("Lexis 主页「淘汰候选」区:入库满这么多天、且这么多天没自然相遇过的词才会入列(常驻/已归档/已淘汰的词永远不会进候选)。")
+      .addSlider((s) => s.setLimits(14, 365, 1).setValue(this.plugin.settings.retireCandidateDays).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.retireCandidateDays = v; await save(); }));
 
     containerEl.createEl("h4", { text: "浏览器扩展(桥接)" });
     containerEl.createEl("p", { cls: "setting-item-description", text: "在本机开一个只监听 127.0.0.1 的小服务,供 Chrome 扩展拉词库高亮、划词加词。数据不出本机。Obsidian 关掉后服务也停。" });
@@ -2257,6 +2614,8 @@ class LexisSettingTab extends PluginSettingTab {
         const apply = async (v) => { this.plugin.settings.excludeTags = v; await save(); this.plugin.rebuildIndex(false); };
         t.onChange(apply); tagSuggest(t, apply);
       });
+    new Setting(containerEl).setName("批注小节标题").setDesc('浏览器悬浮卡「✎ 批注」写笔记时用的标题。可以只填文字(比如 "引用",默认按 #### 级别新建),也可以带上级别(比如 "## 引用")。留空用默认 "#### 批注"。改了以后,旧笔记里原来的「批注」小节还是认得,追加内容不会重复建一个新的。')
+      .addText((t) => t.setPlaceholder("#### 批注").setValue(this.plugin.settings.annotationHeading).onChange(async (v) => { this.plugin.settings.annotationHeading = v; await save(); }));
     new Setting(containerEl).setName("划词 pill 显示词典选择").setDesc("开启后,网页划词加新词的小条上会多一个文件夹下拉,可当场选落到哪个词典(需多个词典)。关闭则新词进第一个词典,之后在悬浮卡里点文件夹小标可改。")
       .addToggle((t) => t.setValue(this.plugin.settings.pillFolderPicker).onChange(async (v) => { this.plugin.settings.pillFolderPicker = v; await save(); }));
     new Setting(containerEl).setName("启用本地桥接").setDesc(`开启后浏览器访问 http://127.0.0.1:${this.plugin.settings.bridgePort}/ping 应返回 ok。`)

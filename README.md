@@ -23,11 +23,32 @@ What Lexis deliberately does not promise: faster reading, or learning without ef
 >
 > Lexis 明确不承诺:读得更快,或者不费力的学习。
 
+## Why it fades, why it asks, why it eventually lets a word go
+
+The features added after the first release answer to the same standard: be honest about what each one supports.
+
+- **Salience is scarce, and the dictionary's job is to disappear.** A permanently highlighted word is useful precisely because it's rare on the page. Habituation to a repeated visual cue is a basic, well-documented perceptual effect — the same mechanism behind [banner blindness](https://en.wikipedia.org/wiki/Banner_blindness) in interface research. If every word you've ever added stays lit forever, the highlight stops meaning anything. Fading a word toward invisibility as its FSRS stability grows isn't a consolation prize; a prosthesis for a skill you haven't internalized should recede once you have.
+- **Hovering is a failed retrieval, and a flashcard app never sees it happen.** [Testing-effect](https://en.wikipedia.org/wiki/Testing_effect) research treats the attempt to recall — not just the outcome — as the informative event; work on [desirable difficulty](https://en.wikipedia.org/wiki/Desirable_difficulty) frames a moment of friction in recall as diagnostic, not just annoying. A dedicated review app only ever observes you inside its own review session. Lexis observes the stumble in the wild, while you're actually reading, and nudges that word's schedule closer — a noisy signal (a hover can mean curiosity as easily as forgetting), which is exactly why it only ever moves a date, never a difficulty score or a review tally.
+- **A word's importance can't be predicted at add-time — only re-encounter reveals it.** Some terms you add turn out to be load-bearing vocabulary in your field; others you'll never see again, and there's no way to tell which at the moment you create the note. Lexis doesn't try to guess — it waits, and treats a long silence (no natural re-encounter) as a fact worth surfacing, not a verdict. The retirement list is deliberately a court, not a judge: the algorithm only presents the evidence (how long, how often, how many citations); it never removes or auto-archives anything itself.
+- **A personal dictionary is an OED with one reader.** The [Oxford English Dictionary](https://en.wikipedia.org/wiki/Oxford_English_Dictionary)'s original reading programme asked hundreds of volunteers to mail in citation slips — a dated, sourced quotation for every word they encountered — which editors then distilled into definitions. Every word note's occurrence list is the same pattern, automated for an audience of one: the dictionary isn't authored in advance, it's distilled from the encounters you actually have.
+
+None of this promises the thresholds are right for you, or that any of these signals substitute for actually reviewing a word.
+
+> 「为什么会渐隐、为什么要问你、为什么最终会放弃一个词」——第一版之后加的功能,守的是同一条底线:说清楚每一条到底支持什么。
+> - **显著性是稀缺资源,词典的工作是消失**:一个永久高亮的词之所以有用,恰恰是因为它在页面上很稀少。对反复出现的视觉提示产生习惯化,是一种基础、有据可查的知觉效应——界面研究里的[「banner blindness」](https://en.wikipedia.org/wiki/Banner_blindness)就是同一个机制。如果你加过的每个词永远亮着,高亮就不再意味着什么。让一个词随 FSRS stability 增长渐渐淡到看不见,不是退而求其次的安慰奖;一个还没内化的技能才需要假肢,内化之后就该退场。
+> - **悬停是一次失败的提取,背单词软件从来看不到这个信号**:[测试效应](https://en.wikipedia.org/wiki/Testing_effect)研究认为,有信息量的是"尝试回忆"这件事本身,不只是结果;[合意难度](https://en.wikipedia.org/wiki/Desirable_difficulty)相关工作把回忆时那一下卡顿当作诊断信号,而不只是麻烦。专门的复习软件只能在它自己的复习环节里观察你。Lexis 是在你真实阅读、当场卡壳的那一刻观察到的,顺手把这个词的排期拉近一点——这是个有噪声的信号(悬停也可能只是好奇,不一定是忘了),这正是为什么它只挪动日期,从不触碰难度分数或复习次数。
+> - **一个词有多重要,添加时预测不出来,只有靠再相遇才能显影**:有些词后来会变成这个领域的骨干词汇,有些你可能再也不会遇到,建笔记那一刻没法判断是哪种。Lexis 不去猜——它只是等,把"很久没有自然相遇"当成一个值得摆出来的事实,而不是判决。淘汰列表故意做成一个法庭,而不是法官:算法只负责摆证据(多久、多少次、多少条出处),从不自动删除或归档任何东西。
+> - **个人词典是只有一个读者的 OED**:[牛津英语词典](https://en.wikipedia.org/wiki/Oxford_English_Dictionary)最初的阅读计划征集数百名志愿者寄回"引文卡片"——为遇到的每个词附一句带日期、带来源的引用——编辑再据此蒸馏出释义。每个词条笔记的出处列表是同一套模式,自动化给一个人用:词典不是提前写好的,是从你自己实际经历的相遇里蒸馏出来的。
+>
+> 这些都不能保证:阈值是不是适合你,或者这些信号能替代真正的复习。
+
 ## Features
 
 - **A folder is your word bank.** Point Lexis at a folder — every note title inside becomes an entry (aliases supported). English vocabulary, math jargon, or a person's name — Lexis doesn't care.
 - **Highlight + hover.** Matching words are highlighted in reading and live-preview mode (including Obsidian's built-in PDF viewer); hover to see the definition. Color/style can be mapped per tag or per dictionary folder.
-- **FSRS spaced repetition.** Flip cards to review; progress is written into note frontmatter (`lexis-*`). Two card styles — word→note and cloze (fill-in-the-example) — with undo and skip.
+- **Highlight fades as you learn.** Opacity is tied to FSRS stability — new words are full-strength, well-learned words fade toward a configurable floor. **Archive** a word (via its hover card, the command palette, or right-click) to retire it from highlighting and review entirely while keeping it hoverable; mark a word **resident** to exempt it from future culling. A one-time migration command converts legacy `#熟悉` tags to archived status.
+- **Encounter tracking + a culling review, not an algorithm's verdict.** Hovering, adding an occurrence, or opening a word's note all count as a real-world "encounter" (no dwell-time or scroll tracking); hovering a word due far in the future also nudges its review date closer. The Lexis home view surfaces words nobody's naturally run into in a long while as **retirement candidates** — evidence only, no scoring — and you decide per word: evict, keep, or mark mastered.
+- **FSRS spaced repetition.** Flip cards to review; progress is written into note frontmatter (`lexis-*`). Two card styles — word→note and cloze (fill-in-the-occurrence) — with undo and skip.
 - **Lexis home view.** Stats, a review heatmap, and start a review session filtered by tag/frequency/random selection.
 - **Add words on the fly.** Select text anywhere → right-click/command to create a word note; the source sentence is recorded automatically as an occurrence.
 - **`​```lexis` code blocks.** Render the forgetting curve, typed bidirectional related words, or all recorded occurrences (deduped, favoritable) directly inside a note.
@@ -38,14 +59,16 @@ What Lexis deliberately does not promise: faster reading, or learning without ef
 
 > - **文件夹即词库**:指定一个文件夹,里面每个笔记的标题就是一个词条(支持别名)——英语单词、数学术语、人名,Lexis 一视同仁。
 > - **高亮 + 悬浮**:阅读与实时预览里高亮库中出现的词(含 Obsidian 内置 PDF 阅读器),悬停看释义;颜色/线型可按标签映射。
-> - **FSRS 背单词**:翻卡复习,进度写进笔记 frontmatter(`lexis-*`);支持「单词→整篇」和「例句填空」两种卡面;撤销、跳过。
+> - **高亮随记忆渐隐**:透明度跟 FSRS stability 挂钩——新词全强度,记熟的词逐渐淡到一个可调下限。悬浮卡/命令面板/右键菜单都能把一个词**归档**(退出高亮和复习,仍可悬停查),也能让一个词**常驻**以后不被淘汰。带一次性迁移命令,把旧的 `#熟悉` 标签批量转成已归档。
+> - **相遇记账 + 淘汰审判,不是算法说了算**:悬停查释义、划词加出处、打开词条笔记都算一次真实的"相遇"(不追踪停留时长/滚动);悬停一个到期日很远的词还会顺手把它拉近。Lexis 主页会把长期没自然相遇过的词列成**淘汰候选**——只摆证据不打分,淘汰/留下/已掌握,你来判。
+> - **FSRS 背单词**:翻卡复习,进度写进笔记 frontmatter(`lexis-*`);支持「单词→整篇」和「出处填空」两种卡面;撤销、跳过。
 > - **Lexis 主页**:统计 + 热力图 + 按标签/词频/随机选集合开始复习。
 > - **划词添加**:选中→右键/命令建单词文件,自动记录出处。
 > - **`​```lexis` 代码块**:在笔记里渲染遗忘曲线、分类双向相关词、出现过的地方(去重 + 可收藏)。
 >   - 模式:`curve` / `rel [类型]` / `occ` / `derived`(词根派生词)/ 留空=全部。
 > - **`​```lexis-home` / `​```lexis-heatmap` 代码块**:在任意笔记里嵌一份 Lexis 主页摘要(统计+热力图),或者只放热力图;点一下就能跳到真正的主页/直接开始背诵。
 > - **分类双向关系**:近义词/同根词/形近词/辨析 + 词根——只在一边写 `[[链接]]`,两边都显示。
-> - **浏览器伴侣(可选)**:Chrome 扩展在任意网页上高亮你的词库、悬停看笔记、划词把生词/例句写回 vault——全部通过仅本机的桥接。
+> - **浏览器伴侣(可选)**:Chrome 扩展在任意网页上高亮你的词库、悬停看笔记、划词把生词/出处写回 vault——全部通过仅本机的桥接。
 
 ## Installation
 
