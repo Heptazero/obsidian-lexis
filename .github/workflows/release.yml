@@ -1,0 +1,39 @@
+name: Release
+
+# Push a tag matching the manifest version (e.g. `git tag 1.0.14 && git push --tags`)
+# to publish a GitHub Release whose assets carry build-provenance attestations.
+
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: write      # create the release
+  id-token: write      # required to mint attestations
+  attestations: write  # write the attestation
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            main.js
+            manifest.json
+            styles.css
+
+      - name: Create / update release with assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            main.js manifest.json styles.css \
+            --title "$GITHUB_REF_NAME" \
+            --notes "Release $GITHUB_REF_NAME" \
+          || gh release upload "$GITHUB_REF_NAME" \
+            main.js manifest.json styles.css --clobber
