@@ -12,7 +12,6 @@ const { Plugin, PluginSettingTab, Setting, Notice, TFolder, TFile, Component, Ma
 
 const LEXIS_REVIEW_VIEW = "lexis-review-view";
 const LEXIS_HOME_VIEW = "lexis-home-view";
-const LEXIS_EPUB_VIEW = "lexis-epub-view";
 
 const DEFAULT_SETTINGS = {
   // 收录范围:多个文件夹(逗号/换行分隔) ∪ 携带任一标签的笔记(并集)。
@@ -145,17 +144,6 @@ module.exports = class LexisPlugin extends Plugin {
     this.addCommand({ id: "open-review", name: "开始背单词", callback: () => this.openReview() });
     this.addCommand({ id: "add-selected-word", name: "把选中的词加为单词", callback: () => this.addSelectedWordCommand() });
     this.addCommand({ id: "open-home", name: "打开 Lexis 主页", callback: () => this.openHome() });
-    this.addCommand({
-      id: "open-epub-reader",
-      name: "用 Lexis 阅读当前 EPUB",
-      checkCallback: (checking) => {
-        const file = this.app.workspace.getActiveFile();
-        if (!(file instanceof TFile) || file.extension.toLowerCase() !== "epub") return false;
-        if (checking) return true;
-        this.openEpub(file);
-        return true;
-      },
-    });
     this.addRibbonIcon("graduation-cap", "Lexis 主页", () => this.openHome());
     this.addRibbonIcon("brain", "Lexis 背单词", () => this.openReview());
 
@@ -206,9 +194,6 @@ module.exports = class LexisPlugin extends Plugin {
       },
     });
     this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => {
-      if (file instanceof TFile && file.extension.toLowerCase() === "epub") {
-        menu.addItem((it) => it.setTitle("Lexis: 阅读 EPUB").setIcon("book-open").onClick(() => this.openEpub(file)));
-      }
       if (!(file instanceof TFile) || !this.inVocabFolder(file.path)) return;
       const { archived, pinned } = this.readLifecycle(file);
       menu.addItem((it) => it.setTitle(archived ? "Lexis:恢复" : "Lexis:标为已掌握(归档)").setIcon(archived ? "archive-restore" : "archive").onClick(() => {
@@ -222,8 +207,6 @@ module.exports = class LexisPlugin extends Plugin {
 
     this.registerView(LEXIS_REVIEW_VIEW, (leaf) => new LexisReviewView(leaf, this));
     this.registerView(LEXIS_HOME_VIEW, (leaf) => new LexisHomeView(leaf, this));
-    this.registerView(LEXIS_EPUB_VIEW, (leaf) => new LexisEpubView(leaf, this));
-    this.registerExtensions(["epub"], LEXIS_EPUB_VIEW);
 
     this.addSettingTab(new LexisSettingTab(this.app, this));
 
@@ -233,6 +216,7 @@ module.exports = class LexisPlugin extends Plugin {
     this.registerMarkdownCodeBlockProcessor("lexis-home", (src, el) => this.renderHomeBlock(el));
     this.setupLiveExtension();
     this.setupPdfHighlight();
+    this.setupEpubIframeHighlight();
 
     this.registerDomEvent(document, "mouseover", (e) => this.onMouseOver(e));
     this.registerDomEvent(document, "click", (e) => this.onClick(e));
@@ -292,6 +276,7 @@ module.exports = class LexisPlugin extends Plugin {
     this.removePopover();
     this.removeSelPill();
     this.teardownPdfHighlight();
+    this.teardownEpubIframeHighlight();
     this.stopBridge();
   }
 
@@ -979,6 +964,7 @@ module.exports = class LexisPlugin extends Plugin {
     });
     if (this.liveAvailable) this.app.workspace.updateOptions();
     this.rescanPdfLayers();
+    this.rescanEpubIframes();
   }
 
   // ---------- 阅读模式高亮 ----------
@@ -993,8 +979,9 @@ module.exports = class LexisPlugin extends Plugin {
   // excludeKeys:命中这些 key 时只留纯文本不高亮(词条笔记里不高亮自己的标题/别名,但别的词照常高亮)。
   wrapMatchesInElement(el, rejectSelector, styleOpts, excludeKeys) {
     if (!this._pattern || !this.index.size) return;
+    const doc = el.ownerDocument || document;
     const regex = new RegExp(this._pattern, "gi");
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+    const walker = doc.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
       acceptNode: (node) => {
         if (!node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
         const p = node.parentElement;
@@ -1010,20 +997,20 @@ module.exports = class LexisPlugin extends Plugin {
       regex.lastIndex = 0;
       if (!regex.test(text)) continue;
       regex.lastIndex = 0;
-      const frag = document.createDocumentFragment();
+      const frag = doc.createDocumentFragment();
       let last = 0, m;
       while ((m = regex.exec(text))) {
-        if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+        if (m.index > last) frag.appendChild(doc.createTextNode(text.slice(last, m.index)));
         const key = m[0].toLowerCase();
         if (excludeKeys && excludeKeys.has(key)) {
-          frag.appendChild(document.createTextNode(m[0]));
+          frag.appendChild(doc.createTextNode(m[0]));
           last = m.index + m[0].length;
           if (m[0].length === 0) regex.lastIndex++;
           continue;
         }
         const entry = this.index.get(key);
         if (entry) this.passiveEncounter(entry.file);
-        const span = document.createElement("span");
+        const span = doc.createElement("span");
         span.className = "lexis-hl";
         span.textContent = m[0];
         span.dataset.lexisKey = key;
@@ -1032,7 +1019,7 @@ module.exports = class LexisPlugin extends Plugin {
         last = m.index + m[0].length;
         if (m[0].length === 0) regex.lastIndex++;
       }
-      if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+      if (last < text.length) frag.appendChild(doc.createTextNode(text.slice(last)));
       node.parentNode.replaceChild(frag, node);
     }
   }
@@ -1177,6 +1164,67 @@ module.exports = class LexisPlugin extends Plugin {
       document.querySelectorAll(".lexis-pdf-hl-layer").forEach((l) => l.remove());
       document.querySelectorAll(".textLayer").forEach((l) => { l.normalize(); this.scanPdfLayer(l); });
     } catch (_e) {}
+  }
+
+  // ---------- 第三方 EPUB 阅读器高亮 ----------
+  // EPUB Marginalia 与 ePub Reader 都用 epub.js,章节放在同源 iframe 中。
+  // 主文档的事件/TreeWalker 无法穿透 iframe,所以只对 epub.js 的 iframe 单独注入。
+  isEpubIframe(frame) {
+    return !!(frame && frame.tagName === "IFRAME" && (
+      frame.hasAttribute("enable-annotation") ||
+      frame.matches?.(".epub-reader-area iframe, .epub-container iframe, .epub-view iframe") ||
+      frame.closest?.(".epub-reader-area, .epub-container, .epub-view")
+    ));
+  }
+  setupEpubIframeHighlight() {
+    this.teardownEpubIframeHighlight();
+    this._epubIframeFrames = new WeakSet();
+    this._epubIframeDocs = new Map();
+    this._epubIframeObserver = new MutationObserver((muts) => {
+      for (const mu of muts) for (const node of mu.addedNodes) {
+        if (!node || node.nodeType !== 1) continue;
+        if (this.isEpubIframe(node)) this.observeEpubIframe(node);
+        node.querySelectorAll?.("iframe[enable-annotation], .epub-reader-area iframe, .epub-container iframe, .epub-view iframe").forEach((frame) => this.observeEpubIframe(frame));
+      }
+    });
+    this._epubIframeObserver.observe(document.body, { childList: true, subtree: true });
+    this.rescanEpubIframes();
+  }
+  observeEpubIframe(frame) {
+    if (!this.isEpubIframe(frame)) return;
+    if (!this._epubIframeFrames.has(frame)) {
+      this._epubIframeFrames.add(frame);
+      frame.addEventListener("load", () => this.scanEpubIframe(frame));
+    }
+    this.scanEpubIframe(frame);
+  }
+  scanEpubIframe(frame) {
+    if (!this.settings.enableHighlight || !this.isEpubIframe(frame)) return;
+    let doc;
+    try { doc = frame.contentDocument; } catch (_e) { return; }
+    if (!doc?.body) return;
+    this.wrapMatchesInElement(doc.body, "script,style,code,pre,.lexis-hl,.lexis-popover", null);
+    if (this._epubIframeDocs.has(doc)) return;
+    const over = (e) => this.onMouseOver(e);
+    const click = (e) => this.onClick(e);
+    const mouseup = (e) => this.maybeShowSelPill(e, true);
+    doc.addEventListener("mouseover", over);
+    doc.addEventListener("click", click);
+    doc.addEventListener("mouseup", mouseup);
+    this._epubIframeDocs.set(doc, { over, click, mouseup });
+  }
+  rescanEpubIframes() {
+    try { document.querySelectorAll("iframe[enable-annotation], .epub-reader-area iframe, .epub-container iframe, .epub-view iframe").forEach((frame) => this.observeEpubIframe(frame)); } catch (_e) {}
+  }
+  teardownEpubIframeHighlight() {
+    if (this._epubIframeObserver) { this._epubIframeObserver.disconnect(); this._epubIframeObserver = null; }
+    if (this._epubIframeDocs) {
+      for (const [doc, hooks] of this._epubIframeDocs) {
+        try { doc.removeEventListener("mouseover", hooks.over); doc.removeEventListener("click", hooks.click); doc.removeEventListener("mouseup", hooks.mouseup); } catch (_e) {}
+      }
+    }
+    this._epubIframeDocs = null;
+    this._epubIframeFrames = null;
   }
 
   // ---------- 实时预览高亮 ----------
@@ -1651,20 +1699,6 @@ module.exports = class LexisPlugin extends Plugin {
     this.app.workspace.revealLeaf(leaf);
     if (leaf.view instanceof LexisHomeView) leaf.view.render();
   }
-  async openEpub(file) {
-    if (!(file instanceof TFile) || file.extension.toLowerCase() !== "epub") {
-      new Notice("Lexis:请选择一个 EPUB 文件");
-      return;
-    }
-    let leaf = this.app.workspace.getLeavesOfType(LEXIS_EPUB_VIEW).find((l) => l.view && l.view.filePath === file.path);
-    if (!leaf) {
-      leaf = this.app.workspace.getLeaf(true);
-      await leaf.setViewState({ type: LEXIS_EPUB_VIEW, state: { filePath: file.path }, active: true });
-    }
-    this.app.workspace.revealLeaf(leaf);
-    if (leaf.view instanceof LexisEpubView) await leaf.view.openFile(file);
-  }
-
   // ---------- 划词添加 ----------
   sanitizeName(name) { return (name || "").replace(/[\\/:*?"<>|#^[\]]/g, "").replace(/\s+/g, " ").trim(); }
   async ensureFolder(folder) {
@@ -1848,20 +1882,26 @@ module.exports = class LexisPlugin extends Plugin {
   }
   // ---------- 划词添加药丸(普通笔记,阅读/编辑两种模式) ----------
   removeSelPill() { if (this._selPill) { this._selPill.remove(); this._selPill = null; } }
-  maybeShowSelPill(e) {
+  maybeShowSelPill(e, fromEpubIframe) {
     if (!this.settings.selectionPill) return;
     const tgt = e && e.target;
     // 点到自己的 UI(药丸/悬浮卡/菜单)不处理,避免抢选区
     if (tgt && tgt.closest && tgt.closest(".lexis-sel-pill, .lexis-popover, .menu")) return;
+    const sourceDoc = (tgt && tgt.ownerDocument) || document;
+    const sourceWin = sourceDoc.defaultView || window;
     let sel, text;
-    try { sel = window.getSelection(); text = sel ? sel.toString().trim() : ""; } catch (_e) { return; }
+    try { sel = sourceWin.getSelection(); text = sel ? sel.toString().trim() : ""; } catch (_e) { return; }
     if (!text || text.length > 60 || /[\n\r]/.test(text)) { this.removeSelPill(); return; }
-    // 选区必须落在 Markdown 笔记内容 或 PDF 文字层里(其它面板/设置一律不弹)
+    // 选区必须落在 Markdown 笔记内容、PDF 文字层,或已识别的 EPUB iframe 里。
     const node = sel.anchorNode;
     const host = node ? (node.nodeType === 1 ? node : node.parentElement) : null;
-    if (!host || !host.closest || !host.closest(".markdown-source-view, .markdown-reading-view, .markdown-preview-view, .pdf-viewer, .pdf-container, .pdf-embed, .textLayer")) { this.removeSelPill(); return; }
+    if (!host || !host.closest || (!fromEpubIframe && !host.closest(".markdown-source-view, .markdown-reading-view, .markdown-preview-view, .pdf-viewer, .pdf-container, .pdf-embed, .textLayer"))) { this.removeSelPill(); return; }
     let rect; try { rect = sel.getRangeAt(0).getBoundingClientRect(); } catch (_e) { return; }
     if (!rect || (!rect.width && !rect.height)) { this.removeSelPill(); return; }
+    if (sourceWin !== window && sourceWin.frameElement) {
+      const frameRect = sourceWin.frameElement.getBoundingClientRect();
+      rect = { left: rect.left + frameRect.left, right: rect.right + frameRect.left, top: rect.top + frameRect.top, bottom: rect.bottom + frameRect.top, width: rect.width, height: rect.height };
+    }
     this.removeSelPill();
     const known = this.index.has(text.toLowerCase());
     const pill = document.body.createDiv({ cls: "lexis-sel-pill" });
@@ -2127,10 +2167,12 @@ module.exports = class LexisPlugin extends Plugin {
   positionPopover(pop, spanEl) {
     const r = spanEl.getBoundingClientRect();
     const pr = pop.getBoundingClientRect();
-    let left = r.left, top = r.bottom + 6;
+    const ownerWin = spanEl.ownerDocument?.defaultView;
+    const frameRect = ownerWin && ownerWin !== window && ownerWin.frameElement ? ownerWin.frameElement.getBoundingClientRect() : null;
+    let left = r.left + (frameRect ? frameRect.left : 0), top = r.bottom + (frameRect ? frameRect.top : 0) + 6;
     if (left + pr.width > window.innerWidth - 10) left = window.innerWidth - pr.width - 10;
     if (left < 10) left = 10;
-    if (top + pr.height > window.innerHeight - 10) top = r.top - pr.height - 6;
+    if (top + pr.height > window.innerHeight - 10) top = r.top + (frameRect ? frameRect.top : 0) - pr.height - 6;
     if (top < 10) top = 10;
     pop.style.left = left + "px"; pop.style.top = top + "px";
   }
@@ -2430,183 +2472,7 @@ class LexisHomeView extends ItemView {
   onClose() {}
 }
 
-// ---------- 内置 EPUB 阅读器 ----------
-// EPUB 是 ZIP + OPF 清单 + XHTML 章节。只用浏览器原生 DecompressionStream，避免引入
-// 一个只为解压而存在的大依赖；不支持加密/DRM EPUB 和固定版式（pre-paginated）书籍。
-function epubNormalizePath(base, href) {
-  const raw = String(href || "").split(/[?#]/, 1)[0].replace(/\\/g, "/");
-  if (!raw) return "";
-  const parts = (base ? base.split("/").slice(0, -1) : []).concat(raw.split("/"));
-  const out = [];
-  for (const part of parts) {
-    if (!part || part === ".") continue;
-    if (part === "..") out.pop(); else out.push(part);
-  }
-  try { return decodeURIComponent(out.join("/")); } catch (_e) { return out.join("/"); }
-}
-
-function epubText(bytes) { return new TextDecoder("utf-8").decode(bytes); }
-function epubBase64(bytes) {
-  let binary = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  return btoa(binary);
-}
-
-async function epubInflate(bytes, method) {
-  if (method === 0) return bytes;
-  if (method !== 8 || typeof DecompressionStream === "undefined") {
-    throw new Error(method === 8 ? "当前 Obsidian 运行环境不支持 EPUB 压缩解码" : `不支持的 EPUB 压缩方式(${method})`);
-  }
-  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
-}
-
-async function readEpubArchive(buffer) {
-  const bytes = new Uint8Array(buffer);
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  let eocd = -1;
-  for (let i = Math.max(0, bytes.length - 65557); i <= bytes.length - 22; i++) {
-    if (view.getUint32(i, true) === 0x06054b50) eocd = i;
-  }
-  if (eocd < 0) throw new Error("不是有效的 EPUB/ZIP 文件");
-  const count = view.getUint16(eocd + 10, true);
-  let pos = view.getUint32(eocd + 16, true);
-  const entries = new Map();
-  for (let i = 0; i < count; i++) {
-    if (view.getUint32(pos, true) !== 0x02014b50) throw new Error("EPUB 目录损坏");
-    const flags = view.getUint16(pos + 8, true), method = view.getUint16(pos + 10, true);
-    const packed = view.getUint32(pos + 20, true), nameLen = view.getUint16(pos + 28, true);
-    const extraLen = view.getUint16(pos + 30, true), commentLen = view.getUint16(pos + 32, true);
-    const localOffset = view.getUint32(pos + 42, true);
-    const name = epubText(bytes.slice(pos + 46, pos + 46 + nameLen));
-    if (flags & 1) throw new Error("加密/DRM EPUB 无法读取");
-    if (view.getUint32(localOffset, true) !== 0x04034b50) throw new Error("EPUB 条目损坏");
-    const localNameLen = view.getUint16(localOffset + 26, true), localExtraLen = view.getUint16(localOffset + 28, true);
-    const dataStart = localOffset + 30 + localNameLen + localExtraLen;
-    entries.set(name.replace(/^\/+/, ""), { method, packed, dataStart });
-    pos += 46 + nameLen + extraLen + commentLen;
-  }
-  return {
-    async read(path) {
-      const entry = entries.get(String(path).replace(/^\/+/, ""));
-      if (!entry) return null;
-      return epubInflate(bytes.slice(entry.dataStart, entry.dataStart + entry.packed), entry.method);
-    },
-  };
-}
-
-class LexisEpubView extends ItemView {
-  constructor(leaf, plugin) { super(leaf); this.plugin = plugin; this.filePath = ""; this.book = null; this.chapter = 0; this.fontScale = 1; }
-  getViewType() { return LEXIS_EPUB_VIEW; }
-  getDisplayText() { return this.title || "Lexis EPUB"; }
-  getIcon() { return "book-open"; }
-  getState() { return { filePath: this.filePath, chapter: this.chapter, fontScale: this.fontScale }; }
-  async setState(state, result) {
-    this.filePath = state?.filePath || state?.file || state?.path || this.filePath;
-    this.chapter = Math.max(0, Number(state?.chapter) || 0);
-    this.fontScale = Math.max(0.75, Math.min(1.6, Number(state?.fontScale) || 1));
-    if (result && this.filePath) await this.loadBook();
-  }
-  async onOpen() {
-    if (!this.filePath) {
-      const active = this.app.workspace.getActiveFile();
-      if (active instanceof TFile && active.extension.toLowerCase() === "epub") this.filePath = active.path;
-    }
-    if (this.filePath) await this.loadBook(); else this.renderEmpty();
-  }
-  async openFile(file) { if (this.filePath !== file.path || !this.book) { this.filePath = file.path; this.chapter = 0; await this.loadBook(); } }
-  async loadBook() {
-    const file = this.app.vault.getAbstractFileByPath(this.filePath);
-    if (!(file instanceof TFile)) { this.renderEmpty("找不到这个 EPUB 文件"); return; }
-    this.contentEl.empty(); this.contentEl.addClass("lexis-epub");
-    this.contentEl.createDiv({ cls: "lexis-epub-loading", text: "正在打开 EPUB…" });
-    try {
-      const archive = await readEpubArchive(await this.app.vault.readBinary(file));
-      const container = await archive.read("META-INF/container.xml");
-      if (!container) throw new Error("EPUB 缺少 META-INF/container.xml");
-      const root = new DOMParser().parseFromString(epubText(container), "application/xml").querySelector("rootfile")?.getAttribute("full-path");
-      if (!root) throw new Error("EPUB 找不到 OPF 书目文件");
-      const opfBytes = await archive.read(root);
-      if (!opfBytes) throw new Error("EPUB 书目文件无法读取");
-      const opf = new DOMParser().parseFromString(epubText(opfBytes), "application/xml");
-      const manifest = new Map();
-      for (const item of opf.querySelectorAll("manifest > item")) {
-        const id = item.getAttribute("id"), href = item.getAttribute("href");
-        if (id && href) manifest.set(id, { path: epubNormalizePath(root, href), mediaType: item.getAttribute("media-type") || "" });
-      }
-      const spine = [];
-      for (const ref of opf.querySelectorAll("spine > itemref")) {
-        const item = manifest.get(ref.getAttribute("idref"));
-        if (item && /xhtml|html/.test(item.mediaType)) spine.push(item);
-      }
-      if (!spine.length) throw new Error("EPUB 没有可阅读的 XHTML 章节");
-      const title = opf.querySelector("title")?.textContent?.trim() || file.basename;
-      this.book = { archive, spine, title, file };
-      this.title = title;
-      this.chapter = Math.min(this.chapter, spine.length - 1);
-      await this.renderChapter();
-    } catch (err) {
-      console.error("[Lexis] EPUB 打开失败", err);
-      this.renderEmpty("无法打开 EPUB：" + (err?.message || err));
-    }
-  }
-  renderEmpty(message) { const c = this.contentEl; c.empty(); c.addClass("lexis-epub"); c.createDiv({ cls: "lexis-epub-empty", text: message || "在文件列表中右键 EPUB，选择「Lexis: 阅读 EPUB」。" }); }
-  async renderChapter() {
-    if (!this.book) return;
-    const c = this.contentEl; c.empty(); c.addClass("lexis-epub");
-    const bar = c.createDiv({ cls: "lexis-epub-toolbar" });
-    const prev = bar.createEl("button", { text: "上一章", attr: { "aria-label": "上一章" } });
-    const label = bar.createDiv({ cls: "lexis-epub-title", text: this.book.title });
-    const shrink = bar.createEl("button", { text: "A-", attr: { "aria-label": "缩小字号" } });
-    const grow = bar.createEl("button", { text: "A+", attr: { "aria-label": "放大字号" } });
-    const next = bar.createEl("button", { text: "下一章", attr: { "aria-label": "下一章" } });
-    prev.disabled = this.chapter <= 0; next.disabled = this.chapter >= this.book.spine.length - 1;
-    prev.onclick = () => { this.chapter--; this.renderChapter(); };
-    next.onclick = () => { this.chapter++; this.renderChapter(); };
-    shrink.onclick = () => { this.fontScale = Math.max(0.75, this.fontScale - 0.1); this.renderChapter(); };
-    grow.onclick = () => { this.fontScale = Math.min(1.6, this.fontScale + 0.1); this.renderChapter(); };
-    label.setAttribute("title", `第 ${this.chapter + 1} / ${this.book.spine.length} 章`);
-    const reading = c.createDiv({ cls: "lexis-epub-reading" });
-    reading.style.fontSize = this.fontScale + "em";
-    reading.createDiv({ cls: "lexis-epub-chapter", text: `第 ${this.chapter + 1} / ${this.book.spine.length} 章` });
-    try {
-      const item = this.book.spine[this.chapter], source = await this.book.archive.read(item.path);
-      if (!source) throw new Error("章节文件缺失");
-      const doc = new DOMParser().parseFromString(epubText(source), "application/xhtml+xml");
-      const body = doc.querySelector("body");
-      if (!body) throw new Error("章节没有正文");
-      for (const bad of body.querySelectorAll("script,iframe,object,embed,form,link,style")) bad.remove();
-      for (const el of body.querySelectorAll("*")) {
-        for (const attr of [...el.attributes]) {
-          if (/^on/i.test(attr.name) || ((attr.name === "href" || attr.name === "src") && /^\s*(javascript|data:text\/html):/i.test(attr.value))) el.removeAttribute(attr.name);
-        }
-      }
-      const chapter = reading.createDiv({ cls: "lexis-epub-content" });
-      chapter.innerHTML = body.innerHTML;
-      for (const img of chapter.querySelectorAll("img[src]")) {
-        const path = epubNormalizePath(item.path, img.getAttribute("src"));
-        const data = await this.book.archive.read(path);
-        if (data) {
-          const ext = path.split(".").pop()?.toLowerCase();
-          const mime = ext === "svg" ? "image/svg+xml" : ext === "png" ? "image/png" : ext === "gif" ? "image/gif" : "image/jpeg";
-          img.src = `data:${mime};base64,${epubBase64(data)}`;
-        }
-      }
-      for (const a of chapter.querySelectorAll("a[href]")) a.addEventListener("click", (e) => {
-        const href = a.getAttribute("href") || "";
-        if (href.startsWith("#")) return;
-        e.preventDefault();
-        const target = epubNormalizePath(item.path, href);
-        const index = this.book.spine.findIndex((x) => x.path === target);
-        if (index >= 0) { this.chapter = index; this.renderChapter(); }
-      });
-      this.plugin.highlightElement(chapter, null);
-    } catch (err) { reading.createDiv({ cls: "lexis-epub-error", text: "章节加载失败：" + (err?.message || err) }); }
-  }
-  onClose() { this.book = null; }
-}
-
+// 输入时模糊匹配建议。AbstractInputSuggest 在 Obsidian 1.0+ 运行时可用;
 // 输入时模糊匹配建议。AbstractInputSuggest 在 Obsidian 1.0+ 运行时可用;
 // 缺失时 `|| class {}` 避免 extends undefined 报错,且调用处会跳过实例化。
 // opts.multi=true 时按最后一个分隔符后的"活动 token"匹配,选中后追加(用于逗号/空格分隔的标签/属性多值字段)。

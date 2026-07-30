@@ -46,7 +46,7 @@ None of this promises the thresholds are right for you, or that any of these sig
 
 - **A folder is your word bank.** Point Lexis at a folder — every note title inside becomes an entry (aliases supported). English vocabulary, math jargon, or a person's name — Lexis doesn't care.
 - **Highlight + hover.** Matching words are highlighted in reading and live-preview mode (including Obsidian's built-in PDF viewer); hover to see the definition. Color/style can be mapped per tag or per dictionary folder.
-- **Built-in EPUB reader.** Right-click an EPUB in the vault and open it with Lexis. Its reflowable text is rendered directly in Obsidian, with the same highlighting and hover definitions; no separate EPUB plugin is required.
+- **EPUB reader integration.** In epub.js-based readers, Lexis highlights words inside book chapters and keeps hover definitions and add-word selection available. Lexis does not own the EPUB reader or file association.
 - **Highlight fades as you learn.** Opacity is tied to FSRS stability — new words are full-strength, well-learned words fade toward a configurable floor. **Archive** a word (via its hover card, the command palette, or right-click) to retire it from highlighting and review entirely while keeping it hoverable; mark a word **resident** to exempt it from future culling. A one-time migration command converts legacy `#熟悉` tags to archived status.
 - **Encounter tracking + a culling review, not an algorithm's verdict.** Hovering, adding an occurrence, or opening a word's note all count as a real-world "encounter" (no dwell-time or scroll tracking); hovering a word due far in the future also nudges its review date closer. The Lexis home view surfaces words nobody's naturally run into in a long while as **retirement candidates** — evidence only, no scoring — and you decide per word: evict, keep, or mark mastered.
 - **FSRS spaced repetition.** Flip cards to review; progress is written into note frontmatter (`lexis-*`). Two card styles — word→note and cloze (fill-in-the-occurrence) — with undo and skip.
@@ -60,7 +60,7 @@ None of this promises the thresholds are right for you, or that any of these sig
 
 > - **文件夹即词库**:指定一个文件夹,里面每个笔记的标题就是一个词条(支持别名)——英语单词、数学术语、人名,Lexis 一视同仁。
 > - **高亮 + 悬浮**:阅读与实时预览里高亮库中出现的词(含 Obsidian 内置 PDF 阅读器),悬停看释义;颜色/线型可按标签映射。
-> - **内置 EPUB 阅读器**:在库内 EPUB 文件上右键,选择 Lexis 打开。章节文字直接在 Obsidian 中排版,沿用同一套高亮与悬浮释义;不依赖其他 EPUB 插件。
+> - **EPUB 阅读器适配**:在基于 epub.js 的阅读器中,Lexis 会在章节文字内高亮词库词,支持悬浮释义与划词加入词库;Lexis 不再接管 EPUB 文件或自建阅读器。
 > - **高亮随记忆渐隐**:透明度跟 FSRS stability 挂钩——新词全强度,记熟的词逐渐淡到一个可调下限。悬浮卡/命令面板/右键菜单都能把一个词**归档**(退出高亮和复习,仍可悬停查),也能让一个词**常驻**以后不被淘汰。带一次性迁移命令,把旧的 `#熟悉` 标签批量转成已归档。
 > - **相遇记账 + 淘汰审判,不是算法说了算**:悬停查释义、划词加出处、打开词条笔记都算一次真实的"相遇"(不追踪停留时长/滚动);悬停一个到期日很远的词还会顺手把它拉近。Lexis 主页会把长期没自然相遇过的词列成**淘汰候选**——只摆证据不打分,淘汰/留下/已掌握,你来判。
 > - **FSRS 背单词**:翻卡复习,进度写进笔记 frontmatter(`lexis-*`);支持「单词→整篇」和「出处填空」两种卡面;撤销、跳过。
@@ -87,9 +87,9 @@ None of this promises the thresholds are right for you, or that any of these sig
 3. **Add words on the fly.** Select text in any note → right-click *Add to Lexis* (or use the command). The source sentence is recorded automatically as an occurrence.
 4. **Review.** Open the **Lexis** home view for stats, a heatmap, and FSRS spaced-repetition review (word→note and cloze cards; undo/skip supported).
 5. **In-note blocks.** Add a `​```lexis` code block to render the forgetting curve (`curve`), related words (`rel [type]`), occurrences (`occ`), or root-derived words (`derived`); leave the mode blank for all. Add a `​```lexis-home` block anywhere to embed the stats + heatmap summary, clickable through to the full home view.
-6. **Read EPUB.** Right-click an `.epub` file in the vault and choose *Lexis: Read EPUB*. Use the chapter controls and `A-` / `A+` in the reader toolbar.
+6. **Use an EPUB reader.** Open an `.epub` with a compatible epub.js-based reader. Lexis adds its vocabulary layer after each chapter is rendered.
 
-> 中文用法见上方「Features」一节:设置里指定词库文件夹 → 阅读时自动高亮悬浮 → EPUB 文件右键用 Lexis 打开 → 划词添加 → Lexis 主页背诵 → 笔记里用 `​```lexis` 块渲染曲线/相关词/出处。
+> 中文用法见上方「Features」一节:设置里指定词库文件夹 → 阅读时自动高亮悬浮 → 用 EPUB 阅读器打开书籍后，Lexis 自动注入高亮 → 划词添加 → Lexis 主页背诵 → 笔记里用 `​```lexis` 块渲染曲线/相关词/出处。
 
 ## Privacy & local bridge
 
