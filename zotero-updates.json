@@ -34,6 +34,17 @@
               "strict_max_version": "9.*"
             }
           }
+        },
+        {
+          "version": "0.1.24",
+          "update_link": "https://github.com/Heptazero/obsidian-lexis/releases/download/zotero-v0.1.24/lexis-zotero-0.1.24.xpi",
+          "update_hash": "sha256:cc5a50a84c2dfe41d590d64960dc0039ce5524acfd3b00cf0640a9d124f05636",
+          "applications": {
+            "zotero": {
+              "strict_min_version": "9.0",
+              "strict_max_version": "9.*"
+            }
+          }
         }
       ]
     }
