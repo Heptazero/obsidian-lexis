@@ -1,4 +1,6 @@
 data.json
 encounters.json
+data.sync-conflict-*.json
 .DS_Store
 node_modules/
+zotero-extension/dist/

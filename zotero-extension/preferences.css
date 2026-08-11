@@ -1,0 +1,169 @@
+.lexis-pref-root,
+.lexis-pref-root * {
+  box-sizing: border-box;
+}
+
+.lexis-pref-root {
+  width: 100%;
+  max-width: 620px;
+  min-width: 0;
+  padding: 8px 4px 24px;
+  overflow-x: hidden;
+}
+
+.lexis-pref-panel {
+  width: 100%;
+  min-width: 0;
+  padding: 18px;
+  border: var(--material-border, 1px solid rgba(127, 127, 127, .28));
+  border-radius: 10px;
+  background: var(--material-background, transparent);
+}
+
+.lexis-pref-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.lexis-pref-heading h2,
+.lexis-pref-heading p,
+.lexis-pref-status,
+.lexis-pref-footnote {
+  margin: 0;
+}
+
+.lexis-pref-heading h2 {
+  font-size: 1.35rem;
+  line-height: 1.25;
+}
+
+.lexis-pref-heading p,
+.lexis-pref-footnote {
+  margin-top: 3px;
+  color: var(--fill-secondary);
+  line-height: 1.45;
+}
+
+.lexis-pref-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding-top: 2px;
+  white-space: nowrap;
+}
+
+.lexis-pref-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+}
+
+.lexis-pref-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  min-width: 0;
+  font-weight: 600;
+}
+
+.lexis-pref-field input {
+  appearance: none !important;
+  -moz-appearance: none !important;
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 5px 8px;
+  border: var(--material-border, 1px solid rgba(127, 127, 127, .38)) !important;
+  border-radius: 6px;
+  background: var(--material-background, Field) !important;
+  color: var(--fill-primary, inherit) !important;
+  font: inherit;
+  font-weight: 400;
+  text-align: start !important;
+}
+
+.lexis-pref-field input:focus {
+  border-color: #7c5cff !important;
+  outline: 2px solid color-mix(in srgb, #7c5cff 22%, transparent);
+  outline-offset: 0;
+}
+
+.lexis-pref-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.lexis-pref-actions button {
+  min-height: 32px;
+  padding: 5px 13px;
+  border: var(--material-border, 1px solid rgba(127, 127, 127, .38));
+  border-radius: 6px;
+  background: var(--material-background, ButtonFace);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.lexis-pref-actions button.primary {
+  border-color: #7c5cff;
+  background: #7c5cff;
+  color: white;
+}
+
+.lexis-pref-actions button:disabled {
+  cursor: default;
+  opacity: .55;
+}
+
+.lexis-pref-status {
+  min-height: 1.45em;
+  margin-top: 10px;
+  color: var(--fill-secondary);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.lexis-pref-status[data-state="ok"] { color: #17823b; }
+.lexis-pref-status[data-state="error"] { color: #b42318; }
+.lexis-pref-footnote { padding: 10px 4px 0; }
+
+.lexis-pref-files-panel { margin-top: 14px; }
+
+.lexis-pref-filelist {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 260px;
+  overflow-y: auto;
+  border: var(--material-border, 1px solid rgba(127, 127, 127, .28));
+  border-radius: 8px;
+  padding: 4px;
+}
+
+.lexis-pref-file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 400;
+}
+
+.lexis-pref-file-row:hover { background: var(--material-background, rgba(127, 127, 127, .1)); }
+.lexis-pref-file-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.lexis-pref-files-empty {
+  margin: 0;
+  padding: 10px 8px;
+  color: var(--fill-secondary);
+}

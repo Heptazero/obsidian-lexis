@@ -1,8 +1,8 @@
 # Lexis
 
-A personal dictionary for Obsidian. Not just language learning: every field you enter brings its own jargon, and the words you half-know are exactly the ones your eyes skip while reading. Lexis turns a folder of notes into your personal lexicon — words, terms, names — highlighted everywhere you read (Obsidian, its PDF viewer, and via a companion extension, your browser), with hover definitions, FSRS spaced-repetition review, auto-collected occurrences, and a review heatmap. No build step.
+A personal dictionary for Obsidian. Not just language learning: every field you enter brings its own jargon, and the words you half-know are exactly the ones your eyes skip while reading. Lexis turns a folder of notes into your personal lexicon — words, terms, names — highlighted everywhere you read (Obsidian, its PDF viewer, your browser, and Zotero), with hover definitions, FSRS spaced-repetition review, auto-collected occurrences, and a review heatmap.
 
-> Obsidian 个人词典插件。不只是学外语:每进入一个领域,术语就多一层,而你半懂不懂的词恰恰是阅读时眼睛会滑过去的词。Lexis 把一个文件夹变成你的个人词库——单词、术语、人名——在你阅读的一切地方永久高亮(Obsidian、内置 PDF 阅读器,配套扩展覆盖浏览器),悬浮释义、FSRS 间隔重复、出处自动聚合、热力图。纯 JS、无构建步骤。
+> Obsidian 个人词典插件。不只是学外语:每进入一个领域,术语就多一层,而你半懂不懂的词恰恰是阅读时眼睛会滑过去的词。Lexis 把一个文件夹变成你的个人词库——单词、术语、人名——在你阅读的一切地方永久高亮(Obsidian、内置 PDF 阅读器、浏览器与 Zotero),悬浮释义、FSRS 间隔重复、出处自动聚合、热力图。
 
 ## Why a personal dictionary
 
@@ -46,6 +46,7 @@ None of this promises the thresholds are right for you, or that any of these sig
 
 - **A folder is your word bank.** Point Lexis at a folder — every note title inside becomes an entry (aliases supported). English vocabulary, math jargon, or a person's name — Lexis doesn't care.
 - **Highlight + hover.** Matching words are highlighted in reading and live-preview mode (including Obsidian's built-in PDF viewer); hover to see the definition. Color/style can be mapped per tag or per dictionary folder.
+- **Inline entry notes.** A marked note can hold lightweight names, places, or annotations without creating one file per entry. Use `Name:: note`; Lexis groups entries by their nearest heading and assigns category colors in Settings. The delimiter is configurable.
 - **EPUB reader integration.** In epub.js-based readers, Lexis highlights words inside book chapters and keeps hover definitions and add-word selection available. Lexis does not own the EPUB reader or file association.
 - **Highlight fades as you learn.** Opacity is tied to FSRS stability — new words are full-strength, well-learned words fade toward a configurable floor. **Archive** a word (via its hover card, the command palette, or right-click) to retire it from highlighting and review entirely while keeping it hoverable; mark a word **resident** to exempt it from future culling. A one-time migration command converts legacy `#熟悉` tags to archived status.
 - **Encounter tracking + a culling review, not an algorithm's verdict.** Hovering, adding an occurrence, or opening a word's note all count as a real-world "encounter" (no dwell-time or scroll tracking); hovering a word due far in the future also nudges its review date closer. The Lexis home view surfaces words nobody's naturally run into in a long while as **retirement candidates** — evidence only, no scoring — and you decide per word: evict, keep, or mark mastered.
@@ -57,9 +58,11 @@ None of this promises the thresholds are right for you, or that any of these sig
 - **`​```lexis-home` / `​```lexis-heatmap` blocks.** Embed a mini Lexis home page (stats + review heatmap) — or just the heatmap — in any note; click through to open the real home view or jump straight into review.
 - **Typed bidirectional relations.** Synonyms / cognates / look-alikes / usage-notes + word roots — write the `[[link]]` on one side only, it shows on both.
 - **Browser companion (optional).** A Chrome extension highlights your word bank on any web page, shows the note on hover, and sends selected words/sentences back into your vault — over a local-only bridge.
+- **Zotero companion (optional).** A Zotero 9 plugin brings the same PDF highlights, isolated hover card, MathJax output, dictionary picker, aliases, notes, tags, moves, deletes, source links, and offline queue into Zotero Reader. Obsidian remains the single source of truth.
 
 > - **文件夹即词库**:指定一个文件夹,里面每个笔记的标题就是一个词条(支持别名)——英语单词、数学术语、人名,Lexis 一视同仁。
 > - **高亮 + 悬浮**:阅读与实时预览里高亮库中出现的词(含 Obsidian 内置 PDF 阅读器),悬停看释义;颜色/线型可按标签映射。
+> - **内联条目笔记**:给一份人物表、地名表或设定笔记加 `lexis-inline: true` 属性(或 `#lexis-inline` 标签),即可用 `名字:: 批注` 定义轻量词条。Lexis 按最近标题自动分类，在设置里给「人物」「地点」等分类点调色盘选色、设透明度；同名标题共享样式，嵌套标题可继承上级颜色与透明度。分隔符可在设置中修改。
 > - **EPUB 阅读器适配**:在基于 epub.js 的阅读器中,Lexis 会在章节文字内高亮词库词,支持悬浮释义与划词加入词库;Lexis 不再接管 EPUB 文件或自建阅读器。
 > - **高亮随记忆渐隐**:透明度跟 FSRS stability 挂钩——新词全强度,记熟的词逐渐淡到一个可调下限。悬浮卡/命令面板/右键菜单都能把一个词**归档**(退出高亮和复习,仍可悬停查),也能让一个词**常驻**以后不被淘汰。带一次性迁移命令,把旧的 `#熟悉` 标签批量转成已归档。
 > - **相遇记账 + 淘汰审判,不是算法说了算**:悬停查释义、划词加出处、打开词条笔记都算一次真实的"相遇"(不追踪停留时长/滚动);悬停一个到期日很远的词还会顺手把它拉近。Lexis 主页会把长期没自然相遇过的词列成**淘汰候选**——只摆证据不打分,淘汰/留下/已掌握,你来判。
@@ -71,6 +74,7 @@ None of this promises the thresholds are right for you, or that any of these sig
 > - **`​```lexis-home` / `​```lexis-heatmap` 代码块**:在任意笔记里嵌一份 Lexis 主页摘要(统计+热力图),或者只放热力图;点一下就能跳到真正的主页/直接开始背诵。
 > - **分类双向关系**:近义词/同根词/形近词/辨析 + 词根——只在一边写 `[[链接]]`,两边都显示。
 > - **浏览器伴侣(可选)**:Chrome 扩展在任意网页上高亮你的词库、悬停看笔记、划词把生词/出处写回 vault——全部通过仅本机的桥接。
+> - **Zotero 伴侣(可选)**:Zotero 9 插件把同一套 PDF 高亮、隔离悬浮卡、公式、词典选择、别名、批注、标签、移动、删除、出处链接与离线队列带进 Zotero Reader；Obsidian 仍是唯一数据源。
 
 ## Installation
 
@@ -88,6 +92,22 @@ None of this promises the thresholds are right for you, or that any of these sig
 4. **Review.** Open the **Lexis** home view for stats, a heatmap, and FSRS spaced-repetition review (word→note and cloze cards; undo/skip supported).
 5. **In-note blocks.** Add a `​```lexis` code block to render the forgetting curve (`curve`), related words (`rel [type]`), occurrences (`occ`), or root-derived words (`derived`); leave the mode blank for all. Add a `​```lexis-home` block anywhere to embed the stats + heatmap summary, clickable through to the full home view.
 6. **Use an EPUB reader.** Open an `.epub` with a compatible epub.js-based reader. Lexis adds its vocabulary layer after each chapter is rendered.
+
+### Inline entry notes
+
+Add `lexis-inline: true` to a note's frontmatter (or add the `#lexis-inline` tag), then write entries with the configured delimiter, `::` by default. Entries inherit the color assigned to their nearest heading in Lexis Settings; if that heading has no color, Lexis checks parent headings and then uses the global highlight color. Inline entries highlight and show hover annotations, but never enter FSRS review.
+
+```md
+---
+lexis-inline: true
+---
+
+## 人物
+顾千帆:: 京中画师，和主角旧识。
+
+## 地点
+临安:: 故事的主要发生地。
+```
 
 > 中文用法见上方「Features」一节:设置里指定词库文件夹 → 阅读时自动高亮悬浮 → 用 EPUB 阅读器打开书籍后，Lexis 自动注入高亮 → 划词添加 → Lexis 主页背诵 → 笔记里用 `​```lexis` 块渲染曲线/相关词/出处。
 

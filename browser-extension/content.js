@@ -2,13 +2,15 @@
 (() => {
   const HL = "lexis-web-hl";
   const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "INPUT", "CODE", "PRE", "SELECT", "OPTION", "KBD", "SAMP"]);
-  const DEFAULT_CFG = { highlight: true, color: "#7c5cff", style: "wavy", useObsidianStyle: true, opacity: 100, maxHeight: 52 };
+  const DEFAULT_CFG = { highlight: true, color: "#7c5cff", style: "wavy", useObsidianStyle: true, opacity: 100 };
 
   let cfg = null;
   let keySet = null;
   let keyTags = null;
   let keyFolder = null;
   let keyColor = null;
+  let keyOpacity = null;
+  let keyVisible = null;
   let keyStyle = null;
   let excludedKeys = null;
   let regex = null;
@@ -18,7 +20,28 @@
   let pendingRoots = new Set();
   let styleCfg = null;
   const detailCache = new Map();
-  let pop = null, hideTimer = null, currentSpan = null;
+  let pop = null, popHost = null, hideTimer = null, currentSpan = null;
+  let popoverSheetPromise = null;
+  let mathCssInstalled = "", mathSheet = null;
+
+  function popoverSheet() {
+    if (!popoverSheetPromise) popoverSheetPromise = fetch(chrome.runtime.getURL("popover.css"))
+      .then((response) => response.text())
+      .then((css) => { const sheet = new CSSStyleSheet(); sheet.replaceSync(css); return sheet; });
+    return popoverSheetPromise;
+  }
+
+  function installMathCss(root, css) {
+    if (!css) return;
+    if (!mathSheet) {
+      mathSheet = new CSSStyleSheet();
+    }
+    if (css !== mathCssInstalled) {
+      mathSheet.replaceSync(css);
+      mathCssInstalled = css;
+    }
+    if (!root.adoptedStyleSheets.includes(mathSheet)) root.adoptedStyleSheets = [...root.adoptedStyleSheets, mathSheet];
+  }
 
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   // 词边界(支持中文):仅当词以英文字母/数字/下划线开头或结尾时加 ASCII 边界;中文不加,否则 \b 永不命中
@@ -124,6 +147,8 @@
     keyTags = new Map();
     keyFolder = new Map();
     keyColor = new Map();
+    keyOpacity = new Map();
+    keyVisible = new Map();
     keyStyle = new Map();
     excludedKeys = new Set();
     const exSet = excludeSet();
@@ -135,6 +160,8 @@
       keyTags.set(k, tags);
       if (x.f) keyFolder.set(k, x.f);
       if (x.c) keyColor.set(k, x.c);
+      if (Number.isFinite(Number(x.o))) keyOpacity.set(k, Number(x.o));
+      keyVisible.set(k, x.v !== false);
       if (x.s) keyStyle.set(k, x.s);
       if (exSet.size && tags.some((t) => exSet.has(t))) { excludedKeys.add(k); continue; }
       keySet.add(k);
@@ -160,6 +187,7 @@
 
   // 对标 Obsidian 的 inlineStyleForEntry:词典色/标签规则 → 颜色/线型,带透明度
   function inlineStyleFor(key) {
+    if (keyVisible && keyVisible.get(key) === false) return "text-decoration:none;background:none";
     // 用户关了「使用 Obsidian 标签着色」→ 只用全局色
     if (cfg.useObsidianStyle === false || !styleCfg) {
       let c = cfg.color || "#7c5cff";
@@ -183,7 +211,7 @@
       }
     }
     if (!styleKind) styleKind = styleCfg.highlightStyle || cfg.style || "wavy";
-    const alpha = styleCfg.highlightOpacity != null ? styleCfg.highlightOpacity : 1;
+    const alpha = keyOpacity.has(key) ? keyOpacity.get(key) : (styleCfg.highlightOpacity != null ? styleCfg.highlightOpacity : 1);
     if (alpha < 1) color = `color-mix(in srgb, ${color} ${Math.round(alpha * 100)}%, transparent)`;
     if (styleKind === "background") return `background-color:${color};border-radius:3px;padding:0 1px;text-decoration:none`;
     const line = styleKind === "underline" ? "solid" : "wavy";
@@ -306,27 +334,40 @@
   }
 
   // ---- 悬停卡 ----
-  function removePop() { if (pop) { pop.remove(); pop = null; } }
+  let hoverTimer = null, hoverTarget = null;
+  function removePop() {
+    clearTimeout(hoverTimer); hoverTimer = null; hoverTarget = null;
+    if (popHost) popHost.remove();
+    popHost = null; pop = null;
+  }
   function scheduleHide() { clearTimeout(hideTimer); hideTimer = setTimeout(removePop, 220); }
 
   async function showPop(span) {
     const key = span.dataset.k;
     currentSpan = span;
     if (pop && pop.dataset.k === key) { clearTimeout(hideTimer); return; }
+    const cardSheet = await popoverSheet();
+    if (hoverTarget !== span || !span.isConnected) return;
     removePop();
+    popHost = document.createElement("lexis-web-popover");
+    popHost.style.cssText = "position:absolute;z-index:2147483647;display:block;";
+    const shadow = popHost.attachShadow({ mode: "open" });
+    shadow.adoptedStyleSheets = [cardSheet];
     pop = document.createElement("div");
     pop.className = "lexis-web-pop";
     pop.dataset.k = key;
-    pop.innerHTML = `<div class="lexis-web-pop-title">${span.textContent}</div><div class="lexis-web-pop-body">加载中…</div>`;
+    pop.innerHTML = `<div class="lexis-web-pop-title">${span.textContent}</div><div class="lexis-web-pop-corner"></div><div class="lexis-web-pop-meta"></div><div class="lexis-web-pop-body">加载中…</div>`;
     pop.addEventListener("mouseenter", () => clearTimeout(hideTimer));
     pop.addEventListener("mouseleave", scheduleHide);
-    document.body.appendChild(pop);
-    // 应用用户自定义的卡片最大高度
-    if (cfg && cfg.maxHeight) {
-      const body = pop.querySelector(".lexis-web-pop-body");
-      if (body) body.style.maxHeight = cfg.maxHeight + "vh";
-    }
-    position(pop, span);
+    shadow.appendChild(pop);
+    document.body.appendChild(popHost);
+    const width = Math.max(260, Number(styleCfg && styleCfg.popoverWidth) || 460);
+    const height = Math.max(160, Number(styleCfg && styleCfg.popoverMaxHeight) || 420);
+    const fontSize = Math.max(11, Number(styleCfg && styleCfg.popoverFontSize) || 14);
+    pop.style.setProperty("--lexis-popover-width", width + "px");
+    pop.style.setProperty("--lexis-popover-height", height + "px");
+    pop.style.setProperty("--lexis-popover-font-size", fontSize + "px");
+    position(popHost, span);
 
     let data = detailCache.get(key);
     if (!data) {
@@ -336,7 +377,7 @@
     }
     if (!pop || pop.dataset.k !== key) return;
     renderDetail(pop, data);
-    position(pop, span);
+    position(popHost, span);
   }
 
   function obsidianUri(data) {
@@ -346,29 +387,43 @@
 
   function renderDetail(box, data) {
     const titleEl = box.querySelector(".lexis-web-pop-title");
+    const cornerEl = box.querySelector(".lexis-web-pop-corner");
+    const metaEl = box.querySelector(".lexis-web-pop-meta");
     const body = box.querySelector(".lexis-web-pop-body");
+    cornerEl.textContent = "";
+    metaEl.textContent = "";
     body.innerHTML = "";
+    box.classList.toggle("has-corner-actions", !!(data && data.ok && !data.inline));
     if (!data || !data.ok) {
       body.textContent = data && data.offline ? "Obsidian 未连接(开着且桥接已启用?)" : "未找到这个词";
       return;
     }
+    installMathCss(box.getRootNode(), data.mathCss);
     // 标题:点击在 Obsidian 中打开该笔记
     const uri = obsidianUri(data);
     titleEl.textContent = "";
-    const label = data.word + (data.base && data.base !== data.word ? "  → " + data.base : "");
+    const primary = data.title || data.base || data.word;
+    const secondary = data.subtitle || (data.alias && data.word !== primary ? data.word : data.inline && data.category ? data.category : "");
     if (uri) {
       const a = document.createElement("a");
       a.className = "lexis-web-open";
       a.href = uri;
-      a.textContent = label;
       a.title = "在 Obsidian 中打开";
-      a.style.setProperty("font-size", "18px", "important");
-      a.style.setProperty("font-weight", "700", "important");
+      const main = document.createElement("span");
+      main.className = "lexis-web-title-main";
+      main.textContent = primary;
+      a.appendChild(main);
+      if (secondary) {
+        const sub = document.createElement("span");
+        sub.className = "lexis-web-title-sub";
+        sub.textContent = secondary;
+        a.appendChild(sub);
+      }
       const pen = document.createElement("span"); pen.className = "lexis-web-pen"; pen.textContent = " ✎";
       a.appendChild(pen);
       titleEl.appendChild(a);
     } else {
-      titleEl.textContent = label;
+      titleEl.textContent = primary;
     }
     // 所属文件夹/词典小标;点击可把这个词移到别的词典(只移动文件,正文/批注不变)
     {
@@ -382,7 +437,7 @@
       b.textContent = dir ? dname(dir) : "(根目录)";
       b.title = dir || "根目录";
       const moveKey = data.base || data.word;
-      if (allDicts.length > 1) {
+      if (!data.inline && allDicts.length > 1) {
         b.classList.add("lexis-web-dict-click");
         b.title = (dir || "根目录") + " —— 点击移到别的词典";
         let listEl = null;
@@ -427,7 +482,7 @@
           document.addEventListener("mousedown", onDocDown);
         });
       }
-      titleEl.appendChild(b);
+      metaEl.appendChild(b);
     }
     // ➕ 给这个词加出处(抓页面上它所在的那句)
     const addBtn = document.createElement("button");
@@ -442,11 +497,11 @@
       await doAdd(targetWord, sentence);
       removePop();
     });
-    titleEl.appendChild(addBtn);
+    if (!data.inline) metaEl.appendChild(addBtn);
     // ✎ 批注:纯文字写进笔记的 #### 批注 小节
     const noteBtn = document.createElement("button");
     noteBtn.className = "lexis-web-addbtn";
-    noteBtn.textContent = "✎ 批注";
+    noteBtn.textContent = "✎";
     noteBtn.title = "给这个词写一条批注(纯文字,写入笔记的 #### 批注)";
     noteBtn.addEventListener("click", (ev) => {
       ev.preventDefault();
@@ -473,7 +528,7 @@
       body.insertBefore(row, body.firstChild);
       input.focus();
     });
-    titleEl.appendChild(noteBtn);
+    if (!data.inline) cornerEl.appendChild(noteBtn);
     // ✕ 删除按钮
     const delBtn = document.createElement("button");
     delBtn.className = "lexis-web-addbtn lexis-web-addbtn-del";
@@ -493,8 +548,9 @@
       } catch (e) { toast("删除失败(连不上?)", false); }
       removePop();
     });
-    titleEl.appendChild(delBtn);
+    if (!data.inline) cornerEl.appendChild(delBtn);
     // ---- 标签管理 ----
+    if (!data.inline) {
     const tagWrap = document.createElement("div");
     tagWrap.className = "lexis-web-pop-tags";
     body.appendChild(tagWrap);
@@ -584,6 +640,7 @@
     });
     pick.appendChild(header);
     tagWrap.appendChild(pick);
+    }
     const content = document.createElement("div");
     content.className = "lexis-web-pop-content";
     if (data.html && data.html.trim()) content.innerHTML = data.html;
@@ -612,14 +669,24 @@
 
   document.addEventListener("mouseover", (e) => {
     const t = e.target;
-    if (t && t.classList && t.classList.contains(HL)) showPop(t);
+    if (!(t && t.classList && t.classList.contains(HL))) return;
+    clearTimeout(hideTimer);
+    if (pop && pop.dataset.k === t.dataset.k) return;
+    if (hoverTarget === t) return;
+    clearTimeout(hoverTimer);
+    hoverTarget = t;
+    const delay = Math.max(0, Number(styleCfg && styleCfg.hoverDelayMs) || 0);
+    const open = () => { hoverTimer = null; if (hoverTarget === t && t.isConnected) showPop(t); };
+    if (delay) hoverTimer = setTimeout(open, delay); else open();
   });
   document.addEventListener("mouseout", (e) => {
     const t = e.target;
-    if (t && t.classList && t.classList.contains(HL)) scheduleHide();
+    if (!(t && t.classList && t.classList.contains(HL))) return;
+    if (hoverTarget === t) { clearTimeout(hoverTimer); hoverTimer = null; hoverTarget = null; }
+    if (pop && pop.dataset.k === t.dataset.k) scheduleHide();
   });
 
-  // ---- 划词添加:选中文本 → 浮动 pill([➕ 添加] [aliases]) ----
+  // ---- 划词添加:选中文本 → 浮动 pill([＋] [词典] [🔗]) ----
   let selBtn = null;
   function hideSelBtn() { if (selBtn) { selBtn.remove(); selBtn = null; } document.querySelectorAll(".lexis-web-folderlist").forEach((el) => el.remove()); }
   function onSelect() {
@@ -679,7 +746,7 @@
 
     const addBtn = document.createElement("button");
     addBtn.className = "lexis-web-selbtn-pill";
-    addBtn.textContent = "+ 添加";
+    addBtn.textContent = "＋";
     addBtn.title = "直接以选中词为标题建新词";
     addBtn.addEventListener("mousedown", (e) => e.preventDefault());
     addBtn.addEventListener("click", async () => {
@@ -690,7 +757,7 @@
     pill.appendChild(addBtn);
 
     // 文件夹/词典选择段(需在设置里开启,且有多个词典)
-    if (styleCfg && styleCfg.pillFolderPicker && dicts.length > 1) {
+    if (dicts.length > 1) {
       const folderBtn = document.createElement("button");
       folderBtn.className = "lexis-web-selbtn-pill lexis-web-selfolder";
       folderBtn.textContent = "📁 " + fname(selFolder);
@@ -726,7 +793,7 @@
 
     const aliasBtn = document.createElement("button");
     aliasBtn.className = "lexis-web-selbtn-pill";
-    aliasBtn.textContent = "aliases";
+    aliasBtn.textContent = "🔗";
     aliasBtn.title = "把选中词作为别名,归入另一个词";
     aliasBtn.addEventListener("mousedown", (e) => e.preventDefault());
     aliasBtn.addEventListener("click", () => {
@@ -751,8 +818,9 @@
     });
     pill.appendChild(aliasBtn);
 
-    // 智能定位:优先选区下方中间,超出视口则放上方
-    const pillW = 130, pillH = 26, gap = 6;
+    document.body.appendChild(pill);
+    // 智能定位:先按实际内容测量宽度，再放在选区附近。
+    const pillW = pill.offsetWidth || 90, pillH = pill.offsetHeight || 26, gap = 6;
     let left = rect.left + (rect.width - pillW) / 2 + window.scrollX;
     let top = rect.bottom + window.scrollY + gap;
     if (top + pillH > window.scrollY + document.documentElement.clientHeight - 8)
@@ -763,7 +831,6 @@
     pill.style.left = Math.max(8, left) + "px";
     pill.style.top = Math.max(8, top) + "px";
 
-    document.body.appendChild(pill);
     const tc = textColorFor(getComputedStyle(pill).backgroundColor);
     pill.style.color = tc;
     pill.dataset.word = text;

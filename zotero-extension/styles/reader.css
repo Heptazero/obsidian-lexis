@@ -1,0 +1,42 @@
+.lexis-zotero-hl {
+  position: relative;
+  cursor: pointer;
+}
+
+.lexis-zotero-pdf-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.lexis-zotero-pdf-mark {
+  position: absolute;
+  border-radius: 2px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+lexis-zotero-popover {
+  position: absolute;
+  z-index: 2147483647;
+  display: block;
+}
+
+.lexis-zotero-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  z-index: 2147483647;
+  max-width: min(420px, calc(100vw - 24px));
+  padding: 7px 13px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: #23232a;
+  color: #fff;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, .28);
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  transition: opacity .2s;
+}
+
+.lexis-zotero-toast.error { background: #b42318; }

@@ -1,0 +1,19 @@
+{
+  "manifest_version": 2,
+  "name": "Lexis for Zotero",
+  "version": "0.1.23",
+  "description": "在 Zotero PDF Reader 中复用 Obsidian Lexis 的高亮、卡片与划词操作。",
+  "author": "Hzero",
+  "icons": {
+    "48": "icons/lexis.svg",
+    "96": "icons/lexis.svg"
+  },
+  "applications": {
+    "zotero": {
+      "id": "lexis-zotero@heptazero.local",
+      "update_url": "https://raw.githubusercontent.com/Heptazero/obsidian-lexis/main/zotero-updates.json",
+      "strict_min_version": "9.0",
+      "strict_max_version": "9.*"
+    }
+  }
+}

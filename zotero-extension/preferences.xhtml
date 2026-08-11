@@ -1,0 +1,53 @@
+<vbox xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+      xmlns:html="http://www.w3.org/1999/xhtml"
+      class="lexis-pref-root">
+  <html:section class="lexis-pref-panel">
+    <html:div class="lexis-pref-heading">
+      <html:div>
+        <html:h2>Lexis</html:h2>
+        <html:p>连接 Obsidian 词库</html:p>
+      </html:div>
+      <html:label class="lexis-pref-toggle">
+        <html:input id="lexis-zotero-enabled" type="checkbox"/>
+        <html:span>在 PDF 中启用</html:span>
+      </html:label>
+    </html:div>
+
+    <html:div class="lexis-pref-fields">
+      <html:label class="lexis-pref-field">
+        <html:span>地址</html:span>
+        <html:input id="lexis-zotero-host" type="text" spellcheck="false"/>
+      </html:label>
+      <html:label class="lexis-pref-field">
+        <html:span>端口</html:span>
+        <html:input id="lexis-zotero-port" type="number" min="1" max="65535"/>
+      </html:label>
+      <html:label class="lexis-pref-field">
+        <html:span>令牌</html:span>
+        <html:input id="lexis-zotero-token" type="password" autocomplete="off"/>
+      </html:label>
+      <html:label class="lexis-pref-field">
+        <html:span>自动同步间隔（分钟）</html:span>
+        <html:input id="lexis-zotero-sync" type="number" min="1" max="60"/>
+      </html:label>
+    </html:div>
+
+    <html:div class="lexis-pref-actions">
+      <html:button id="lexis-zotero-sync-now" type="button" class="primary">立即同步</html:button>
+      <html:button id="lexis-zotero-test" type="button">测试连接</html:button>
+    </html:div>
+    <html:p id="lexis-zotero-status" class="lexis-pref-status" role="status" aria-live="polite">尚未测试连接</html:p>
+  </html:section>
+
+  <html:section class="lexis-pref-panel lexis-pref-files-panel">
+    <html:div class="lexis-pref-heading">
+      <html:div>
+        <html:h2>按词典文件夹开关高亮</html:h2>
+        <html:p>只影响本机 Zotero 的 PDF 高亮，不影响 Obsidian 或浏览器端。</html:p>
+      </html:div>
+    </html:div>
+    <html:div id="lexis-zotero-dicts" class="lexis-pref-filelist"></html:div>
+  </html:section>
+
+  <html:p class="lexis-pref-footnote">Obsidian 需保持打开，并在 Lexis 设置中启用本机桥接。</html:p>
+</vbox>

@@ -681,3 +681,263 @@
 - `node --check main.js`、`node --check browser-extension/content.js`、`node --check browser-extension/background.js` 都过。
 - 服务端加了新路由 `/encounter`,`manifest.json` 按"新功能"规则 MINOR 归零 PATCH:`1.4.0 → 1.5.0`;浏览器扩展这次真的改了代码(`content.js` + `background.js`),`browser-extension/manifest.json`:`1.0.16 → 1.0.17`。
 - 四阶段路线图到这里全部完成,HANDOFF.md 的路线图小节和各阶段标题都已标注 ✅。
+
+## feat:内联条目库——人物、地名等无需一词一文件(插件 v1.7.0)
+
+- 新增内联条目来源:任意笔记带 `lexis-inline: true` 属性或 `#lexis-inline` 标签后，可用 `词条::批注` 定义可全局高亮、悬停批注的轻量词条；默认分隔符 `::` 可在设置修改。
+- `color:: red` 使用同一分隔符，把后续条目设为指定 CSS 颜色，直到下一个颜色指令；标题只作为悬浮卡中的分类，例如 `## 人物` / `## 地点`。
+- 内联条目与普通词典共用高亮索引、阅读模式、实时预览、PDF 和浏览器桥接；同名时普通词典条目优先，避免覆盖可复习词。
+- 悬浮卡仅展示分类与批注，点击跳回来源笔记的词条行；内联条目不进入 FSRS、归档/淘汰、相遇记账或出处聚合。
+- 修改已标记笔记、增删标记或切换分隔符都会防抖重建索引；异步读取带构建序号保护，旧一次扫描不会覆盖新结果。
+
+### 约束核对
+- `node --check main.js` 通过；以带 frontmatter 的人物/地点样例验证了分类、颜色继承、批注和跳转行号的解析结果。
+- 浏览器扩展沿用已有词条颜色字段和详情渲染通路，服务端直接下发内联条目颜色/批注；扩展对内联条目隐藏出处、批注、移动、标签、删除等管理按钮。服务端也拒绝这些操作，避免旧扩展误删来源笔记。
+- `manifest.json`:`1.6.1 → 1.7.0`; `browser-extension/manifest.json`:`1.0.17 → 1.0.18`。
+
+## feat:内联条目按标题分类配色(插件 v1.8.0)
+
+- 移除正文 `color::` 指令的配色职责：词条颜色现在只由其最近标题决定，标题层级可为 `#` 到 `######`；同名标题无论处于哪个层级、哪个内联笔记，都共享同一条颜色规则。
+- 设置页「内联条目库」自动列出实际识别到的标题及条目数，每个分类提供调色盘与“恢复默认高亮色”按钮，不再要求用户在正文写 `#RRGGBB`，也就不会触发 Obsidian 标签识别。
+- 嵌套标题按最近优先、上级回退：例如 `## 人物` 下的 `### 主角` 未单独设色时继承“人物”的颜色；两者都未设色时回退全局高亮色。
+- 旧的 `color:: ...` 行会被静默跳过，既不再影响颜色，也不会被误识别为词条。
+
+### 约束核对
+- 浏览器扩展无需变更：桥接本来就接收服务端算好的最终颜色。
+- `manifest.json`:`1.7.0 → 1.8.0`。
+
+## fix:内联分类色在 PDF 生效 + 分类独立透明度(插件 v1.9.0, 浏览器扩展 v1.0.19)
+
+- 修复 PDF 覆盖层没有走内联标题分类色的问题：现在 PDF、阅读模式、实时预览和 EPUB 都复用 `colorForEntry()` / `highlightAlphaForEntry()`，不会再出现“能悬浮但没有分类高亮”的分叉。
+- 设置页每个标题分类新增透明度滑块。未单独设置时跟随全局高亮透明度；设置后按最近标题、父标题回退，和颜色继承规则一致。
+- 桥接 `/words` 对内联条目下发最终透明度，浏览器扩展据此渲染，保持网页端和 Obsidian 一致。
+
+### 约束核对
+- `manifest.json`:`1.8.0 → 1.9.0`; `browser-extension/manifest.json`:`1.0.18 → 1.0.19`。
+
+## fix:EPUB 已识别可悬浮但无视觉高亮(插件 v1.9.1)
+
+- 根因不是匹配器，而是样式作用域：EPUB 章节在独立 iframe 中，默认分类色回退为主文档 CSS 变量 `var(--text-accent)`，iframe 无法解析该变量，因此 span 存在、事件能悬浮，但背景/下划线颜色声明失效。
+- `inlineStyleForEntry(entry, { external:true })` 在跨文档场景改用 `effectiveHighlightColor()` 的实际颜色值；分类专属色和透明度仍按原优先级覆盖。
+- `scanEpubIframe()` 扫描前先拆掉 iframe 中旧 `.lexis-hl` span，再按当前索引与配色重建，解决插件重载后旧无效样式被 rejectSelector 跳过、一直残留的问题。
+- `manifest.json`:`1.9.0 → 1.9.1`。
+
+## feat:统一 Obsidian/浏览器卡片与划词操作(插件 v1.10.0, 浏览器扩展 v1.0.20)
+
+- 修复内联卡片在标题和正文重复显示分类名；分类现在只在标题栏出现一次。
+- 悬浮卡新增宽度、最大高度、字号和悬停延迟设置；设置页提供实时预览，同一组参数通过桥接同步给浏览器扩展。
+- 内联分类设置行新增高亮显示开关；关闭后仍保留匹配 span 与悬浮卡，只隐藏背景色/下划线，PDF覆盖层也不再绘制。
+- Obsidian 悬浮卡补齐浏览器已有的移动词典、标签增删、添加批注和删除操作；复用同一批桥接方法，内联条目继续只读。
+- 两端划词药丸统一为「＋ / 词典 / 🔗」：多词典时先选目标再提交，符号按钮保留完整 title 提示。
+
+### 约束核对
+- 分类隐藏状态随 `/words` 同步，浏览器仍把词放入匹配索引，因此不高亮也能悬浮。
+- 浏览器弹窗移除旧的独立高度入口，避免两端设置互相覆盖。
+
+## refactor:收束外部阅读端边界(版本号不变)
+
+- 将本机 HTTP 服务从 `LexisPlugin` 的零散方法收束为 `LexisBridge`：它只管理服务生命周期、认证、CORS 和路由，词典索引、配色、写入及 FSRS 规则继续由插件核心统一处理。保持单个 `main.js` 发布，不引入构建器、仓储层或只转发一次的抽象。
+- 浏览器 `background.js` 将 GET/POST/DELETE 合并到一个请求入口；访问令牌改放 `X-Lexis-Token` 请求头，不再拼进 URL。查询参数、JSON body 和离线 add 重放仍保持原行为。
+- CORS 明确允许 `DELETE`，与既有删词接口一致；旧客户端的查询串 token 兼容仍保留在服务端。
+- 忽略 Syncthing 生成的 `data.sync-conflict-*.json`，避免个人配置冲突副本进入版本控制；同时纠正 JS 文件误带的可执行位。
+- 验收：四个 JS 文件通过 `node --check`，`git diff --check` 通过；Obsidian 实际重载后主页仍为待复习 577 / 新词 540 / 总计 583，桥接 `/ping` 返回 v1.10.0，`/words` 仍为 808 条(普通 797、内联 11)。Edge 中正式库扩展 v1.0.17 可连接并同步到 808 条；v1.0.20 源码尚未覆盖到正式英文库，因此本轮没有把兼容验收冒充为新版部署验收。
+
+## fix:悬浮卡标题不再被元属性挤压(插件 v1.10.1, 浏览器扩展 v1.0.21)
+
+- 悬浮卡改成稳定的三层结构：标题独占首行；词典与出处、批注、删除、归档等操作放在第二行并自然换行；标签仍在正文前单独成行。
+- 不使用标题/按钮百分比分配。比例方案会受标题语言、字号和卡片宽度影响，在临界宽度继续产生竖排；语义分行能保证标题始终获得完整卡片宽度。
+- Obsidian 与浏览器共用相同布局规则，窄卡片中操作项只会换行，不再压缩标题。
+- 后续收束维护操作：批注与删除固定在右上角，仅为标题预留两个图标的固定宽度；词典、出处与归档继续留在第二行，避免高频信息和维护动作混在一起。
+
+## fix:粘贴型空格导致部分 LaTeX 渲染失败(插件 v1.10.2)
+
+- 根因是部分 Markdown 从网页或富文本粘贴后，公式内部混入 `U+00A0` 不换行空格；Obsidian 渲染时它会变成 `&nbsp;` 并进入 TeX，MathJax 因此报 `Misplaced &`。同一笔记中的普通空格公式仍能渲染，所以表现为“有的行、有的不行”。
+- 新增单一 Markdown 渲染入口：只在交给 `MarkdownRenderer` 的内存副本中把 `U+00A0` 规范为普通空格，不改用户笔记原文。悬浮卡正文、浏览器桥接 HTML、出处预览、内联批注和复习卡共用该入口。
+- 浏览器无需再引入一套 MathJax；它继续接收 Obsidian 已排版并等待 `finishRenderMath()` 完成后的 HTML，避免两套公式行为分叉。
+- 实机验收：`能量更新公式` 在 Obsidian 编辑视图与阅读视图均正常；桥接词条 `能量差` 的 MathJax 错误节点从 2 个降为 0，且不再残留原始 `\\Delta` 文本。
+
+## fix:浏览器 MathJax 字形样式 + 两端标题层级统一(插件 v1.10.3，浏览器扩展 v1.0.22)
+
+- 浏览器空白公式的真正原因是桥接只序列化了 MathJax CHTML 节点，没有带走 `MJX-CHTML-styles`。这些节点本身没有文字，字形由样式里的 `mjx-c::before` 生成，所以浏览器既看不到公式，也不会退回显示 TeX 源码。
+- `/word` 在词条包含公式时一并返回 Obsidian 当前的 MathJax CHTML 样式；读取 `style.sheet.cssRules`，因此也包含 MathJax 通过 CSSOM 动态插入、不会出现在 `<style>.textContent` 里的具体字形规则。扩展用一张 constructable stylesheet 注入一次，继续坚持“Obsidian 排版、浏览器展示”，不再引入第二套 MathJax。
+- 卡片标题统一为“词条文件标题 + 较小的命中别名/内联分类”。不再显示“别名”或箭头，Obsidian 与浏览器使用同一组 `title/subtitle` 数据。
+- 浏览器的全局字号约束缩小到普通 HTML 元素，不再覆盖 `mjx-*` 的相对字号。
+
+## refactor:浏览器悬浮卡 Shadow DOM 隔离与单一滚动(浏览器扩展 v1.0.23)
+
+- 悬浮卡迁入 Shadow DOM。宿主网页的 `ul { list-style:none }`、标题字号、链接颜色等规则不再进入卡片，Lexis 卡片样式也不会泄漏到网页。
+- 新增独立 `popover.css`，只负责卡片；`content.css` 收缩为页面高亮、划词药丸与 toast。不是换框架，而是按运行边界拆开两类样式。
+- 整张 `.lexis-web-pop` 成为唯一滚动容器，统一拥有 `max-height`、`overflow-y:auto` 和 `overscroll-behavior`；删除正文区域写死的“总高度减 56px”计算，标题、操作、标签与正文作为整体滚动。
+- Shadow DOM 内显式恢复 `ul` 的 `disc`、`ol` 的 `decimal` 和嵌套列表标记；图片、SVG、代码块、表格补齐卡片范围约束。
+- MathJax constructable stylesheet 改为只注入卡片的 ShadowRoot，不再把字形规则放进宿主网页；Obsidian 仍是唯一 Markdown/公式渲染端，浏览器只展示最终 HTML。
+
+## fix:PDF 跨片段与跨行词条可高亮(插件 v1.10.4)
+
+- 根因是通用高亮器逐文本节点匹配，而 pdf.js 会把同一行甚至同一个词拆成多个 span；词条一旦跨过节点边界，两边单独都无法命中。
+- 修复只放在 PDF 适配层：先按文字片段的实际几何位置还原短的视觉行，处理同一行跨 span、英文连字符断词、普通短语换行和中日韩无空格换行；再把命中范围映射回原文本节点，各片段共用同一个 `data-lexis-key`。通用 Markdown / EPUB 匹配器保持不变。
+- 没有把整页文字直接拼成字符串。视觉行遇到大的水平间距会拆开，跨行只连接同栏、正常行距内的下一行，避免双栏论文把左栏末尾与右栏开头误拼。
+- 多个候选重叠时只保留最长词条；现有 PDF overlay 会自然为同一词条画出多个矩形，悬浮、点击和被动相遇继续复用原逻辑。
+- 验收：`node --check main.js`、`git diff --check` 通过；用源码方法的最小 DOM 模型验证了同一行拆片、连字符断词、中文换行、英文短语换行与双栏不串接五种场景。
+
+## feat:Zotero 9 阅读端 v0.1.0
+
+- 新增与 `browser-extension/` 并列的 `zotero-extension/`，目标环境按本机实际版本锁定为 Zotero 9（已核对 9.0.6 / Gecko ESR 140）。它是独立 bootstrapped plugin，不向 `main.js` 塞 Zotero Reader 代码。
+- 架构按运行边界拆分：`bridge-client.js` 负责本机协议、缓存和顺序写队列；`word-index.js` 负责语言无关匹配与最终显示样式；`reader-adapter.js` 把 Zotero Reader/PDF.js 私有结构隔离在单点；`pdf-highlighter.js` 负责文字层和跨片段/跨行映射；`card-view.js` 负责 Shadow DOM 卡片与官方划词扩展区；`plugin.js` 只编排生命周期。
+- 自动高亮沿用 Obsidian 已验证的视觉行恢复逻辑：支持同一行拆 span、连字符断词、英文短语换行和 CJK 无空格换行，并按栏宽与行距避免双栏串接。PDF.js 的 `textlayerrendered` 负责缩放、翻页和重绘后的恢复；扫描 PDF 没有文字层时明确依赖 OCR，不假装能命中。
+- 悬浮卡直接使用 Obsidian `/word` 返回的最终 HTML 和 MathJax CSS，放在 Shadow DOM 中；`styles/card.css` 与浏览器 `popover.css` 保持字节一致，并由构建脚本检查。整张卡片唯一滚动，标题旁只显示缩小的别名/分类，批注和删除位于右上角。
+- 卡片接通加出处、批注、标签、移动词典、删除；Zotero 官方 `renderTextSelectionPopup` 中接通 `＋ / 词典 / 🔗`。出处写入论文标题、选中文字、PDF 页码和 `zotero://open-pdf` 链接。
+- 离线缓存保存在 Zotero profile 的 `lexis-zotero-cache.json`：断线继续高亮，add/tag/note/move/delete 顺序排队，恢复连接后先重放再刷新词库；被动相遇是弱信号，离线仍静默丢弃。
+- 生成 `dist/lexis-zotero-0.1.0.xpi`。所有 JS 语法、manifest JSON、preferences XML、词索引/句子单测、离线写入排队→恢复重放顺序测试、XPI 压缩完整性检查通过；尚待 Zotero 9.0.6 真机安装与 Reader 交互验收。
+
+## fix:Zotero 9 安装清单 v0.1.1
+
+- 补上 Zotero 9.0.6 强制校验的 `applications.zotero.update_url`。Firefox 的 WebExtension 清单把它视作可选项，但 Zotero 的 `ExtensionData.parseManifest()` 会在缺失时直接判定扩展无效，前端只显示笼统的“不兼容”提示。
+- 重新生成 `dist/lexis-zotero-0.1.1.xpi`，保留 v0.1.0 供问题复盘；仍待真机安装与 Reader 交互验收。
+
+## fix:Zotero 设置与 Reader 接入 v0.1.2
+
+- 设置页从 XUL `grid`/`command` 改为纵向响应式 HTML 表单与 `click`/`change` 事件。字段不再横排撑宽，按钮可换行，连接/同步结果在独立状态行明确显示；主程序未启动、令牌错误和 Obsidian 桥接离线都不再静默。
+- PDF 接入改为直接使用 Zotero 9 的 `_internalReader._primaryView` / `_secondaryView`，删除遍历外层 iframe 的猜测逻辑。划词工具条改为 Reader 文档中的普通 DOM，避免 Shadow DOM 经过 Zotero 的事件桥接时不可见。
+- 新增设置交互和 Reader 主视图接入测试；共 5 组单测通过。XPI: `dist/lexis-zotero-0.1.2.xpi`，待真机更新安装后验收。
+
+## fix:Zotero 设置片段生命周期 v0.1.3
+
+- 根因是 Zotero 9 先在独立 sandbox 加载设置脚本，再把 XHTML 作为动态片段插入主设置窗口；依赖根节点内联 `onload` 无法稳定访问该 sandbox。设置脚本现在从 `document` 捕获 Zotero 主动派发给片段根节点的 `load` 事件，再绑定交互。
+- 测试不再直接调用 `init()`，而是模拟 Zotero 的片段 `load` 生命周期后点击按钮，覆盖端口初始化、偏好写入和状态反馈。
+- Zotero 端默认端口改为用户当前 Obsidian 实际配置的 `12345`；已实测 `/ping` 返回 Lexis 1.10.0，鉴权后的 `/words` 返回 874 个词和样式配置。
+- 修正把 `--material-border`（本身已是完整 border 值）再次包进 `1px solid` 导致整条声明失效的问题；输入框强制可见边框，数字与文字统一左对齐。XPI: `dist/lexis-zotero-0.1.3.xpi`。
+
+## fix:同步状态与 PDF 重绘解耦 v0.1.4
+
+- 真机缓存证明同步已经成功：875 个词、`pending=0`、同步时间已更新。此前 `BridgeClient.sync()` 在快照落盘后同步调用 `controller.updateIndex()`，当前 PDF 页一旦重扫抛错，外层就把整次操作误报为“同步失败”。
+- 快照更新现在只排程视图刷新；PDF 在下一动画帧重扫，各页独立处理错误。数据同步、设置页状态和其他 PDF 页不再被单页 DOM 异常连带拖失败，新增词也会触发同一条异步重扫路径。
+- 划词工具条恢复与浏览器/Obsidian 一致的链接符号，不再显示擅自改动的“归入…”。新增异步刷新与逐页错误边界测试。XPI: `dist/lexis-zotero-0.1.4.xpi`。
+
+## fix:Zotero 已同步但 PDF 无自动高亮 v0.1.5
+
+- 真机反馈进一步缩小了问题范围：划词浮窗能出现、桥接缓存已有完整词库，但 PDF 中没有任何自动高亮。这说明桥接和 `renderTextSelectionPopup` 都正常，断点只可能在 PDF iframe 的接入时机。
+- `ReaderController` 改为等待 Zotero 已完成初始化的活跃视图 `reader._lastView`，并继续兼容主/副视图；每个视图还会等待 PDF.js 的 `PDFViewerApplication.initializedPromise` 后才创建高亮器。此前只等 `_internalReader._primaryView`，该私有入口在实际 Reader 生命周期中可能尚未创建，于是没有高亮器可扫描文字层。
+- 划词与工具栏触发的后续视图刷新改为显式处理异步失败，不会造成未处理 Promise。新增测试覆盖“仅暴露 `_lastView` 的已初始化阅读器”也能附着高亮器。XPI: `dist/lexis-zotero-0.1.5.xpi`。
+
+## fix:对齐成熟 Zotero 插件的 PDF 接入顺序 v0.1.6
+
+- v0.1.5 后仍无高亮，说明“一次检查最近视图”仍然早于 Zotero 创建内部 PDF iframe。对照已安装且在 Zotero 9 中工作的 PDF Translate / Knowledge4Zotero，它们的共同做法是：先等 Reader 初始化，再轮询非失效的 `_internalReader._primaryView._iframeWindow`，最后等 PDF.js 的 `initializedPromise`。
+- `ReaderController` 现按该顺序接入主/副 PDF 视图；不再把外层 `_lastView` 当作可立即使用的 PDF 视图。Reader 公共类型也同时兼容 `type` 与 `_type`。
+- `PdfHighlighter` 保留 PDF.js 的 `textlayerrendered` 事件，并补上与 Obsidian 端同样的文字层创建监听：当 PDF.js 在高亮器启动后才插入 `.textLayer`，下一帧会被扫描。监听只关注新增文字层，不因 Lexis 自己插入 span 造成循环扫描。
+- XPI: `dist/lexis-zotero-0.1.6.xpi`；新增文字层后置创建测试，全部 5 组单测、JS 语法、XML/JSON、共享卡片 CSS 与 XPI 完整性检查通过。
+
+## refactor:Zotero PDF 改为内容流坐标虚拟高亮 v0.1.7
+
+- 真实问题不再归因于词库、桥接或 Reader 接入：真机已经证明词库同步和划词浮窗均正常，但把 span 注入 PDF.js `.textLayer` 同时依赖其层级、透明文字和命中事件，Zotero Reader 中没有稳定的交互保证。
+- `PdfHighlighter` 收束为一条直接的数据流：`pdfPage.getTextContent()` → 还原相邻文本片段间的空格 → 用词典索引匹配 → 用 `viewport.convertToViewportRectangle()` 换算页面坐标 → 在 `.page` 上创建独立虚拟命中框。高亮框本身接收 hover，卡片不再经过文字层代理。
+- 继续监听 `pagerendered` / `textlayerrendered`，并在 `pdfViewer.pagesPromise` 完成后补一次扫描；缩放、翻页和重绘只重建当前页面自己的命中层。
+- 这借鉴了 `zotero-reference` 从 PDF 内容流而非 DOM 取文本与坐标的方式，但 Lexis 的匹配、颜色、卡片和写入仍保持独立职责，没有引入引用解析器或另一套词典。
+- XPI: `dist/lexis-zotero-0.1.7.xpi`；新增内容流跨文本项匹配测试，待 Zotero 9.0.6 真机验收。
+
+## debug:停止猜测 Zotero PDF 断点 v0.1.8
+
+- 真机确认已安装并启用的 v0.1.7 XPI 与构建产物 SHA-256 完全一致，因此排除“装错版本”。本机没有启用 Zotero Debug Output，之前无法判断控制器、内容流、匹配和绘制中到底停在哪一层。
+- 增加最小持久诊断：记录 Reader 接入、内部 PDF 视图数、高亮器启动、可见/总页数，以及各页 `items / matches / marks` 和异常。文件固定写在 Zotero profile 的 `lexis-zotero-debug.json`，最多 200 行，不写令牌、词表、选中文字或笔记内容。
+- 已直接核对本机 Zotero 9.0.6 的 `reader.js`：`_internalReader._primaryView._iframeWindow.PDFViewerApplication` 确实仍是 Zotero 自己使用的入口，因此本版不再换第三套 Reader 入口，也不声称尚未真机验证的修复已经成功。
+- XPI: `dist/lexis-zotero-0.1.8.xpi`；5 组单测、全部 JS 语法、JSON/XML、共享卡片 CSS 与 XPI 完整性检查通过。
+
+## fix:解包 PDF.js 跨沙箱数组 v0.1.9
+
+- v0.1.8 真机诊断首次给出确定断点：Reader 接入成功、词典 pattern 存在、PDF 有 28 页、5 个可见页进入重扫，但每页都在读取 PDF.js 数组时抛出 `Permission denied to access property 0`。因此此前所有“视图未接入、CSS 不可见、坐标错误”的推断都不是当前根因。
+- Gecko 会给 PDF iframe 返回的数组套 Xray wrapper；插件能看到对象和属性名，却不能直接读取数组下标。新增单一边界 `plainTextItems()`：用 `Components.utils.waiveXrays()` 解包，只复制 `str / width / height / hasEOL / transform[0..5]` 到插件自己的普通对象。`convertToViewportRectangle()` 返回的坐标数组也在读取前解包。
+- 匹配、页面坐标虚拟层和卡片逻辑保持不变；持久诊断继续保留，复测可直接观察 `items / matches / marks` 是否跨过零值。
+- XPI: `dist/lexis-zotero-0.1.9.xpi`；补充文本项最小化测试，5 组单测、全部 JS 语法、JSON/XML、共享卡片 CSS 与 XPI 完整性检查通过。
+
+## fix:在 PDF iframe 内序列化跨沙箱数据 v0.1.10
+
+- v0.1.9 仍出现同一权限错误，说明仅对 Xray 对象调用 `waiveXrays` 不能保证 PDF.js 数组下标可读。
+- v0.1.10 将文本项数组和 `convertToViewportRectangle()` 坐标数组交给 PDF iframe 自己的 `JSON.stringify`，只让 JSON 字符串跨越沙箱，再由插件侧 `JSON.parse`。这样不再读取被 Xray 包装的 `[0]`，也不改变高亮层的职责。
+- XPI: `dist/lexis-zotero-0.1.10.xpi`；5 组单测、全部 JS 语法、JSON/XML、共享卡片 CSS 与 XPI 完整性检查通过，待真机复测。
+
+## fix:从根上换成 wrappedJSObject，去掉整套 waiveXrays 补丁 v0.1.11
+
+- v0.1.10 真机复测报出与 v0.1.9 完全相同的 `Permission denied to access property 0`，诊断里连一次 `items=/matches=/marks=` 都没出现——说明改动根本没跑到序列化那步。查代码发现问题在更上游：`reader-adapter.js` 里 `const win = view._iframeWindow` 从一开始就没解包，后面全靠在 `pdf-highlighter.js` 里对每个中间结果反复 `waiveXrays`/借用 `win.JSON.stringify` 打补丁,但 `getTextContent()` 返回的 Promise 结果每次跨界都会被重新 Xray，`waiveXrays` 对这种链路不保证生效。
+- 查证了 Zotero 官方插件开发文档（zotero-chinese.com）和真实能跑的 `zotero-var-highlighter` 插件，标准做法是从根上换成 `_iframeWindow.wrappedJSObject`：一旦 `win` 本身是解包后的原生对象，沿着 `win.PDFViewerApplication.pdfViewer._pages[i].pdfPage.getTextContent()` 一路拿到的所有对象（包括 `items` 数组下标）都不再跨越 Xray 边界，不需要任何后续解包。
+- `reader-adapter.js` 只改一行：`view._iframeWindow.wrappedJSObject || view._iframeWindow`。`pdf-highlighter.js` 删掉 `unwrap()` 辅助函数和 `plainTextItems()`/`itemRect()` 里的 `waiveXrays`/JSON 序列化补丁，改回直接原生属性/下标访问。
+- 5 组单测（含 `reader-adapter.test.js` 里对 `win` 的身份断言）、全部 JS 语法检查通过；`reader-adapter.test.js` 的 mock window 没有 `wrappedJSObject` 属性，验证了新逻辑在拿不到解包引用时会安全回退到原始引用，不影响现有测试。XPI: `dist/lexis-zotero-0.1.11.xpi`，待真机复测，重点看诊断里 `items/matches/marks` 是否非零。
+
+## debug:v0.1.11 真机复测报错未变，加分阶段诊断而非再猜架构 v0.1.12
+
+- v0.1.11 真机复测报出和 v0.1.9/v0.1.10 完全相同的 `Permission denied to access property 0`，说明"从 `_iframeWindow.wrappedJSObject` 解包"这个假设本身也没解决问题——之前基于 `zotero-var-highlighter` 源码片段的推断不成立，或者这台机器的 `_iframeWindow` 根本没有 `wrappedJSObject` 属性（本身已经是非 Xray 引用，回退分支直接生效等于没变）。继续基于外部插件源码猜测已经两次落空，不该再猜第三次。
+- 本版不再改动高亮架构或数据获取方式，只加诊断：`reader-adapter.js` 记录 `wrappedJSObject` 是否存在、解包前后是否为同一引用；`pdf-highlighter.js` 的 `paintView` 拆成三个独立 `try/catch` 阶段（`getTextContent` / `items.length` 访问 / 逐项 `items[i]` 访问），异常信息前缀标注具体阶段，这样下次复测能直接从 `lexis-zotero-debug.json` 看出错误发生在哪一步，而不是仅有一句笼统的 `Permission denied`。
+- 5 组单测、全部 JS 语法检查通过。XPI: `dist/lexis-zotero-0.1.12.xpi`，真机复测后先看诊断里的 `[阶段:...]` 前缀和 `win 解包:` 那行，再决定下一步往哪个方向查。
+
+## debug:v0.1.12 诊断定位到真正断点在 itemRect，而非 items 读取 v0.1.13
+
+- v0.1.12 真机复测证实 `_iframeWindow.wrappedJSObject` 是 `undefined`（`win 解包: wrappedJSObject=no, sameRef=yes`），v0.1.11 那次"从根解包"的改动其实从未生效。但更关键的是：三处新增的 `[阶段:getTextContent/items.length/items[i]]` 诊断**全部没有触发**，报错仍是裸的 `Permission denied to access property 0`——说明 `getTextContent()` 到 `plainTextItems()` 这一段其实读取成功，真正的断点在这三个诊断覆盖范围之外。
+- 顺着 `paintView` 往下找到 `itemRect()`：`view.viewport.convertToViewportRectangle(...)` 返回的坐标数组同样是从 PDF.js 内容域拿到的，`coords[0]`/`coords[2]` 是纯下标访问，和最初的 `items[0]` 问题属于同一类；v0.1.9/v0.1.10 这里原本有一层 JSON 序列化保护，v0.1.11 重构"从根解包"时被删掉且没有验证是否还需要——这很可能是回归自己引入的。
+- 本版不改动逻辑，只把 `findMatches()` 调用和 `convertToViewportRectangle()`/`coords[i]` 访问也各自包上带阶段前缀的 `try/catch`，让下一次复测能确认断点到底是不是在这里。
+- 5 组单测、全部 JS 语法检查通过。XPI: `dist/lexis-zotero-0.1.13.xpi`，真机复测重点看是否出现 `[阶段:convertToViewportRectangle]` 或 `[阶段:coords[i]]` 前缀。
+
+## fix:确认断点并修复——参数数组需要在传入前解包 v0.1.14
+
+- v0.1.13 真机复测精确命中：每一页都报 `[阶段:convertToViewportRectangle] Permission denied to access property 0`，`[阶段:coords[i]]` 从未出现。断点被彻底锁定在 `view.viewport.convertToViewportRectangle(...)` 这一次调用本身，而不是读它的返回值。
+- 根因和此前几版的方向正好相反：不是"读 PDF.js 返回的跨沙箱数组"，而是**把 chrome 侧现造的坐标数组 `[x, y, x+width, y+height]` 当参数传进内容域的 PDF.js 方法**，PDF.js 内部读这个参数数组的下标时被拒绝——跨沙箱的数组下标限制是双向的，传参和读返回值都会中招，之前只顾着处理返回值这一边。
+- 修复：调用前对参数数组做 `Components.utils.waiveXrays()`，让内容域代码能正常读取下标；对返回的 `coords` 也保留同样的保护（原来能通过是运气好还是巧合尚未确认，双向都做更稳）。
+- 5 组单测、全部 JS 语法检查通过。XPI: `dist/lexis-zotero-0.1.14.xpi`，真机复测确认高亮是否出现，以及诊断里 `items=/matches=/marks=` 状态行是否首次出现非零值。
+
+## debug:waiveXrays 加了也没用，怀疑 Components 全局本身不可用 v0.1.15
+
+- v0.1.14 真机复测报错**分毫未变**，还是同一句 `[阶段:convertToViewportRectangle] Permission denied to access property 0`。`waiveXrays` 至少应该改变报错内容（哪怕换一种失败方式），完全不变高度可疑：很可能 `Components` 这个全局在当前执行环境里根本不存在，导致代码从 v0.1.8 开始就一直在悄悄走 `typeof Components === "undefined"` 的空操作分支——六个版本里每一次"用 waiveXrays 修"都可能从未真正执行过。
+- 本版不再改任何跨沙箱逻辑，只在 `PdfHighlighter.start()` 里加一行诊断，直接打印 `Components` 和 `Components.utils.waiveXrays` 是否存在，从根上验证这个假设，而不是继续在下游猜第二种绕过写法。
+- 5 组单测、全部 JS 语法检查通过。XPI: `dist/lexis-zotero-0.1.15.xpi`，真机复测重点看诊断开头是否出现 `Components=no`。
+
+## fix:改用 cloneInto 而非 waiveXrays 传参给内容域函数 v0.1.16
+
+- v0.1.15 真机复测证实 `Components=yes, waiveXrays=yes`——`waiveXrays` 确实被调用了，只是它对这个场景不起作用。排除了"空操作"猜测后想清楚了根因：`waiveXrays` 是单向的，只帮 chrome 侧代码读内容域对象；反过来，把 chrome 侧现造的数组当参数传给内容域函数时，`waiveXrays` 不解决"内容域代码读 chrome 对象"这个方向的问题——PDF.js 内部读我们传入的参数数组下标时，看到的仍然是被跨隔间包装过的 chrome 对象。
+- 换成 Gecko 官方为这个场景设计的 API：`Components.utils.cloneInto(data, targetScope)`，把 chrome 侧的坐标数组结构化克隆成内容域原生对象，再传给 `convertToViewportRectangle`。同时把用了哪种传参策略（`cloneInto` 还是回退到 `waiveXrays`）也写进错误信息，方便下次复测直接确认走的是哪条路径。`PdfHighlighter.start()` 的诊断也补上 `cloneInto` 是否可用。
+- 5 组单测、全部 JS 语法检查通过。XPI: `dist/lexis-zotero-0.1.16.xpi`，真机复测确认高亮是否出现；若仍失败，看新错误里 `arg=cloneInto` 还是 `arg=waiveXrays`，以及报错内容是否变化。
+
+## fix:v0.1.16 真机确认高亮终于出现——修坐标错位、加悬浮卡诊断 v0.1.17
+
+- **v0.1.16 真机复测第一次打出非零状态行**（如 `PDF 第 1 页: items=73, matches=14, marks=14`），确认 `cloneInto` 修复了核心的跨沙箱调用问题，高亮真的画出来了。剩两个问题：高亮框和文字有错位；悬停不出卡片。
+- 坐标错位：翻了 Obsidian 端（`main.js` `scanPdfLayer`）当年解决同类问题的思路——不直接信任坐标换算，而是拿 `.page` 实际渲染的 `getBoundingClientRect()` 尺寸和"逻辑尺寸"对比算出缩放系数再乘回去，防止高 DPI/缩放导致换算结果和实际渲染的 CSS 像素不一致。Zotero 端 `paintView` 之前直接把 `convertToViewportRectangle()` 的结果当 CSS 像素用，没做这层校正。现在按 `pageRect.width / view.viewport.width`（高度同理）算出 `scaleX/scaleY`，画每个 mark 前乘上去。
+- 悬浮卡不出的原因还不确定，本版先做防御性修复 + 诊断：`.lexis-zotero-pdf-layer` 的 `z-index` 从 3 提到 1000（防止被 Zotero 自己的选区/标注层盖住抢先接管指针事件）；`mouseenter` 触发时先记一条 `hover 触发: <词>` 日志，`onHover` 调用包 try/catch 记录同步异常；`CardView.show()` 拆成外层 try/catch 包裹的 `showUnsafe()`，异步渲染过程中任何异常都会写进诊断而不是静默丢失，开始渲染时也记一条 `卡片开始渲染: <词>`。
+- 5 组单测、全部 JS 语法检查通过。XPI: `dist/lexis-zotero-0.1.17.xpi`，真机复测重点看:①高亮框是否和文字对齐；②诊断里有没有出现 `hover 触发`/`卡片开始渲染`/`卡片渲染失败` 这几行，没出现 `hover 触发` 就说明指针事件根本没到 mark 元素，出现了但没有`卡片开始渲染`就是 `card.hover()`/`show()` 调度环节的问题。
+
+## chore:接通 Zotero 端自动更新 v0.1.18
+
+- `manifest.json` 的 `update_url` 之前指向这个 vault 仓库 `Heptazero/Note` 的 raw 地址——但这个仓库是**私有**的，`raw.githubusercontent.com` 匿名读不到私有仓库内容，自动更新配了等于没配，Zotero 每次都拿不到更新清单，只能一直手动装 xpi。
+- 改用已有的公开仓库 `Heptazero/obsidian-lexis`（Obsidian 版 Lexis 本来就发布在这，用同一套 `gh release create` 流程），不新建仓库、不把 vault 私有内容公开。`update_url` 改为 `https://raw.githubusercontent.com/Heptazero/obsidian-lexis/main/zotero-updates.json`。
+- 发布流程：`gh release create zotero-v<版本号> dist/lexis-zotero-<版本号>.xpi --repo Heptazero/obsidian-lexis`（tag 加 `zotero-` 前缀，跟 Obsidian 插件本体的纯数字 tag 区分开）上传 xpi，再更新仓库根目录的 `zotero-updates.json`（`addons["lexis-zotero@heptazero.local"].updates` 数组，含 `version`/`update_link`/`update_hash`（sha256）/`applications.zotero` 版本范围）提交推送。已用 `curl` 验证 `zotero-updates.json` 和 release 附件都能公网直接访问。
+- v0.1.18 是最后一次需要手动安装的版本——装上之后 Zotero 会按内置的更新检查周期自动发现并安装之后的新版本，不用再手动拖 xpi。
+- 5 组单测、全部 JS 语法检查通过。XPI: `dist/lexis-zotero-0.1.18.xpi`。
+
+## fix+feat:悬浮卡 attachShadow 同类跨沙箱 bug、坐标缩放读取失败、按文件开关高亮 v0.1.20
+
+- v0.1.18 真机复测诊断精确给出悬浮卡的根因：`卡片渲染失败: Element.attachShadow: Missing required 'mode' member of ShadowRootInit.`——和 `convertToViewportRectangle` 是同一类问题，`host.attachShadow({ mode: "open" })` 里 `{ mode: "open" }` 也是 chrome 侧现造对象传进内容域方法，对方读不出字段。同样用 `Components.utils.cloneInto()` 包一层解决。
+- 坐标错位没好，排查后发现 v0.1.17 加的缩放校正其实一直是空操作：`view.viewport.width/height` 是 PDF.js 普通对象（非 WebIDL）的自定义属性，从 chrome 侧直接读会被 Xray 悄悄挡成 `undefined`，导致代码一直落到 `pageRect.width` 兜底分支，算出来的缩放系数恒为 1。现在读之前先 `waiveXrays(view.viewport)`，并加了一行诊断打印实际算出来的 `viewportW/pageW/scaleX/scaleY`，下次真机复测能直接确认缩放到底生效没有。
+- 新增按文件开关高亮：`plugin.js` 里 `ensureReader` 打开 PDF 时会把 `{itemKey, title}` 记进本机 `Zotero.Prefs`（`extensions.lexis-zotero.seenFiles`，只存打开过的文件，不主动扫描全库），`disabledKeys` 存被关闭高亮的文件 key 集合；两者都只写本机 Prefs，不落进 item 数据，跟 Zotero 账号同步、Obsidian、浏览器端完全无关。`Zotero.Prefs.registerObserver` 监听 `disabledKeys` 变化，已打开的 PDF 切换开关会立即生效（不需要关闭重开）。设置页新增"按文件开关高亮"区块（`preferences.xhtml`/`.js`/`.css`），列出打开过的文件，逐个勾选框控制；`preferences.test.js` 补了空列表和勾选写回 Prefs 的断言。
+- 5 组单测、全部 JS 语法与 XHTML 校验通过。XPI: `dist/lexis-zotero-0.1.20.xpi`，真机复测重点看：①悬浮卡是否正常出现；②诊断里 `scaleX/scaleY` 是不是非 1（之前恒为 1 说明没生效）、高亮是否真的对齐；③设置页的文件列表能不能正常勾选、当场（不重开 PDF）关闭/恢复某个文件的高亮。
+
+## fix:v0.1.20 需求理解错了——改成按词典文件夹开关，不是按 PDF 文件 v0.1.21
+
+- 用户反馈 v0.1.20 的"按文件开关"理解错了：需要的不是"这一篇 PDF 要不要高亮"，而是 Obsidian 那种"文件夹即词典"——想控制的是"这次读文献只想高亮 CS 术语文件夹的词，不想高亮英语单词库文件夹的词"，即按**词典文件夹**开关，不是按**文献条目**开关。
+- 整个 v0.1.20 的 `seenFiles`/`disabledKeys`（记录打开过的 PDF item、按 item key 禁用）被移除，换成 `disabledDicts`（禁用的词典文件夹路径集合），语义完全不同：
+  - `plugin.js`：`ensureReader` 恢复成只看全局 `enabled()`，不再按单篇文献网关；新增 `disabledDicts()` 读本机 Prefs，通过 `ReaderController` 传给每个 `PdfHighlighter`。
+  - `pdf-highlighter.js`：`paintView` 对每个匹配到的词，用 `index.folderOf(entry.file)` 算出它属于哪个词典文件夹，`dictDisabled()` 按前缀匹配（复用 `word-index.js` `dictionaryColor()` 同款"精确匹配或子文件夹"逻辑）判断是否跳过绘制；跳过时也不计入相遇记账。
+  - `reader-adapter.js` 新增 `rescan()`，只触发重扫、不重建整个控制器；`plugin.js` 监听 `disabledDicts` 变化时对所有已打开的阅读器调用它，切换开关时已经开着的 PDF 立即生效，不用关闭重开（复用现有的 `scheduleRescan` 机制，不需要新的响应式管线）。
+  - `plugin.js` 新增 `listDictionaries()`（读当前 `index.dictionaries()`），供设置页调用。
+  - 设置页从"列出打开过的 PDF"改成"列出词典文件夹"（`preferences.xhtml`/`.js`），勾选框逐个控制，未同步过词典列表时提示先测试连接/同步。
+  - `preferences.test.js` 同步改写，覆盖空列表提示和勾选后写入 `disabledDicts` 的场景。
+- 5 组单测、全部 JS 语法、XHTML 校验通过。XPI: `dist/lexis-zotero-0.1.21.xpi`，待真机复测：设置页词典列表能否正常显示（先测试连接/同步一次）、勾掉某个词典后已打开的 PDF 是否立即失去对应词的高亮。
+
+## fix:悬浮卡在滚动 PDF 时会消失 v0.1.22
+
+- 真机反馈：v0.1.21 悬浮卡能正常弹出了，坐标缩放也有好转（真机诊断 `scaleX/scaleY` 稳定在 0.999~1.000，缩放校正确认生效），但用户想滚动/继续看卡片内容时，一离开卡片就消失。
+- 根因：`CardView` 构造时监听了 PDF 视口 `viewerContainer` 的 `scroll` 事件，一滚动 PDF 页面就无条件 `remove()` 关掉卡片——这是为了避免卡片位置因为页面滚动而错位设计的，但代价是用户想边滚 PDF 边看长卡片内容时体验很差：命中词的锚点 span 其实还在（PDF.js 还没把这一页虚拟化掉），只是位置变了。
+- 改成滚动时优先重新定位（`this.position(this.currentSpan)`）跟着锚点走，只有锚点真的从 DOM 上消失（翻页翻远导致 PDF.js 卸载了这一页）才关闭。另外给卡片补了一层 `wheel` 事件 `stopPropagation`，防止卡片内容滚到底后滚轮事件冒泡触发上面这个监听（CSS 本来就有 `overscroll-behavior: contain`，这里是双保险）。
+- 5 组单测、全部 JS 语法检查通过。XPI: `dist/lexis-zotero-0.1.22.xpi`，真机复测：卡片内容滚动/PDF 页面滚动时卡片是否还跟着、不再莫名关闭。坐标残留的小偏差还没有具体定位，需要用户描述偏移方向/幅度或截图再继续查（不确定是垂直基线近似误差还是子串宽度比例近似误差，猜的成本比较高，想先要证据）。
+- 已把 v0.1.22 发布到公开更新源（`Heptazero/obsidian-lexis` 的 `zotero-updates.json` + `zotero-v0.1.22` release），用户可以试试 Zotero「检查更新」是否能自动装上。
+
+## debug:卡片消失问题理解错了——是 hover 到卡片本身就关，不是滚动 v0.1.23
+
+- 用户纠正：v0.1.22 想解决的"滚动 PDF 时卡片消失"不是真正的问题；真正的问题是鼠标从高亮词移到卡片上时，卡片本身就消失了——说明 `card` 自己的 `mouseenter`（本该 `clearTimeout(this.hideTimer)` 取消关闭）没有生效，或者根本没鼠标真的碰到卡片的可交互区域。
+- 排查代码没找到明显逻辑漏洞（`hover()`/`leave()`/卡片自身 `mouseenter`/`mouseleave` 的时序看起来是对的），但这类"看起来对但实际不对"的坑这次调试史上出现太多次了，不能再靠读代码猜。
+- 本版不改逻辑，只加诊断：`leave()`、`remove()`、卡片自身 `mouseenter`/`mouseleave` 都记日志，能从 `lexis-zotero-debug.json` 里直接看出到底是"卡片自己的 mouseenter 从没触发过"（鼠标没真的进入卡片可交互区域，可能是定位/层级问题）还是"触发了但还是被关掉了"（真正的逻辑漏洞，可能在别处，比如某处重扫意外调用了 `card.remove()`）。
+- 5 组单测、全部 JS 语法检查通过。XPI: `dist/lexis-zotero-0.1.23.xpi`，用户手动装（还在调试期，暂不发布到更新源）；测试时把鼠标从高亮词移到卡片上，然后把这段时间的诊断日志发回来定位。

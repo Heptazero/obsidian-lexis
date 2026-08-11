@@ -7,11 +7,18 @@ async function getCfg() {
 }
 function base(cfg) { return `http://${cfg.host}:${cfg.port}`; }
 
-async function api(cfg, path, params) {
+async function api(cfg, path, { query, method = "GET", body } = {}) {
   const u = new URL(base(cfg) + path);
-  if (params) for (const k in params) u.searchParams.set(k, params[k]);
-  if (cfg.token) u.searchParams.set("token", cfg.token);
-  const r = await fetch(u.toString(), { method: "GET", cache: "no-store" });
+  if (query) for (const k in query) u.searchParams.set(k, query[k]);
+  const headers = {};
+  if (cfg.token) headers["X-Lexis-Token"] = cfg.token;
+  if (body != null) headers["Content-Type"] = "application/json";
+  const r = await fetch(u.toString(), {
+    method,
+    headers,
+    body: body == null ? undefined : JSON.stringify(body),
+    cache: "no-store",
+  });
   return r.json();
 }
 
@@ -20,11 +27,8 @@ async function flushPending(cfg) {
   if (!pendingAdds || !pendingAdds.length) return 0;
   const remaining = [];
   for (const p of pendingAdds) {
-    try {
-      const u = new URL(base(cfg) + "/add");
-      if (cfg.token) u.searchParams.set("token", cfg.token);
-      await fetch(u.toString(), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) });
-    } catch (e) { remaining.push(p); }
+    try { await api(cfg, "/add", { method: "POST", body: p }); }
+    catch (e) { remaining.push(p); }
   }
   await chrome.storage.local.set({ pendingAdds: remaining });
   return remaining.length;
@@ -44,7 +48,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         const data = await api(cfg, "/words");
         if (data && data.ok) {
           const folderOf = (p) => { if (!p) return ""; const i = p.lastIndexOf("/"); return i > 0 ? p.slice(0, i) : ""; };
-          const words = (data.words || []).map((x) => ({ k: x.key, w: x.word, t: x.tags || [], f: folderOf(x.file), c: x.color, s: x.wstyle }));
+          const words = (data.words || []).map((x) => ({ k: x.key, w: x.word, t: x.tags || [], f: folderOf(x.file), c: x.color, o: x.opacity, v: x.visible !== false, s: x.wstyle }));
           const meta = { count: words.length, syncedAt: Date.now(), version: data.version };
           const styleConfig = data.styleConfig || null;
           await chrome.storage.local.set({ words, meta, styleConfig });
@@ -55,54 +59,35 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         return;
       }
       if (msg.type === "detail") {
-        sendResponse(await api(cfg, "/word", { key: msg.key }));
+        sendResponse(await api(cfg, "/word", { query: { key: msg.key } }));
         return;
       }
       if (msg.type === "delete") {
-        const u = new URL(base(cfg) + "/word");
-        u.searchParams.set("key", msg.key || "");
-        if (cfg.token) u.searchParams.set("token", cfg.token);
-        const r = await fetch(u.toString(), { method: "DELETE" });
-        sendResponse(await r.json());
+        sendResponse(await api(cfg, "/word", { method: "DELETE", query: { key: msg.key || "" } }));
         return;
       }
       if (msg.type === "tag") {
-        const u = new URL(base(cfg) + "/tag");
-        if (cfg.token) u.searchParams.set("token", cfg.token);
-        const r = await fetch(u.toString(), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(msg.payload || {}) });
-        sendResponse(await r.json());
+        sendResponse(await api(cfg, "/tag", { method: "POST", body: msg.payload || {} }));
         return;
       }
       if (msg.type === "note") {
-        const u = new URL(base(cfg) + "/note");
-        if (cfg.token) u.searchParams.set("token", cfg.token);
-        const r = await fetch(u.toString(), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(msg.payload || {}) });
-        sendResponse(await r.json());
+        sendResponse(await api(cfg, "/note", { method: "POST", body: msg.payload || {} }));
         return;
       }
       if (msg.type === "move") {
-        const u = new URL(base(cfg) + "/move");
-        if (cfg.token) u.searchParams.set("token", cfg.token);
-        const r = await fetch(u.toString(), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(msg.payload || {}) });
-        sendResponse(await r.json());
+        sendResponse(await api(cfg, "/move", { method: "POST", body: msg.payload || {} }));
         return;
       }
       if (msg.type === "encounter") {
         // 被动相遇:低价值信号,离线就静默丢弃,不排队重试(跟 add 不一样,这个不算真数据丢失)
-        const u = new URL(base(cfg) + "/encounter");
-        if (cfg.token) u.searchParams.set("token", cfg.token);
         try {
-          const r = await fetch(u.toString(), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(msg.payload || {}) });
-          sendResponse(await r.json());
+          sendResponse(await api(cfg, "/encounter", { method: "POST", body: msg.payload || {} }));
         } catch (e) { sendResponse({ ok: false, error: "offline" }); }
         return;
       }
       if (msg.type === "add") {
-        const u = new URL(base(cfg) + "/add");
-        if (cfg.token) u.searchParams.set("token", cfg.token);
         try {
-          const r = await fetch(u.toString(), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(msg.payload || {}) });
-          sendResponse(await r.json());
+          sendResponse(await api(cfg, "/add", { method: "POST", body: msg.payload || {} }));
         } catch (e) {
           // 网络不通(Obsidian 没开):排队,下次同步时自动重放
           const { pendingAdds } = await chrome.storage.local.get("pendingAdds");
