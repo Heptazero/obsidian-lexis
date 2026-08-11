@@ -1,0 +1,19 @@
+{
+  "addons": {
+    "lexis-zotero@heptazero.local": {
+      "updates": [
+        {
+          "version": "0.1.18",
+          "update_link": "https://github.com/Heptazero/obsidian-lexis/releases/download/zotero-v0.1.18/lexis-zotero-0.1.18.xpi",
+          "update_hash": "sha256:9314cd7f37462283d73ad5c9bd4b2bb35c13479b6201ef1b484e96044865164e",
+          "applications": {
+            "zotero": {
+              "strict_min_version": "9.0",
+              "strict_max_version": "9.*"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
