@@ -26,9 +26,9 @@
     updateIndex(index) { this.index = index; this.detailCache.clear(); }
 
     hover(span, meta) {
-      clearTimeout(this.hideTimer);
+      this.win.clearTimeout(this.hideTimer);
       if (this.currentSpan === span && this.host) return;
-      clearTimeout(this.showTimer);
+      this.win.clearTimeout(this.showTimer);
       this.currentSpan = span;
       this.currentMeta = meta;
       const delay = Math.max(0, Number(this.index.styleConfig.hoverDelayMs || 0));
@@ -38,7 +38,7 @@
     leave(span) {
       if (span !== this.currentSpan) return;
       this.logger(`leave 触发: ${this.currentMeta?.key}，220ms 后关闭（若鼠标进入卡片会取消）`);
-      clearTimeout(this.showTimer);
+      this.win.clearTimeout(this.showTimer);
       this.hideTimer = this.win.setTimeout(() => {
         this.logger(`卡片关闭(超时): ${this.currentMeta?.key}`);
         this.remove();
@@ -46,8 +46,8 @@
     }
 
     remove() {
-      clearTimeout(this.showTimer);
-      clearTimeout(this.hideTimer);
+      this.win.clearTimeout(this.showTimer);
+      this.win.clearTimeout(this.hideTimer);
       if (this.host) this.logger(`卡片移除: ${this.currentMeta?.key}`);
       this.host?.remove();
       this.host = null;
@@ -94,7 +94,7 @@
       card.innerHTML = `<div class="lexis-web-pop-title">${this.escape(meta.key)}</div><div class="lexis-web-pop-corner"></div><div class="lexis-web-pop-meta"></div><div class="lexis-web-pop-body">加载中…</div>`;
       card.addEventListener("mouseenter", () => {
         this.logger(`卡片被 hover: ${this.currentMeta?.key}`);
-        clearTimeout(this.hideTimer);
+        this.win.clearTimeout(this.hideTimer);
       });
       card.addEventListener("mouseleave", () => {
         this.logger(`鼠标离开卡片: ${this.currentMeta?.key}`);

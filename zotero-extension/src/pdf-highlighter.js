@@ -221,37 +221,81 @@
       this.onStatus?.(`PDF 第 ${Number(view?.id || 0)} 页缩放: viewportW=${viewportWidth.toFixed(1)}, pageW=${pageRect.width.toFixed(1)}, scaleX=${scaleX.toFixed(3)}, scaleY=${scaleY.toFixed(3)}`);
       const pageIndex = Math.max(0, Number(view.id || page.dataset.pageNumber || 1) - 1);
       const pageLabel = this.viewer()?._pageLabels?.[pageIndex] || String(pageIndex + 1);
-      let drawn = 0;
+      let drawn = 0, fromLayer = 0, fromMath = 0;
       for (const match of matches) {
         const entry = this.index.get(match.key);
         if (entry && this.dictDisabled(this.index.folderOf(entry.file))) continue;
         this.reportEncounter(match.key);
+        const appearance = this.index.appearance(match.key);
+        if (!appearance.visible) continue;
         for (const range of match.ranges) {
           const item = items[range.itemIndex];
-          const rect = this.itemRect(view, item, range.start, range.end);
-          if (!rect) continue;
-          const appearance = this.index.appearance(match.key);
-          if (!appearance.visible) continue;
-          const mark = this.doc.createElement("div");
-          mark.className = "lexis-zotero-pdf-mark";
-          mark.dataset.lexisKey = match.key;
-          mark.style.cssText = [
-            `left:${rect.left * scaleX}px`, `top:${rect.top * scaleY}px`,
-            `width:${rect.width * scaleX}px`, `height:${rect.height * scaleY}px`,
-            `background:color-mix(in srgb, ${appearance.color} ${Math.round(Math.max(.08, appearance.opacity * .58) * 100)}%, transparent)`,
-          ].join(";");
-          const meta = { key: match.key, sentence: match.sentence, pageIndex, pageLabel };
-          mark.addEventListener("mouseenter", () => {
-            this.onStatus?.(`hover 触发: ${match.key}`);
-            try { this.onHover(mark, meta); }
-            catch (error) { this.onStatus?.(`hover 处理失败: ${error.message || error}`); }
-          });
-          mark.addEventListener("mouseleave", () => this.onLeave(mark));
-          overlay.appendChild(mark);
-          drawn++;
+          const { rects, source } = this.rectsFor(view, item, range, scaleX, scaleY);
+          if (!rects.length) continue;
+          if (source === "layer") fromLayer++; else fromMath++;
+          for (const rect of rects) {
+            const mark = this.doc.createElement("div");
+            mark.className = "lexis-zotero-pdf-mark";
+            mark.dataset.lexisKey = match.key;
+            mark.style.cssText = [
+              `left:${rect.left}px`, `top:${rect.top}px`, `width:${rect.width}px`, `height:${rect.height}px`,
+              `background:color-mix(in srgb, ${appearance.color} ${Math.round(Math.max(.08, appearance.opacity * .58) * 100)}%, transparent)`,
+            ].join(";");
+            const meta = { key: match.key, sentence: match.sentence, pageIndex, pageLabel };
+            mark.addEventListener("mouseenter", () => {
+              this.onStatus?.(`hover 触发: ${match.key}`);
+              try { this.onHover(mark, meta); }
+              catch (error) { this.onStatus?.(`hover 处理失败: ${error.message || error}`); }
+            });
+            mark.addEventListener("mouseleave", () => this.onLeave(mark));
+            overlay.appendChild(mark);
+            drawn++;
+          }
         }
       }
+      if (drawn) this.onStatus?.(`PDF 第 ${Number(view?.id || 0)} 页坐标来源: textLayer=${fromLayer}, 换算兜底=${fromMath}`);
       this.reportPageStatus(view, items.length, matches.length, drawn);
+    }
+
+    // 优先用 .textLayer 里 PDF.js 已经排好版的真实文字几何（Range.getClientRects()），
+    // 跟 Obsidian 端读 span.getClientRects() 是同一种精度来源，只是不往 DOM 里插东西、
+    // 不占用它的 hover 事件（那条路在 Zotero Reader 里不稳定，这是当初弃用的原因）。
+    // 读不到再退回内容流换算兜底，不会比现在更差。
+    rectsFor(view, item, range, scaleX, scaleY) {
+      const layerRects = this.textLayerRects(view, item, range.itemIndex, range.start, range.end);
+      if (layerRects) return { rects: layerRects, source: "layer" };
+      const single = this.itemRect(view, item, range.start, range.end);
+      if (!single) return { rects: [], source: "math" };
+      return {
+        rects: [{
+          left: single.left * scaleX, top: single.top * scaleY,
+          width: single.width * scaleX, height: single.height * scaleY,
+        }],
+        source: "math",
+      };
+    }
+
+    textLayerRects(view, item, itemIndex, start, end) {
+      try {
+        const textLayer = view.div?.querySelector(":scope > .textLayer");
+        const span = textLayer?.children?.[itemIndex];
+        const textNode = span?.tagName === "SPAN" ? span.firstChild : null;
+        if (!textNode || textNode.nodeType !== 3 || textNode.textContent !== item.str) return null;
+        const length = textNode.length;
+        const from = Math.max(0, Math.min(start, length));
+        const to = Math.max(from, Math.min(end, length));
+        if (from === to) return null;
+        const range = this.doc.createRange();
+        range.setStart(textNode, from);
+        range.setEnd(textNode, to);
+        const pageRect = view.div.getBoundingClientRect();
+        const rects = Array.from(range.getClientRects())
+          .filter((r) => r.width && r.height)
+          .map((r) => ({ left: r.left - pageRect.left, top: r.top - pageRect.top, width: r.width, height: r.height }));
+        return rects.length ? rects : null;
+      } catch (_error) {
+        return null;
+      }
     }
 
     dictDisabled(folder) {

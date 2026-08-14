@@ -940,4 +940,27 @@
 - 用户纠正：v0.1.22 想解决的"滚动 PDF 时卡片消失"不是真正的问题；真正的问题是鼠标从高亮词移到卡片上时，卡片本身就消失了——说明 `card` 自己的 `mouseenter`（本该 `clearTimeout(this.hideTimer)` 取消关闭）没有生效，或者根本没鼠标真的碰到卡片的可交互区域。
 - 排查代码没找到明显逻辑漏洞（`hover()`/`leave()`/卡片自身 `mouseenter`/`mouseleave` 的时序看起来是对的），但这类"看起来对但实际不对"的坑这次调试史上出现太多次了，不能再靠读代码猜。
 - 本版不改逻辑，只加诊断：`leave()`、`remove()`、卡片自身 `mouseenter`/`mouseleave` 都记日志，能从 `lexis-zotero-debug.json` 里直接看出到底是"卡片自己的 mouseenter 从没触发过"（鼠标没真的进入卡片可交互区域，可能是定位/层级问题）还是"触发了但还是被关掉了"（真正的逻辑漏洞，可能在别处，比如某处重扫意外调用了 `card.remove()`）。
-- 5 组单测、全部 JS 语法检查通过。XPI: `dist/lexis-zotero-0.1.23.xpi`，用户手动装（还在调试期，暂不发布到更新源）；测试时把鼠标从高亮词移到卡片上，然后把这段时间的诊断日志发回来定位。
+- 5 组单测、全部 JS 语法检查通过。XPI: `dist/lexis-zotero-0.1.23.xpi`，用户手动装（还在调试期，暂不发布到更新源）；测试时把鼠标从高亮词移到卡片上，然后把这段时间的诊断日志发回来定位。用户要求以后每版都发布到更新源，本版之后不再单独询问。
+
+## feat:坐标改用 .textLayer 真实渲染几何，兜底保留内容流换算 v0.1.24
+
+- 用户问"为什么效果不如 Obsidian 端的 PDF 高亮，本质原因是什么"：查了 Obsidian 端 `main.js` `scanPdfLayer()` 的实现，本质区别是**数据来源精度不同**——Obsidian 版直接读 PDF.js 已经渲染好的 `.textLayer` span 的 `getClientRects()`，是浏览器自己排版好的真实几何（字体度量、字距、连字全部精确）；Zotero 版目前只能从内容流 `getTextContent()` 拿到整段文字的 `transform`+总宽度，再按**字符数量比例**去猜某个词占多宽——比例字体下这是近似值，垂直方向的行高也是近似，这正是缩放系数修好之后仍有"一点小问题"的根源。当初弃用 `.textLayer` 是因为在它上面挂事件代理（hover/click）在 Zotero Reader 里不稳定，不是它的坐标不准。
+- 用户认为值得投入，要求先 commit 再做（`3622794`，含这次会话之前 main.js/browser-extension 已经在工作区但一直没提交的 v1.10.4 相关工作，一起打了个包，本地提交未推送）。
+- 实现混合方案：继续保留"内容流匹配 + 独立虚拟高亮层"架构不变（不往 `.textLayer` 里插任何东西，不占用它的事件代理，规避 Zotero Reader 的稳定性坑），但坐标来源改成优先用 `.textLayer` 对应 span 的文字节点开 `Range`、读 `Range.getClientRects()`——和 Obsidian 端本质上是同一种精度来源，只是不常驻挂事件、纯读取。
+  - 假设 `.textLayer` 的 span 顺序和 `getTextContent().items` 顺序一一对应（PDF.js 标准渲染行为），用 `textNode.textContent !== item.str` 做哨兵检查，任何一步对不上（span 缺失、文字不匹配、textLayer 还没渲染出来）就返回 `null`，自动退回原来的内容流换算路径——不会比现在更差，只会在能读到时更准。
+  - 一个匹配片段现在可能对应多个 `DOMRect`（真实文字跨行时 `getClientRects()` 会返回多条），画高亮框时按每条 rect 各画一个 mark，而不是假设只有一个矩形。
+  - 加了每页诊断：`PDF 第 X 页坐标来源: textLayer=N, 换算兜底=M`，能直接看出真机上这个假设成不成立、覆盖率多高。
+- 5 组单测、全部 JS 语法检查通过。XPI: `dist/lexis-zotero-0.1.24.xpi`，真机复测重点看这行诊断的 textLayer 命中率，以及高亮是不是比之前更贴合文字。悬浮卡 hover 消失的问题仍在等 v0.1.23 的诊断日志反馈，还没有新进展。
+
+## fix:找到卡片消失真正根因——clearTimeout 和 setTimeout 不是同一张计时器表 v0.1.25
+
+- v0.1.24 真机诊断给出决定性证据：`leave 触发` → `卡片被 hover`（`clearTimeout` 确实执行了）→ 231ms 后还是 `卡片关闭(超时)`。`clearTimeout` 执行了却没清掉计时器，说明清的根本不是同一个计时器。
+- 根因：`card-view.js` 里所有 `setTimeout` 调用都用 `this.win.setTimeout(...)`（在 PDF 内容页 iframe 的 window 上注册），但所有对应的 `clearTimeout` 调用都是裸的 `clearTimeout(...)`——这段代码本身跑在 chrome 特权层（`Services.scriptloader.loadSubScript` 加载进 `globalThis`），裸 `clearTimeout` 用的是特权层自己的计时器表，跟内容页 window 的计时器表完全不是一回事。清的是错误命名空间里的 ID，真正那个定时器完全没被动到，所以`hover`卡片、离开卡片这些交互无论怎么操作，220ms 后该关的还是会关——这是这几个类里最基础的 bug，从 CardView 最早写下来就在，不是这次改坏的。
+- 全部 `clearTimeout` 改成 `this.win.clearTimeout`，和创建时用的 `this.win.setTimeout` 对齐（`hover()`/`leave()`/`remove()`/卡片自身 mouseenter）。顺带检查了其他文件：`pdf-highlighter.js` 的 `requestAnimationFrame`/`cancelAnimationFrame` 两边本来就都用 `this.win.`，`plugin.js` 的 `setTimeout`/`clearTimeout` 两边都是裸的（管理的是插件自己的防抖计时器，不跟任何 PDF window 绑定），都没有这个问题，只有 `card-view.js` 中招。
+- 5 组单测、全部 JS 语法检查通过。XPI: `dist/lexis-zotero-0.1.25.xpi`，真机复测：hover 到卡片上是否真的能保持悬浮、不再莫名其妙消失。
+
+## feat:移动端复习安全区与可读记忆曲线，模块拆分 v1.11.0
+
+- 手机复习评分栏现在始终给 Obsidian 底部工具栏留出安全区，不再要求用户手调间距。
+- 曲线横轴改为实际日期，纵轴为百分比保留率；标出今天预测值、目标保留率与下次复习日。
+- `main.js` 不再直接承载复习会话与 SVG 绘制：复习界面抽到 `review-view.js`，曲线抽到纯呈现的 `curve.js`。两者通过显式注入的依赖调用主插件，词库读写与 FSRS 规则仍只存在于 `main.js`。

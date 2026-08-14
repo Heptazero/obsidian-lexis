@@ -37,7 +37,7 @@
 Chrome 扩展  ⇄  http://127.0.0.1:<端口>  ⇄  Lexis(在 Obsidian 里跑的本地 HTTP 服务)  ⇄  vault 的 .md 文件
 ```
 
-当前架构刻意保持**Obsidian 单文件发布、外部客户端按运行时拆分**：Obsidian Release 仍只交付 `main.js + manifest.json + styles.css`，不为了目录好看拆核心。`LexisPlugin` 是词典规则和写入动作的唯一真相；`LexisBridge` 只拥有 HTTP 生命周期、认证和路由；各 View/Modal/Setting 类只负责交互。浏览器由 `background.js` 统一承接桥接请求；Zotero 端按桥接、索引、PDF 适配、卡片拆成小模块，但不复制 Markdown、MathJax、词条写入或 FSRS 规则。Zotero 的 `scripts/build.sh` 只做 XPI 压缩与共享卡片 CSS 一致性检查，不转译源码。
+当前架构按职责拆分、仍保持零构建：`main.js` 是词典规则、FSRS、桥接和设置的唯一真相；`review-view.js` 只负责复习会话 UI；`curve.js` 只负责把已算出的调度状态画成 SVG。Obsidian Release 交付这三个 JS 文件以及 `manifest.json + styles.css`。浏览器由 `background.js` 统一承接桥接请求；Zotero 端按桥接、索引、PDF 适配、卡片拆成小模块，但不复制 Markdown、MathJax、词条写入或 FSRS 规则。Zotero 的 `scripts/build.sh` 只做 XPI 压缩与共享卡片 CSS 一致性检查，不转译源码。
 
 ## 自动更新（v0.1.18 起生效）
 
@@ -49,7 +49,20 @@ Chrome 扩展  ⇄  http://127.0.0.1:<端口>  ⇄  Lexis(在 Obsidian 里跑的
   5. 用 `curl` 核对 raw 地址和 release 附件都能公网访问。
 - v0.1.18 是最后一次需要用户手动装 xpi 的版本，之后 Zotero 会按自己的更新检查周期自动发现新版本并安装。
 
-## 当前待验收：Zotero 阅读端 v0.1.23（诊断版——上一版理解错了卡片消失的原因）
+## 当前待验收：Zotero 阅读端 v0.1.25（卡片消失真根因已修复）
+
+- 用户要求每版都自动发布，本版已按流程发布到更新源。
+- **卡片消失根因确认**：v0.1.24 诊断给出决定性证据——`卡片被 hover`（`clearTimeout` 执行了）之后 231ms 还是 `卡片关闭(超时)`。`card-view.js` 里所有计时器都用 `this.win.setTimeout(...)` 创建（挂在 PDF 内容页 iframe 的 window 上），但清除都用裸 `clearTimeout(...)`——这段代码本身跑在 chrome 特权层，裸 `clearTimeout` 用的是特权层自己的计时器表，跟内容页 window 的计时器表是两本完全不同的账，清的 ID 对不上号，真正的计时器从没被取消过。已把 `card-view.js` 里全部 `clearTimeout` 改成 `this.win.clearTimeout`，和创建时的 `this.win.setTimeout` 对齐。`pdf-highlighter.js`（`requestAnimationFrame`/`cancelAnimationFrame` 两边都用 `this.win.`）和 `plugin.js`（两边都用裸的，管理插件自己的防抖计时器不绑定任何 PDF window）都自洽，没有这个问题。
+- 下一步：真机复测 hover 到卡片上是否真的能保持悬浮。坐标残留偏差和 v0.1.24 的 textLayer 命中率诊断也还没等到反馈。
+
+## （历史）Zotero 阅读端 v0.1.24（坐标改用 .textLayer 真实几何 + 兜底）
+
+- 用户要求以后每版都自动发布到更新源，不用再单独问；本版起默认执行这个流程。
+- 坐标来源改为混合方案（架构说明见下），不改变"内容流匹配 + 独立虚拟高亮层，不碰 `.textLayer` 事件代理"这条 v0.1.7 定下的主线——只是坐标数据来源变了。核心方法：`PdfHighlighter.textLayerRects(view, item, itemIndex, start, end)`，假设 `.textLayer` 的 span 顺序和 `content.items` 一一对应，用 `textNode.textContent !== item.str` 做哨兵校验，任何一步失败自动退回原来的 `itemRect()`（`convertToViewportRectangle` 换算）路径。`rectsFor()` 统一两条路径的出口，`paintView` 按每条返回的 `DOMRect` 各画一个 mark（真实文字可能跨行返回多条）。加了每页诊断 `PDF 第 X 页坐标来源: textLayer=N, 换算兜底=M`。
+- 下一步：真机复测看这行诊断——`textLayer` 命中率高说明假设成立、以后可以把换算兜底路径当纯保险；命中率低或恒为 0 说明 Zotero 这份 PDF.js 的 span 顺序假设不成立，需要换个匹配 span 的方式（比如按 span 文字内容模糊匹配而不是纯按下标）。同时看高亮是否比 v0.1.22 更贴合文字。
+- 悬浮卡 hover-to-card 消失的诊断（v0.1.23 加的）还没等到用户反馈日志，这条线索仍然悬着，不要在没有日志前继续猜。
+
+## （历史）Zotero 阅读端 v0.1.23（诊断版——上一版理解错了卡片消失的原因）
 
 - v0.1.22 想解决的是"滚动 PDF 时卡片消失"，但用户纠正真正问题是：**鼠标从高亮词移到卡片本身上时，卡片就消失了**——和滚动无关。读代码没找到明显漏洞（`hover()`/`leave()`/卡片自身 mouseenter/mouseleave 时序看起来对），本版不改逻辑，只在 `leave()`/`remove()`/卡片自身 mouseenter/mouseleave 都加了日志。
 - 用户需在 Zotero 9.0.6（Gecko 140.0）手动安装 `zotero-extension/dist/lexis-zotero-0.1.23.xpi`（诊断版，不发布到更新源）。安装后关闭并重新打开 PDF，把鼠标从高亮词移到卡片上，然后读 `lexis-zotero-debug.json` 这段时间的日志。
@@ -243,4 +256,4 @@ Hz 已经把四段完整规格写死,**每段是一次独立会话的完整 prom
 2. 改了 `browser-extension/` → `chrome://extensions` **刷新↻扩展** + **刷新网页**。
 3. `node --check main.js`(及改过的 ext js)必须过。
 4. git:`cd .obsidian/plugins/lexis && git add <具体文件> && git commit && git push`。`data.json` 已 gitignore(含个人复习数据,别提交);别把 Syncthing 冲突文件(`data.sync-conflict-*.json`)一起 add 进去。改服务端记得 bump 两个 `manifest.json` 的 version(各自独立)。
-5. 发布:`gh release create <版本号> main.js manifest.json styles.css --title ... --notes ...`(只有插件三件套进 release,浏览器扩展不打包发布,靠用户手动重载/覆盖)。
+5. 发布:`gh release create <版本号> main.js curve.js review-view.js manifest.json styles.css --title ... --notes ...`(浏览器扩展不打包发布,靠用户手动重载/覆盖)。

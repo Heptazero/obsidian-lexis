@@ -9,6 +9,8 @@
 
 const obsidian = require("obsidian");
 const { Plugin, PluginSettingTab, Setting, Notice, TFolder, TFile, Component, MarkdownRenderer, ItemView, Modal, finishRenderMath } = obsidian;
+const { buildCurveSVG } = require("./curve");
+const { createReviewView } = require("./review-view");
 
 const LEXIS_REVIEW_VIEW = "lexis-review-view";
 const LEXIS_HOME_VIEW = "lexis-home-view";
@@ -124,6 +126,12 @@ const FSRS = {
   nextForgetStability(d, s, r) { return FSRS_W[11] * Math.pow(d, -FSRS_W[12]) * (Math.pow(s + 1, FSRS_W[13]) - 1) * Math.exp((1 - r) * FSRS_W[14]); },
   nextInterval(s, R) { const ivl = (s / FSRS_FACTOR) * (Math.pow(R, 1 / FSRS_DECAY) - 1); return Math.min(MAX_IVL, Math.max(1, Math.round(ivl))); },
 };
+
+const LexisReviewView = createReviewView({
+  reviewViewType: LEXIS_REVIEW_VIEW,
+  todayStr,
+  renderLexisMarkdown,
+});
 
 // 外部阅读端（浏览器、未来的 Zotero）只通过这条本机桥接访问 Lexis。
 // 这里负责 HTTP 生命周期与路由；词典规则和写入动作仍由 LexisPlugin 作为唯一真相处理。
@@ -829,7 +837,7 @@ module.exports = class LexisPlugin extends Plugin {
     if (showCurve) {
       const card = this.readCard(file);
       const svg = this.buildCurveSVG(card);
-      if (svg) { const due = card.due ? ` · 下次 ${String(card.due).slice(0, 10)}` : ""; html += `<div class="lexis-web-sec">🧠 记忆曲线(稳定度 ${round2(Number(card.s))} 天${due})</div><div class="lexis-web-curve">${svg}</div>`; }
+      if (svg) { const due = card.due ? ` · 下次复习 ${String(card.due).slice(0, 10)}` : ""; html += `<div class="lexis-web-sec">🧠 记忆曲线（日期 × 保留率${due}）</div><div class="lexis-web-curve">${svg}</div>`; }
     }
     if (showRelated && this.settings.showRelated) {
       try {
@@ -2195,25 +2203,14 @@ module.exports = class LexisPlugin extends Plugin {
   }
   // 遗忘曲线 SVG(FSRS 衰减)
   buildCurveSVG(card) {
-    const s = Number(card.s);
-    if (!s || isNaN(s)) return null;
-    const R = this.settings.requestRetention || 0.9;
-    const ivl = FSRS.nextInterval(s, R);
-    const maxT = Math.max(ivl * 1.6, 2);
-    const W = 340, H = 96, pad = 6;
-    const X = (t) => pad + (W - 2 * pad) * (t / maxT);
-    const Y = (r) => pad + (H - 2 * pad) * (1 - r);
-    let d = "";
-    const N = 48;
-    for (let i = 0; i <= N; i++) { const t = maxT * i / N; const r = FSRS.retrievability(t, s); d += (i ? " L" : "M") + X(t).toFixed(1) + " " + Y(r).toFixed(1); }
-    const elapsed = card.last ? Math.min(daysBetween(card.last, todayStr()), maxT) : 0;
-    const tx = X(elapsed), ry = Y(R), cy = Y(FSRS.retrievability(elapsed, s));
-    return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">` +
-      `<line x1="${pad}" y1="${ry.toFixed(1)}" x2="${W - pad}" y2="${ry.toFixed(1)}" stroke="var(--text-faint)" stroke-dasharray="3 3" stroke-width="1"/>` +
-      `<path d="${d}" fill="none" stroke="var(--interactive-accent)" stroke-width="2"/>` +
-      `<line x1="${tx.toFixed(1)}" y1="${pad}" x2="${tx.toFixed(1)}" y2="${H - pad}" stroke="var(--text-accent)" stroke-width="1"/>` +
-      `<circle cx="${tx.toFixed(1)}" cy="${cy.toFixed(1)}" r="3" fill="var(--text-accent)"/>` +
-      `</svg>`;
+    return buildCurveSVG(card, {
+      requestRetention: this.settings.requestRetention,
+      nextInterval: FSRS.nextInterval,
+      retrievability: FSRS.retrievability,
+      addDaysStr,
+      daysBetween,
+      todayStr,
+    });
   }
   // 笔记内 ```lexis 代码块:曲线 + 相关词 + 出现过的地方
   async renderLexisBlock(el, ctx, src) {
@@ -2234,8 +2231,8 @@ module.exports = class LexisPlugin extends Plugin {
       const card = this.readCard(file);
       const svg = this.buildCurveSVG(card);
       if (svg) {
-        const due = card.due ? ` · 下次 ${String(card.due).slice(0, 10)}` : "";
-        el.createDiv({ cls: "lexis-section-title", text: `🧠 记忆曲线(稳定度 ${round2(Number(card.s))} 天${due})` });
+        const due = card.due ? ` · 下次复习 ${String(card.due).slice(0, 10)}` : "";
+        el.createDiv({ cls: "lexis-section-title", text: `🧠 记忆曲线（日期 × 保留率${due}）` });
         el.createDiv({ cls: "lexis-curve" }).innerHTML = svg;
       }
     }
@@ -2810,165 +2807,6 @@ class LexisRestoreModal extends Modal {
   onClose() { this.contentEl.empty(); }
 }
 
-// ---------- 背单词复习视图 ----------
-class LexisReviewView extends ItemView {
-  constructor(leaf, plugin) { super(leaf); this.plugin = plugin; this.queue = []; this.pos = 0; this.reviewed = 0; this.revealed = false; this.undoStack = []; this.options = {}; }
-  getViewType() { return LEXIS_REVIEW_VIEW; }
-  getDisplayText() { return "Lexis 背单词"; }
-  getIcon() { return "brain"; }
-  async onOpen() { this.registerDomEvent(window, "keydown", (e) => this.onKey(e)); this.refresh(); }
-  onClose() { if (this._comp) this._comp.unload(); if (this._frontComp) this._frontComp.unload(); }
-  refresh() { this.queue = this.plugin.buildQueue(this.options); this.pos = 0; this.reviewed = 0; this.revealed = false; this.undoStack = []; this.render(); }
-
-  render() {
-    const c = this.contentEl;
-    c.empty(); c.addClass("lexis-review");
-    if (this.pos >= this.queue.length) { this.renderDone(c); return; }
-    this.revealed = false;
-    const item = this.currentItem = this.queue[this.pos];
-    const topbar = c.createDiv({ cls: "lexis-rv-topbar" });
-    topbar.createDiv({ cls: "lexis-rv-progress", text: `已背 ${this.reviewed} · 剩 ${this.queue.length - this.pos}` });
-    const topbtns = topbar.createDiv({ cls: "lexis-rv-topbtns" });
-    if (this.undoStack.length) {
-      const ub = topbtns.createEl("button", { cls: "lexis-rv-undo", text: "↩ 撤销 (Z)" });
-      ub.addEventListener("click", () => this.undo());
-    }
-    const sb = topbtns.createEl("button", { cls: "lexis-rv-undo", text: "跳过 (S)" });
-    sb.addEventListener("click", () => this.skip());
-    const card = c.createDiv({ cls: "lexis-rv-card" });
-    const wordEl = card.createDiv({ cls: "lexis-rv-word", text: item.file.basename });
-    wordEl.setAttribute("title", "点击在旁边打开原文");
-    wordEl.addEventListener("click", () => this.openSource(item.file));
-    if (this.plugin.settings.cardFront === "cloze") this.applyClozeFront(wordEl, item);
-    const tagsSet = this.plugin.getTags(item.file);
-    if (tagsSet.size) {
-      const tw = card.createDiv({ cls: "lexis-rv-tags" });
-      for (const t of tagsSet) {
-        const pill = tw.createSpan({ cls: "lexis-tag", text: "#" + t });
-        pill.setAttribute("title", `只背 #${t}`);
-        pill.addEventListener("click", () => this.plugin.openReview({ tag: t }));
-      }
-    }
-    this.backEl = card.createDiv({ cls: "lexis-rv-back" });
-    this.backEl.style.display = "none";
-    this.showBtn = c.createEl("button", { cls: "mod-cta lexis-rv-show", text: "显示答案 (空格)" });
-    this.showBtn.addEventListener("click", () => this.reveal());
-    this.rateBar = c.createDiv({ cls: "lexis-rv-rate" });
-    this.rateBar.style.display = "none";
-    // 评分栏置底:空余空间推到底部 + 可配置的底部间距
-    const bs = this.plugin.settings.reviewBottomSpace || 70;
-    if (document.body.classList.contains("is-phone")) {
-      const spacer = document.createElement("div");
-      spacer.style.flex = "1";
-      c.insertBefore(spacer, this.rateBar);
-    }
-    this.rateBar.style.marginBottom = bs + "px";
-    const grades = [[1, "重来"], [2, "较难"], [3, "记得"], [4, "简单"]];
-    for (const [g, label] of grades) {
-      const ivl = this.plugin.scheduleCard(item.card, g).interval;
-      const b = this.rateBar.createEl("button", { cls: "lexis-rv-btn lexis-rv-g" + g });
-      b.createSpan({ cls: "lexis-rv-label", text: `${label} (${g})` });
-      b.createSpan({ cls: "lexis-rv-ivl", text: this.plugin.humanInterval(ivl) });
-      b.addEventListener("click", () => this.grade(g));
-    }
-  }
-  async reveal() {
-    if (this.revealed) return;
-    this.revealed = true;
-    this.showBtn.style.display = "none";
-    this.backEl.style.display = "";
-    this.rateBar.style.display = "";
-    try {
-      if (this._comp) this._comp.unload();
-      this._comp = new Component(); this._comp.load();
-      await this.plugin.renderNoteInto(this.backEl, this.currentItem.file, this._comp, true);
-      const openOcc = () => this.backEl.querySelectorAll("details.lexis-occ-details").forEach((d) => { d.open = true; });
-      openOcc(); window.setTimeout(openOcc, 60);
-    } catch (err) {
-      this.backEl.setText("内容渲染出错:" + (err?.message || err));
-      console.error("[Lexis] reveal error", err);
-    }
-  }
-  async grade(g) {
-    if (!this.revealed) { new Notice("Lexis:请先点「显示答案」"); return; }
-    const item = this.currentItem;
-    try {
-      const prev = { s: item.card.s, d: item.card.d, due: item.card.due, last: item.card.last, reps: item.card.reps, lapses: item.card.lapses };
-      const wasNew = item.card.s == null || isNaN(Number(item.card.s));
-      const sched = this.plugin.scheduleCard(item.card, g);
-      await this.plugin.applySchedule(item.file, sched);
-      await this.plugin.logReview();
-      this.undoStack.push({ item, prev, wasNew, pos: this.pos, requeued: g === 1 });
-      this.reviewed++;
-      if (g === 1) this.queue.push({ file: item.file, card: { s: sched.s, d: sched.d, due: sched.due, last: todayStr(), reps: sched.reps, lapses: sched.lapses } });
-      this.pos++;
-      this.render();
-    } catch (err) {
-      new Notice("Lexis 评分出错:" + (err?.message || err));
-      console.error("[Lexis] grade error", err);
-    }
-  }
-  async undo() {
-    const u = this.undoStack.pop();
-    if (!u) { new Notice("Lexis:没有可撤销的"); return; }
-    try {
-      await this.plugin.app.fileManager.processFrontMatter(u.item.file, (fm) => {
-        if (u.wasNew) { delete fm["lexis-s"]; delete fm["lexis-d"]; delete fm["lexis-due"]; delete fm["lexis-last"]; delete fm["lexis-reps"]; delete fm["lexis-lapses"]; }
-        else { fm["lexis-s"] = u.prev.s; fm["lexis-d"] = u.prev.d; fm["lexis-due"] = u.prev.due; fm["lexis-last"] = u.prev.last; fm["lexis-reps"] = u.prev.reps; fm["lexis-lapses"] = u.prev.lapses; }
-      });
-      const t = todayStr();
-      if (this.plugin.settings.reviewLog[t]) { this.plugin.settings.reviewLog[t]--; if (this.plugin.settings.reviewLog[t] <= 0) delete this.plugin.settings.reviewLog[t]; await this.plugin.saveSettings(); }
-      if (u.requeued && this.queue.length) this.queue.pop();
-      this.pos = u.pos;
-      this.reviewed = Math.max(0, this.reviewed - 1);
-      this.render();
-    } catch (err) { new Notice("Lexis 撤销出错:" + (err?.message || err)); }
-  }
-  openSource(file) {
-    let target = this.app.workspace.getLeavesOfType("markdown").find((l) => l !== this.leaf);
-    if (!target) target = this.app.workspace.getLeaf("split", "vertical");
-    target.openFile(file);
-    this.app.workspace.revealLeaf(target);
-  }
-  onKey(e) {
-    if (this.app.workspace.activeLeaf !== this.leaf) return;
-    const tag = (e.target && e.target.tagName) || "";
-    if (/INPUT|TEXTAREA/.test(tag) || (e.target && e.target.isContentEditable)) return;
-    if (e.key === "z" || e.key === "Z") { e.preventDefault(); this.undo(); return; }
-    if (e.key === "s" || e.key === "S") { e.preventDefault(); this.skip(); return; }
-    if (this.pos >= this.queue.length) return;
-    // 空格始终拦截(防止焦点落在某个评分按钮上被空格误触发 → "跳到下一个"的 bug)
-    if (e.code === "Space") { e.preventDefault(); if (!this.revealed) this.reveal(); return; }
-    if (this.revealed && ["1", "2", "3", "4"].includes(e.key)) { e.preventDefault(); this.grade(Number(e.key)); }
-  }
-  async applyClozeFront(wordEl, item) {
-    const ex = await this.plugin.getFirstExample(item.file);
-    if (!ex || this.currentItem !== item) return; // 无出处则保持单词;卡片已切走则放弃
-    wordEl.addClass("lexis-rv-cloze");
-    wordEl.empty();
-    if (this._frontComp) this._frontComp.unload();
-    this._frontComp = new Component(); this._frontComp.load();
-    const cloze = this.plugin.buildCloze(ex, item.file.basename);
-    // 走 Markdown 渲染管线(而不是 setText),出处里的 LaTeX/加粗/斜体等格式才能正常显示
-    await renderLexisMarkdown(this.app, cloze, wordEl, item.file.path, this._frontComp);
-  }
-  skip() {
-    if (this.pos >= this.queue.length) return;
-    this.queue.push(this.queue[this.pos]); // 稍后再出现
-    this.pos++;
-    this.render();
-  }
-  renderDone(c) {
-    const d = c.createDiv({ cls: "lexis-rv-done" });
-    d.createDiv({ cls: "lexis-rv-done-emoji", text: "🎉" });
-    d.createDiv({ text: this.reviewed ? `本轮背了 ${this.reviewed} 个,清空啦` : "现在没有到期的单词~" });
-    const b = d.createEl("button", { cls: "mod-cta", text: "再查一遍" });
-    b.onclick = () => { this.plugin.rebuildIndex(false); this.refresh(); };
-    this.plugin.renderHeatmap(d.createDiv({ cls: "lexis-hm-wrap" }));
-    c.style.paddingBottom = (this.plugin.settings.reviewBottomSpace || 70) + "px";
-  }
-}
-
 // ---------- Lexis 主页 ----------
 class LexisHomeView extends ItemView {
   constructor(leaf, plugin) { super(leaf); this.plugin = plugin; }
@@ -3286,7 +3124,7 @@ class LexisSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("每轮最多复习").addSlider((s) => s.setLimits(10, 500, 10).setValue(this.plugin.settings.maxReviewsPerSession).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.maxReviewsPerSession = v; await save(); }));
     new Setting(containerEl).setName("卡片正面").setDesc("整篇=正面单词、背面笔记;填空=正面出处挖空、背面笔记(需先收藏出处,没有则退回显示单词)。")
       .addDropdown((dd) => dd.addOption("note", "单词 → 整篇").addOption("cloze", "出处填空").setValue(this.plugin.settings.cardFront).onChange(async (v) => { this.plugin.settings.cardFront = v; await save(); }));
-    new Setting(containerEl).setName("评分按钮底部间距").setDesc("答案区下方评分按钮与底部的距离(px)。移动端需留出导航栏空间,默认 70。")
+    new Setting(containerEl).setName("评分按钮底部间距").setDesc("桌面端答案区下方评分按钮与底部的距离(px)。手机版会自动避开工具栏。")
       .addSlider((s) => s.setLimits(0, 200, 5).setValue(this.plugin.settings.reviewBottomSpace).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.reviewBottomSpace = v; await save(); }));
     new Setting(containerEl).setName("开始背单词").addButton((b) => b.setButtonText("打开复习").setCta().onClick(() => this.plugin.openReview()));
     new Setting(containerEl).setName("悬停回流复习排期").setDesc("悬停查一个词的释义(Obsidian 内或网页扩展都算),如果它的到期日比设置的天数还远,就把到期日拉近到今天——只挪排期,不影响 stability/难度,也不算一次复习评分。")

@@ -80,9 +80,9 @@ None of this promises the thresholds are right for you, or that any of these sig
 
 **From Community Plugins (recommended):** open *Settings → Community plugins → Browse*, search for **Lexis**, install, then enable.
 
-**Manual:** download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/Heptazero/obsidian-lexis/releases) into `<vault>/.obsidian/plugins/lexis/`, then enable Lexis under *Settings → Community plugins*.
+**Manual:** download `main.js`, `curve.js`, `review-view.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/Heptazero/obsidian-lexis/releases) into `<vault>/.obsidian/plugins/lexis/`, then enable Lexis under *Settings → Community plugins*.
 
-> 从社区插件市场搜索 **Lexis** 安装并启用;或手动把 `main.js`、`manifest.json`、`styles.css` 放进 `<vault>/.obsidian/plugins/lexis/` 再启用。
+> 从社区插件市场搜索 **Lexis** 安装并启用;或手动把 `main.js`、`curve.js`、`review-view.js`、`manifest.json`、`styles.css` 放进 `<vault>/.obsidian/plugins/lexis/` 再启用。
 
 ## Usage
 

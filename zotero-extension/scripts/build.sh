@@ -5,7 +5,7 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 EXT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 REPO_DIR=$(CDPATH= cd -- "$EXT_DIR/.." && pwd)
 DIST_DIR="$EXT_DIR/dist"
-OUTPUT="$DIST_DIR/lexis-zotero-0.1.23.xpi"
+OUTPUT="$DIST_DIR/lexis-zotero-0.1.25.xpi"
 
 if ! cmp -s "$REPO_DIR/browser-extension/popover.css" "$EXT_DIR/styles/card.css"; then
   echo "styles/card.css 与浏览器卡片样式不同步" >&2
