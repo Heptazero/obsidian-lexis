@@ -964,3 +964,9 @@
 - 手机复习评分栏现在始终给 Obsidian 底部工具栏留出安全区，不再要求用户手调间距。
 - 曲线横轴改为实际日期，纵轴为百分比保留率；标出今天预测值、目标保留率与下次复习日。
 - `main.js` 不再直接承载复习会话与 SVG 绘制：复习界面抽到 `review-view.js`，曲线抽到纯呈现的 `curve.js`。两者通过显式注入的依赖调用主插件，词库读写与 FSRS 规则仍只存在于 `main.js`。
+
+## fix:模块源码在发布时合并，恢复手机版启动 v1.11.1
+
+- v1.11.0 把 `curve.js`、`review-view.js` 作为运行时相对模块加载；桌面环境能解析，但 Obsidian 手机版插件沙箱不保证相对路径 `require()`，导致插件入口启动失败。
+- 源码仍按职责保存在 `src/main.js`、`src/curve.js`、`src/review-view.js`；新增 `scripts/build-obsidian.js`，发布前将它们确定性合并为根目录单文件 `main.js`。
+- 发布产物重新回到 Obsidian 兼容的三件套：`main.js + manifest.json + styles.css`；生成后的 `main.js` 只保留 `require("obsidian")`，不再包含任何相对模块加载。

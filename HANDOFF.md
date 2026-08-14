@@ -37,7 +37,7 @@
 Chrome 扩展  ⇄  http://127.0.0.1:<端口>  ⇄  Lexis(在 Obsidian 里跑的本地 HTTP 服务)  ⇄  vault 的 .md 文件
 ```
 
-当前架构按职责拆分、仍保持零构建：`main.js` 是词典规则、FSRS、桥接和设置的唯一真相；`review-view.js` 只负责复习会话 UI；`curve.js` 只负责把已算出的调度状态画成 SVG。Obsidian Release 交付这三个 JS 文件以及 `manifest.json + styles.css`。浏览器由 `background.js` 统一承接桥接请求；Zotero 端按桥接、索引、PDF 适配、卡片拆成小模块，但不复制 Markdown、MathJax、词条写入或 FSRS 规则。Zotero 的 `scripts/build.sh` 只做 XPI 压缩与共享卡片 CSS 一致性检查，不转译源码。
+当前架构按职责拆分源码、发布为单文件：`src/main.js` 是词典规则、FSRS、桥接和设置的唯一真相；`src/review-view.js` 只负责复习会话 UI；`src/curve.js` 只负责把已算出的调度状态画成 SVG。`node scripts/build-obsidian.js` 将三者合并为根目录 `main.js`，因此手机版运行时仍只需加载 Obsidian 官方保证的单一入口，不执行相对路径 `require()`。Obsidian Release 继续只交付 `main.js + manifest.json + styles.css`。浏览器由 `background.js` 统一承接桥接请求；Zotero 端按桥接、索引、PDF 适配、卡片拆成小模块，但不复制 Markdown、MathJax、词条写入或 FSRS 规则。
 
 ## 自动更新（v0.1.18 起生效）
 
@@ -256,4 +256,4 @@ Hz 已经把四段完整规格写死,**每段是一次独立会话的完整 prom
 2. 改了 `browser-extension/` → `chrome://extensions` **刷新↻扩展** + **刷新网页**。
 3. `node --check main.js`(及改过的 ext js)必须过。
 4. git:`cd .obsidian/plugins/lexis && git add <具体文件> && git commit && git push`。`data.json` 已 gitignore(含个人复习数据,别提交);别把 Syncthing 冲突文件(`data.sync-conflict-*.json`)一起 add 进去。改服务端记得 bump 两个 `manifest.json` 的 version(各自独立)。
-5. 发布:`gh release create <版本号> main.js curve.js review-view.js manifest.json styles.css --title ... --notes ...`(浏览器扩展不打包发布,靠用户手动重载/覆盖)。
+5. 发布前先运行 `node scripts/build-obsidian.js`；再执行 `gh release create <版本号> main.js manifest.json styles.css --title ... --notes ...`(浏览器扩展不打包发布,靠用户手动重载/覆盖)。
