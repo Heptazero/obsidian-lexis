@@ -274,6 +274,8 @@ const DEFAULT_SETTINGS = {
   bridgeToken: "",
   // 在 Obsidian 笔记里划词后,选区旁冒出"+ 加入词库"浮动药丸(阅读/编辑两种模式都生效)
   selectionPill: true,
+  // 划词加词后是否自动打开该词笔记;关掉则只建文件、不跳转,不打断当前阅读
+  openNoteAfterAdd: true,
   // 在 Obsidian 内置 PDF 阅读器里也高亮词库词(钩 pdf.js 文字层;扫描版无文字层则无效)
   enablePdfHighlight: true,
 };
@@ -2373,6 +2375,7 @@ module.exports = class LexisPlugin extends Plugin {
     // 从 PDF 划词加词时,新词笔记开到新标签页,免得把正在读的 PDF 顶掉
     const fromPdf = srcFile && srcFile.extension === "pdf" && !editor;
     if (existing) {
+      // 已存在:始终打开已有笔记(原行为),不受 openNoteAfterAdd 影响——该设置只管新建文件后要不要跳过去
       new Notice(`Lexis:「${existing.basename}」已存在,打开它`);
       this.app.workspace.getLeaf(fromPdf ? "tab" : false).openFile(existing);
       return;
@@ -2398,10 +2401,14 @@ module.exports = class LexisPlugin extends Plugin {
         // 从 PDF 加词:留在 PDF 页面,不打开新词笔记;立刻重建索引→当场高亮
         new Notice(`Lexis:已加入「${fileName}」,已在 PDF 高亮`);
         this.rebuildIndex(false);
-      } else {
+      } else if (this.settings.openNoteAfterAdd) {
         new Notice(`Lexis:已创建「${fileName}」`);
         await this.app.workspace.getLeaf(false).openFile(file);
         this.scheduleRebuild();
+      } else {
+        // 不跳转:留在当前阅读位置,立刻重建索引→新词当场高亮(与 PDF 分支一致,不走 800ms 防抖)
+        new Notice(`Lexis:已创建「${fileName}」`);
+        this.rebuildIndex(false);
       }
     } catch (err) { new Notice("Lexis 创建失败:" + (err?.message || err)); }
   }
@@ -3251,6 +3258,8 @@ class LexisSettingTab extends PluginSettingTab {
       .addToggle((t) => t.setValue(this.plugin.settings.enableLivePreview).setDisabled(!this.plugin.liveAvailable).onChange(async (v) => { this.plugin.settings.enableLivePreview = v; await save(); refresh(); }));
     new Setting(containerEl).setName("划词冒出「加入词库」药丸").setDesc("在笔记里(阅读/编辑模式)选中一段文字,松开鼠标后选区旁出现浮动按钮,点一下即建词并记出处。")
       .addToggle((t) => t.setValue(this.plugin.settings.selectionPill).onChange(async (v) => { this.plugin.settings.selectionPill = v; await save(); if (!v) this.plugin.removeSelPill(); }));
+    new Setting(containerEl).setName("加词后打开词笔记").setDesc("划词加入词库后自动打开该词的笔记;关闭后只创建文件、不跳转,不打断当前阅读。")
+      .addToggle((t) => t.setValue(this.plugin.settings.openNoteAfterAdd).onChange(async (v) => { this.plugin.settings.openNoteAfterAdd = v; await save(); }));
     new Setting(containerEl).setName("PDF 里也高亮").setDesc("在 Obsidian 内置 PDF 阅读器里高亮词库词,可悬浮看释义、点击跳转。仅对有文字层的 PDF 有效(扫描版/纯图片 PDF 无效)。")
       .addToggle((t) => t.setValue(this.plugin.settings.enablePdfHighlight).onChange(async (v) => { this.plugin.settings.enablePdfHighlight = v; await save(); if (v) this.plugin.setupPdfHighlight(); else { this.plugin.teardownPdfHighlight(); this.plugin.rescanPdfLayers(); } }));
     new Setting(containerEl).setName("默认高亮线型").setDesc("没被标签规则覆盖时使用。")
