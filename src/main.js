@@ -73,8 +73,8 @@ const DEFAULT_SETTINGS = {
   bridgeToken: "",
   // 在 Obsidian 笔记里划词后,选区旁冒出"+ 加入词库"浮动药丸(阅读/编辑两种模式都生效)
   selectionPill: true,
-  // 划词加词后是否自动打开该词笔记
-  openNoteAfterAdd: true,
+  // 划词药丸上次选中的词典
+  lastSelectionFolder: "",
   // 在 Obsidian 内置 PDF 阅读器里也高亮词库词(钩 pdf.js 文字层;扫描版无文字层则无效)
   enablePdfHighlight: true,
 };
@@ -2265,7 +2265,7 @@ module.exports = class LexisPlugin extends Plugin {
     if (!word) { new Notice(this.t("notice.selectWord")); return; }
     this.addWordFromSelection(word, editor, view);
   }
-  async addWordFromSelection(word, editor, view, targetFolder) {
+  async addWordFromSelection(word, editor, view, targetFolder, { openExisting = false } = {}) {
     const clean = (word || "").trim();
     const fileName = this.sanitizeName(clean);
     if (!fileName) { new Notice(this.t("notice.invalidWord")); return; }
@@ -2283,8 +2283,8 @@ module.exports = class LexisPlugin extends Plugin {
     // 从 PDF 划词加词时,新词笔记开到新标签页,免得把正在读的 PDF 顶掉
     const fromPdf = srcFile && srcFile.extension === "pdf" && !editor;
     if (existing) {
-      new Notice(this.t("notice.exists", { word: existing.basename }));
-      this.app.workspace.getLeaf(fromPdf ? "tab" : false).openFile(existing);
+      new Notice(this.t(openExisting ? "notice.exists" : "notice.existsNoOpen", { word: existing.basename }));
+      if (openExisting) this.app.workspace.getLeaf(fromPdf ? "tab" : false).openFile(existing);
       return;
     }
     try {
@@ -2304,18 +2304,9 @@ module.exports = class LexisPlugin extends Plugin {
       }
       const file = await this.app.vault.create(targetPath, content);
       this.recordEncounter(file, "add");
-      if (fromPdf) {
-        // 从 PDF 加词:留在 PDF 页面,不打开新词笔记;立刻重建索引→当场高亮
-        new Notice(this.t("notice.addedPdf", { word: fileName }));
-        this.rebuildIndex(false);
-      } else if (this.settings.openNoteAfterAdd) {
-        new Notice(this.t("notice.created", { word: fileName }));
-        await this.app.workspace.getLeaf(false).openFile(file);
-        this.scheduleRebuild();
-      } else {
-        new Notice(this.t("notice.created", { word: fileName }));
-        this.rebuildIndex(false);
-      }
+      // 划词添加只写入并留在原文；"添加"不再暗含一次页面跳转。
+      new Notice(this.t(fromPdf ? "notice.addedPdf" : "notice.created", { word: fileName }));
+      this.rebuildIndex(false);
     } catch (err) { new Notice(this.t("notice.createFailed", { error: err?.message || err })); }
   }
   // 遗忘曲线 SVG(FSRS 衰减)
@@ -2459,10 +2450,10 @@ module.exports = class LexisPlugin extends Plugin {
     pill.addEventListener("mousedown", (ev) => ev.preventDefault());
     if (known) {
       const b = pill.createSpan({ cls: "lexis-sel-pill-btn", text: `📖 ${this.t("selection.openExisting")}` });
-      b.addEventListener("click", (ev) => { ev.preventDefault(); ev.stopPropagation(); this.addFromPill(text); });
+      b.addEventListener("click", (ev) => { ev.preventDefault(); ev.stopPropagation(); this.addFromPill(text, undefined, { openExisting: true }); });
     } else {
       const dicts = this.dictFolders();
-      let selectedFolder = dicts[0] || "";
+      let selectedFolder = this.preferredSelectionFolder();
       const folderLabel = (f) => String(f || this.t("common.root")).split("/").pop();
       const addB = pill.createSpan({ cls: "lexis-sel-pill-btn", text: "＋" });
       addB.setAttribute("title", this.t("selection.add"));
@@ -2477,7 +2468,11 @@ module.exports = class LexisPlugin extends Plugin {
         folderB.addEventListener("click", (ev) => {
           ev.preventDefault(); ev.stopPropagation();
           const menu = new obsidian.Menu();
-          for (const f of dicts) menu.addItem((it) => it.setTitle(f || this.t("common.root")).setIcon(f === selectedFolder ? "check" : "folder").onClick(() => { selectedFolder = f; folderB.setText(`📁 ${folderLabel(f)}`); }));
+          for (const f of dicts) menu.addItem((it) => it.setTitle(f || this.t("common.root")).setIcon(f === selectedFolder ? "check" : "folder").onClick(() => {
+            selectedFolder = f;
+            folderB.setText(`📁 ${folderLabel(f)}`);
+            this.rememberSelectionFolder(f);
+          }));
           menu.showAtPosition({ x: ev.clientX, y: ev.clientY });
         });
       }
@@ -2498,11 +2493,23 @@ module.exports = class LexisPlugin extends Plugin {
     pill.style.left = left + "px";
     this._selPill = pill;
   }
-  addFromPill(text, folder) {
+  preferredSelectionFolder() {
+    const dicts = this.dictFolders();
+    const saved = this.normalizeFolder(this.settings.lastSelectionFolder || "");
+    return dicts.includes(saved) ? saved : (dicts[0] || "");
+  }
+  async rememberSelectionFolder(folder) {
+    const value = this.normalizeFolder(folder || "");
+    if (!this.dictFolders().includes(value) || this.settings.lastSelectionFolder === value) return;
+    this.settings.lastSelectionFolder = value;
+    await this.saveSettings();
+  }
+  async addFromPill(text, folder, options) {
     const view = this.app.workspace.getActiveViewOfType(obsidian.MarkdownView);
     const editor = (view && view.getMode && view.getMode() === "source" && view.editor) ? view.editor : null;
     this.removeSelPill();
-    this.addWordFromSelection(text, editor, view, folder);
+    if (folder) await this.rememberSelectionFolder(folder);
+    await this.addWordFromSelection(text, editor, view, folder, options);
   }
   // 把 alias 写进某词条文件的 frontmatter aliases(已存在则跳过,幂等)
   async addAliasToFile(file, alias) {
@@ -3189,8 +3196,6 @@ class LexisSettingTab extends PluginSettingTab {
       .addToggle((t) => t.setValue(this.plugin.settings.enableLivePreview).setDisabled(!this.plugin.liveAvailable).onChange(async (v) => { this.plugin.settings.enableLivePreview = v; await save(); refresh(); }));
     new Setting(hlSection).setName(t("settings.selectionPill"))
       .addToggle((t) => t.setValue(this.plugin.settings.selectionPill).onChange(async (v) => { this.plugin.settings.selectionPill = v; await save(); if (!v) this.plugin.removeSelPill(); }));
-    new Setting(hlSection).setName(t("settings.openAfterAdd"))
-      .addToggle((t) => t.setValue(this.plugin.settings.openNoteAfterAdd).onChange(async (v) => { this.plugin.settings.openNoteAfterAdd = v; await save(); }));
     new Setting(hlSection).setName(t("settings.pdfHighlight")).setDesc(t("settings.pdfHighlightDesc"))
       .addToggle((t) => t.setValue(this.plugin.settings.enablePdfHighlight).onChange(async (v) => { this.plugin.settings.enablePdfHighlight = v; await save(); if (v) this.plugin.setupPdfHighlight(); else { this.plugin.teardownPdfHighlight(); this.plugin.rescanPdfLayers(); } }));
     new Setting(hlSection).setName(t("settings.highlightStyle"))
