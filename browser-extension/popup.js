@@ -48,12 +48,12 @@ function renderMeta(meta, pendingAdds) {
   const parts = [];
   if (meta && meta.count != null) {
     const t = meta.syncedAt ? new Date(meta.syncedAt).toLocaleString() : "?";
-    parts.push(`已缓存 ${meta.count} 个词 · 上次 ${t}`);
+    parts.push(`${meta.count} 个词 · ${t}`);
   } else {
-    parts.push("还没同步过词库");
+    parts.push("尚未同步");
   }
   if (pendingAdds && pendingAdds.length) {
-    parts.push(`⏳ ${pendingAdds.length} 条待同步`);
+    parts.push(`${pendingAdds.length} 条待同步`);
   }
   $("meta").textContent = parts.join(" · ");
 }
@@ -83,8 +83,8 @@ $("test").addEventListener("click", async () => {
   await save();
   status("连接中…");
   const r = await chrome.runtime.sendMessage({ type: "ping" }).catch(() => null);
-  if (r && r.ok) status(`✅ 已连上 Lexis v${r.version || "?"}`, "ok");
-  else status("❌ 连不上。Obsidian 开着吗?桥接启用了吗?端口对吗?", "err");
+  if (r && r.ok) status(`已连接 · v${r.version || "?"}`, "ok");
+  else status("连接失败：请检查 Obsidian、桥接和端口", "err");
 });
 
 $("sync").addEventListener("click", async () => {
@@ -93,9 +93,9 @@ $("sync").addEventListener("click", async () => {
   $("sync").disabled = true;
   const r = await chrome.runtime.sendMessage({ type: "sync" }).catch(() => null);
   $("sync").disabled = false;
-  if (r && r.ok) { status(`✅ 同步了 ${r.meta.count} 个词`, "ok"); renderMeta(r.meta); }
-  else if (r && r.error === "bad-token") status("❌ 令牌不对,去 Lexis 设置里复制", "err");
-  else status("❌ 同步失败。Obsidian 开着且桥接启用?", "err");
+  if (r && r.ok) { status(`已同步 · ${r.meta.count} 个词`, "ok"); renderMeta(r.meta); }
+  else if (r && r.error === "bad-token") status("令牌错误", "err");
+  else status("同步失败：请检查 Obsidian 和桥接", "err");
 });
 
 for (const id of ["highlight", "showMemoryCurve", "style", "color"]) $(id).addEventListener("change", save);

@@ -30,11 +30,11 @@
 
   <div class="row"><label>主机</label><input type="text" id="host" placeholder="127.0.0.1"></div>
   <div class="row"><label>端口</label><input type="number" id="port" placeholder="45945"></div>
-  <div class="row"><label>令牌</label><input type="text" id="token" placeholder="粘贴 Lexis 设置里的令牌"></div>
+  <div class="row"><label>令牌</label><input type="text" id="token" placeholder="从 Lexis 设置复制"></div>
 
   <div class="btns">
-    <button id="test">测试连接</button>
-    <button id="sync">同步词库</button>
+    <button id="test">测试</button>
+    <button id="sync">同步</button>
   </div>
   <div class="status" id="status"></div>
   <div class="meta" id="meta"></div>
@@ -43,7 +43,7 @@
 
   <div class="toggle"><input type="checkbox" id="highlight"><label for="highlight" style="flex:1">在网页上高亮</label></div>
   <div class="toggle"><input type="checkbox" id="showMemoryCurve"><label for="showMemoryCurve" style="flex:1">悬浮卡显示记忆曲线</label></div>
-  <div class="toggle"><input type="checkbox" id="useObsidianStyle"><label for="useObsidianStyle" style="flex:1">跟随 Obsidian 配色(全局色 / 词典色 / 标签规则)</label></div>
+  <div class="toggle"><input type="checkbox" id="useObsidianStyle"><label for="useObsidianStyle" style="flex:1">跟随 Obsidian 配色</label></div>
   <div id="customStyle">
   <div class="row"><label>线型</label>
     <select id="style"><option value="wavy">波浪下划线</option><option value="underline">实线下划线</option><option value="background">背景色</option></select>
@@ -51,7 +51,7 @@
   <div class="row"><label>颜色</label><input type="color" id="color" style="flex:0 0 40px;height:28px;padding:0;border:none;background:none;cursor:pointer"></div>
   <div class="row"><label>透明度</label><input type="range" id="opacity" min="10" max="100" step="5" style="flex:1;height:24px"><span id="opacityVal" style="font-size:11px;min-width:32px;text-align:right"></span></div>
   </div>
-  <div class="hint">卡片宽高、字号、悬浮延迟与分类高亮开关均跟随 Obsidian Lexis 设置。高亮使用上次同步的本地缓存；修改后请同步词库并刷新网页。</div>
+  <div class="hint">修改 Obsidian 样式后，重新同步词库。</div>
 
   <script src="popup.js"></script>
 </body>

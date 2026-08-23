@@ -237,6 +237,8 @@
 .lexis-web-pop-content hr { margin: 8px 0; border: 0; border-top: 1px solid rgba(128, 128, 128, .25); }
 .lexis-web-pop-content img,
 .lexis-web-pop-content svg { max-width: 100%; height: auto; }
+.lexis-web-pop-content .lexis-web-curve { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
+.lexis-web-pop-content .lexis-web-curve svg { width: auto; height: 122px; max-width: none; }
 .lexis-web-pop-content table { width: 100%; border-collapse: collapse; }
 .lexis-web-pop-content th,
 .lexis-web-pop-content td { padding: 3px 5px; border: 1px solid rgba(128, 128, 128, .25); text-align: left; }

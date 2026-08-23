@@ -6,7 +6,7 @@ const { ItemView, Component, Notice } = require("obsidian");
 const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }) => class LexisReviewView extends ItemView {
   constructor(leaf, plugin) { super(leaf); this.plugin = plugin; this.queue = []; this.pos = 0; this.reviewed = 0; this.revealed = false; this.undoStack = []; this.options = {}; }
   getViewType() { return reviewViewType; }
-  getDisplayText() { return "Lexis 背单词"; }
+  getDisplayText() { return this.plugin.t("review.title"); }
   getIcon() { return "brain"; }
   async onOpen() {
     this.registerDomEvent(window, "keydown", (e) => this.onKey(e));
@@ -28,17 +28,17 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }) => 
     this.revealed = false;
     const item = this.currentItem = this.queue[this.pos];
     const topbar = c.createDiv({ cls: "lexis-rv-topbar" });
-    topbar.createDiv({ cls: "lexis-rv-progress", text: `已背 ${this.reviewed} · 剩 ${this.queue.length - this.pos}` });
+    topbar.createDiv({ cls: "lexis-rv-progress", text: this.plugin.t("review.progress", { done: this.reviewed, left: this.queue.length - this.pos }) });
     const topbtns = topbar.createDiv({ cls: "lexis-rv-topbtns" });
     if (this.undoStack.length) {
-      const ub = topbtns.createEl("button", { cls: "lexis-rv-undo", text: "↩ 撤销 (Z)" });
+      const ub = topbtns.createEl("button", { cls: "lexis-rv-undo", text: `↩ ${this.plugin.t("review.undo")}` });
       ub.addEventListener("click", () => this.undo());
     }
-    const sb = topbtns.createEl("button", { cls: "lexis-rv-undo", text: "跳过 (S)" });
+    const sb = topbtns.createEl("button", { cls: "lexis-rv-undo", text: this.plugin.t("review.skip") });
     sb.addEventListener("click", () => this.skip());
     const card = c.createDiv({ cls: "lexis-rv-card" });
     const wordEl = card.createDiv({ cls: "lexis-rv-word", text: item.file.basename });
-    wordEl.setAttribute("title", "在当前标签页打开原文");
+    wordEl.setAttribute("title", this.plugin.t("review.openSource"));
     wordEl.addEventListener("click", () => this.openSource(item.file));
     if (this.plugin.settings.cardFront === "cloze") this.applyClozeFront(wordEl, item);
     const tagsSet = this.plugin.getTags(item.file);
@@ -46,13 +46,13 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }) => 
       const tw = card.createDiv({ cls: "lexis-rv-tags" });
       for (const t of tagsSet) {
         const pill = tw.createSpan({ cls: "lexis-tag", text: "#" + t });
-        pill.setAttribute("title", `只背 #${t}`);
+        pill.setAttribute("title", this.plugin.t("review.onlyTag", { tag: t }));
         pill.addEventListener("click", () => this.plugin.openReview({ tag: t }));
       }
     }
     this.backEl = card.createDiv({ cls: "lexis-rv-back" });
     this.backEl.style.display = "none";
-    this.showBtn = c.createEl("button", { cls: "mod-cta lexis-rv-show", text: "显示答案 (空格)" });
+    this.showBtn = c.createEl("button", { cls: "mod-cta lexis-rv-show", text: this.plugin.t("review.show") });
     this.showBtn.addEventListener("click", () => this.reveal());
     this.rateBar = c.createDiv({ cls: "lexis-rv-rate" });
     this.rateBar.style.display = "none";
@@ -60,11 +60,11 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }) => 
     const isPhone = document.body.classList.contains("is-phone");
     this.rateBar.style.marginBottom = isPhone ? "" : bs + "px";
     if (isPhone) this.updateMobileRateBarOffset();
-    const grades = [[1, "重来"], [2, "较难"], [3, "记得"], [4, "简单"]];
-    for (const [g, label] of grades) {
+    const grades = [[1, "review.again"], [2, "review.hard"], [3, "review.good"], [4, "review.easy"]];
+    for (const [g, key] of grades) {
       const ivl = this.plugin.scheduleCard(item.card, g).interval;
       const b = this.rateBar.createEl("button", { cls: "lexis-rv-btn lexis-rv-g" + g });
-      b.createSpan({ cls: "lexis-rv-label", text: `${label} (${g})` });
+      b.createSpan({ cls: "lexis-rv-label", text: `${this.plugin.t(key)} (${g})` });
       b.createSpan({ cls: "lexis-rv-ivl", text: this.plugin.humanInterval(ivl) });
       b.addEventListener("click", () => this.grade(g));
     }
@@ -83,7 +83,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }) => 
       openOcc(); window.setTimeout(openOcc, 60);
       this.installAnswerInteractions();
     } catch (err) {
-      this.backEl.setText("内容渲染出错:" + (err?.message || err));
+      this.backEl.setText(this.plugin.t("review.renderFailed", { error: err?.message || err }));
       console.error("[Lexis] reveal error", err);
     }
   }
@@ -93,7 +93,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }) => 
     this.rateBar.style.setProperty("--lexis-mobile-navbar-height", `${navbarHeight}px`);
   }
   async grade(g) {
-    if (!this.revealed) { new Notice("Lexis:请先点「显示答案」"); return; }
+    if (!this.revealed) { new Notice(this.plugin.t("review.revealFirst")); return; }
     const item = this.currentItem;
     try {
       const prev = { s: item.card.s, d: item.card.d, due: item.card.due, last: item.card.last, reps: item.card.reps, lapses: item.card.lapses };
@@ -108,13 +108,13 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }) => 
       this.pos++;
       this.render();
     } catch (err) {
-      new Notice("Lexis 评分出错:" + (err?.message || err));
+      new Notice(this.plugin.t("review.gradeFailed", { error: err?.message || err }));
       console.error("[Lexis] grade error", err);
     }
   }
   async undo() {
     const u = this.undoStack.pop();
-    if (!u) { new Notice("Lexis:没有可撤销的"); return; }
+    if (!u) { new Notice(this.plugin.t("review.nothingUndo")); return; }
     try {
       await this.plugin.app.fileManager.processFrontMatter(u.item.file, (fm) => {
         if (u.wasNew) { delete fm["lexis-s"]; delete fm["lexis-d"]; delete fm["lexis-due"]; delete fm["lexis-last"]; delete fm["lexis-reps"]; delete fm["lexis-lapses"]; }
@@ -125,7 +125,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }) => 
       this.pos = u.pos;
       this.reviewed = Math.max(0, this.reviewed - 1);
       this.render();
-    } catch (err) { new Notice("Lexis 撤销出错:" + (err?.message || err)); }
+    } catch (err) { new Notice(this.plugin.t("review.undoFailed", { error: err?.message || err })); }
   }
   async openSource(file) {
     this.plugin.saveReviewSession(this.leaf, {
@@ -179,7 +179,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }) => 
     close.className = "lexis-rv-image-close";
     close.type = "button";
     close.textContent = "×";
-    close.setAttribute("aria-label", "关闭大图");
+    close.setAttribute("aria-label", this.plugin.t("review.closeImage"));
     close.addEventListener("click", () => this.closeImagePreview());
     overlay.addEventListener("click", () => this.closeImagePreview());
     overlay.append(image, close);
@@ -199,8 +199,8 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }) => 
   renderDone(c) {
     const d = c.createDiv({ cls: "lexis-rv-done" });
     d.createDiv({ cls: "lexis-rv-done-emoji", text: "🎉" });
-    d.createDiv({ text: this.reviewed ? `本轮背了 ${this.reviewed} 个,清空啦` : "现在没有到期的单词~" });
-    const b = d.createEl("button", { cls: "mod-cta", text: "再查一遍" });
+    d.createDiv({ text: this.reviewed ? this.plugin.t("review.done", { count: this.reviewed }) : this.plugin.t("review.noneDue") });
+    const b = d.createEl("button", { cls: "mod-cta", text: this.plugin.t("review.checkAgain") });
     b.onclick = () => { this.plugin.rebuildIndex(false); this.refresh(); };
     this.plugin.renderHeatmap(d.createDiv({ cls: "lexis-hm-wrap" }));
     c.style.paddingBottom = (this.plugin.settings.reviewBottomSpace || 70) + "px";

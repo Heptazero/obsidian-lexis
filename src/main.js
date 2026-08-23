@@ -9,6 +9,7 @@
 
 const obsidian = require("obsidian");
 const { Plugin, PluginSettingTab, Setting, Notice, TFolder, TFile, Component, MarkdownRenderer, ItemView, Modal, finishRenderMath } = obsidian;
+const { createI18n } = require("./i18n");
 const { buildCurveSVG } = require("./curve");
 const { createReviewView } = require("./review-view");
 
@@ -16,6 +17,7 @@ const LEXIS_REVIEW_VIEW = "lexis-review-view";
 const LEXIS_HOME_VIEW = "lexis-home-view";
 
 const DEFAULT_SETTINGS = {
+  language: "zh",
   // 收录范围:多个文件夹(逗号/换行分隔) ∪ 携带任一标签的笔记(并集)。
   // vocabFolders / excludeTags 不放默认值,迁移与兜底在 loadSettings 里做(留默认会盖掉用户老值)。
   vocabTags: "", // 带任一此标签的笔记也算词库(与文件夹取并集)
@@ -156,7 +158,7 @@ class LexisBridge {
     if (this.server) return;
     let http;
     try { http = require("http"); } catch (_e) {}
-    if (!http) { new Notice("Lexis:此平台不支持本地浏览器桥接(需桌面端)"); return; }
+    if (!http) { new Notice(this.plugin.t("notice.desktopBridge")); return; }
     const port = Number(this.plugin.settings.bridgePort) || 45945;
     const server = http.createServer((req, res) => {
       this.handle(req, res).catch((err) => {
@@ -165,7 +167,8 @@ class LexisBridge {
     });
     server.on("error", (err) => {
       this.server = null;
-      new Notice("Lexis 桥接启动失败:" + (err.code === "EADDRINUSE" ? `端口 ${port} 被占用` : (err.code || err.message)));
+      const reason = err.code === "EADDRINUSE" ? this.plugin.t("notice.portBusy", { port }) : (err.code || err.message);
+      new Notice(this.plugin.t("notice.bridgeFailed", { reason }));
     });
     server.listen(port, "127.0.0.1", () => this.plugin.updateStatusBar());
     this.server = server;
@@ -229,6 +232,7 @@ module.exports = class LexisPlugin extends Plugin {
   async onload() {
     try {
     await this.loadSettings();
+    this.i18n = createI18n(() => this.settings.language);
 
     this.index = new Map();
     this.vocabPaths = new Set();
@@ -258,17 +262,17 @@ module.exports = class LexisPlugin extends Plugin {
     this.statusBarEl = this.addStatusBarItem();
     if (this.statusBarEl) {
       this.statusBarEl.style.cursor = "pointer";
-      this.statusBarEl.setAttribute("aria-label", "Lexis:点击重建索引(图标右键可开始背单词)");
+      this.statusBarEl.setAttribute("aria-label", this.t("status.rebuildAria"));
       this.registerDomEvent(this.statusBarEl, "click", () => this.rebuildIndex(true));
     }
 
-    this.addCommand({ id: "rebuild-index", name: "重建单词索引", callback: () => this.rebuildIndex(true) });
-    this.addCommand({ id: "open-review", name: "开始背单词", callback: () => this.openReview() });
-    this.addCommand({ id: "add-selected-word", name: "把选中的词加为单词", callback: () => this.addSelectedWordCommand() });
-    this.addCommand({ id: "open-home", name: "打开 Lexis 主页", callback: () => this.openHome() });
+    this.addCommand({ id: "rebuild-index", name: this.t("command.rebuild"), callback: () => this.rebuildIndex(true) });
+    this.addCommand({ id: "open-review", name: this.t("command.review"), callback: () => this.openReview() });
+    this.addCommand({ id: "add-selected-word", name: this.t("command.addSelection"), callback: () => this.addSelectedWordCommand() });
+    this.addCommand({ id: "open-home", name: this.t("command.home"), callback: () => this.openHome() });
     this.addCommand({
       id: "toggle-current-page-highlights",
-      name: "切换当前页面的所有高亮",
+      name: this.t("command.toggleHighlights"),
       checkCallback: (checking) => {
         const page = this.currentHighlightPage();
         if (!page) return false;
@@ -277,24 +281,24 @@ module.exports = class LexisPlugin extends Plugin {
         return true;
       },
     });
-    this.addRibbonIcon("graduation-cap", "Lexis 主页", () => this.openHome());
-    this.addRibbonIcon("brain", "Lexis 背单词", () => this.openReview());
+    this.addRibbonIcon("graduation-cap", this.t("ribbon.home"), () => this.openHome());
+    this.addRibbonIcon("brain", this.t("ribbon.review"), () => this.openReview());
 
     // ---------- 生命周期命令(归档/恢复/常驻),只对当前打开的词条笔记生效 ----------
     this.addCommand({
       id: "archive-word",
-      name: "标为已掌握(归档)",
+      name: this.t("command.archive"),
       checkCallback: (checking) => {
         const file = this.app.workspace.getActiveFile();
         if (!file || !this.inVocabFolder(file.path) || this.readLifecycle(file).archived) return false;
         if (checking) return true;
-        this.setArchived(file, true).then(() => new Notice(`Lexis:「${file.basename}」已标为归档`));
+        this.setArchived(file, true).then(() => new Notice(this.t("notice.archived", { word: file.basename })));
         return true;
       },
     });
     this.addCommand({
       id: "restore-word",
-      name: "恢复(取消归档)",
+      name: this.t("command.restore"),
       checkCallback: (checking) => {
         const file = this.app.workspace.getActiveFile();
         if (!file || !this.inVocabFolder(file.path) || !this.readLifecycle(file).archived) return false;
@@ -305,36 +309,36 @@ module.exports = class LexisPlugin extends Plugin {
     });
     this.addCommand({
       id: "toggle-pin-word",
-      name: "切换常驻状态",
+      name: this.t("command.pin"),
       checkCallback: (checking) => {
         const file = this.app.workspace.getActiveFile();
         if (!file || !this.inVocabFolder(file.path)) return false;
         if (checking) return true;
         const pinned = this.readLifecycle(file).pinned;
-        this.setPinned(file, !pinned).then(() => new Notice(`Lexis:「${file.basename}」${!pinned ? "已常驻" : "已取消常驻"}`));
+        this.setPinned(file, !pinned).then(() => new Notice(this.t(!pinned ? "notice.pinned" : "notice.unpinned", { word: file.basename })));
         return true;
       },
     });
     this.addCommand({
       id: "migrate-familiar-tag-to-archived",
-      name: "迁移:把 #熟悉 标签的词批量标为已归档",
+      name: this.t("command.migrate"),
       callback: async () => {
         const files = this.app.vault.getMarkdownFiles().filter((f) => this.inVocabFolder(f.path) && this.getTags(f).has("熟悉") && !this.readLifecycle(f).archived && !this.readLifecycle(f).retired);
-        if (!files.length) { new Notice("Lexis:没有找到带 #熟悉 标签、且还没归档的词"); return; }
+        if (!files.length) { new Notice(this.t("notice.noFamiliar")); return; }
         for (const f of files) await this.app.fileManager.processFrontMatter(f, (fm) => { fm["lexis-status"] = "archived"; });
         this.rebuildIndex(false);
-        new Notice(`Lexis:已把 ${files.length} 个带 #熟悉 标签的词标为已归档`);
+        new Notice(this.t("notice.migrated", { count: files.length }));
       },
     });
     this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => {
       if (!(file instanceof TFile) || !this.inVocabFolder(file.path)) return;
       const { archived, pinned } = this.readLifecycle(file);
-      menu.addItem((it) => it.setTitle(archived ? "Lexis:恢复" : "Lexis:标为已掌握(归档)").setIcon(archived ? "archive-restore" : "archive").onClick(() => {
+      menu.addItem((it) => it.setTitle(this.t(archived ? "menu.restore" : "menu.archive")).setIcon(archived ? "archive-restore" : "archive").onClick(() => {
         if (archived) new LexisRestoreModal(this.app, this, file).open();
-        else this.setArchived(file, true).then(() => new Notice(`Lexis:「${file.basename}」已标为归档`));
+        else this.setArchived(file, true).then(() => new Notice(this.t("notice.archived", { word: file.basename })));
       }));
-      menu.addItem((it) => it.setTitle(pinned ? "Lexis:取消常驻" : "Lexis:常驻(不参与淘汰候选)").setIcon(pinned ? "pin-off" : "pin").onClick(() => {
-        this.setPinned(file, !pinned).then(() => new Notice(`Lexis:「${file.basename}」${!pinned ? "已常驻" : "已取消常驻"}`));
+      menu.addItem((it) => it.setTitle(this.t(pinned ? "menu.unpin" : "menu.pin")).setIcon(pinned ? "pin-off" : "pin").onClick(() => {
+        this.setPinned(file, !pinned).then(() => new Notice(this.t(!pinned ? "notice.pinned" : "notice.unpinned", { word: file.basename })));
       }));
     }));
 
@@ -382,13 +386,13 @@ module.exports = class LexisPlugin extends Plugin {
         // 多词典:每个文件夹一项「添加到 <folder>」
         for (const f of dicts) {
           menu.addItem((item) => item
-            .setTitle(`Lexis:添加“${label}”到 ${f}`)
+            .setTitle(this.t("menu.addTo", { word: label, folder: f }))
             .setIcon("book-plus")
             .onClick(() => this.addWordFromSelection(sel, editor, view, f)));
         }
       } else {
         menu.addItem((item) => item
-          .setTitle(`Lexis:添加到单词库 “${label}”`)
+          .setTitle(this.t("menu.add", { word: label }))
           .setIcon("book-plus")
           .onClick(() => this.addWordFromSelection(sel, editor, view)));
       }
@@ -402,7 +406,7 @@ module.exports = class LexisPlugin extends Plugin {
     }
     } catch (err) {
       console.error("[Lexis] onload 失败:", err?.stack || err);
-      if (typeof Notice !== "undefined") new Notice("Lexis 加载失败:" + (err?.message || err));
+      if (typeof Notice !== "undefined") new Notice(this.t("notice.loadFailed", { error: err?.message || err }));
     }
   }
 
@@ -440,6 +444,8 @@ module.exports = class LexisPlugin extends Plugin {
       this.settings.dicts = this.parseFolders(this.settings.vocabFolders).map((f) => ({ folder: f, template: "" }));
     }
   }
+
+  t(key, vars) { return this.i18n ? this.i18n.t(key, vars) : key; }
   async saveSettings() { await this.saveData(this.settings); }
   parseTagRulesText(text) {
     const rules = [];
@@ -1067,11 +1073,11 @@ module.exports = class LexisPlugin extends Plugin {
     this.updateStatusBar();
     this.refreshAllViews();
     if (notify) {
-      const aliasPart = this.settings.includeAliases ? `(含 ${aliases} 个别名)` : "";
+      const aliasPart = this.settings.includeAliases ? this.t("notice.aliasCount", { count: aliases }) : "";
       const nf = this.dictFolders().length, nt = this.vocabTagSet().size;
-      const scope = [nf ? `${nf} 个文件夹` : "", nt ? `${nt} 个标签` : ""].filter(Boolean).join(" + ") || "(空)";
-      const inlinePart = inlineEntries ? ` + ${inlineEntries} 条内联条目` : "";
-      new Notice(`Lexis:从 ${scope} 识别到 ${words} 个单词${aliasPart}${inlinePart}`);
+      const scope = [nf ? this.t("notice.scopeFolders", { count: nf }) : "", nt ? this.t("notice.scopeTags", { count: nt }) : ""].filter(Boolean).join(" + ") || this.t("notice.scopeEmpty");
+      const inlinePart = inlineEntries ? this.t("notice.inlineCount", { count: inlineEntries }) : "";
+      new Notice(this.t("notice.indexBuilt", { scope, words, aliases: aliasPart, inline: inlinePart }));
     }
     return this.stats;
   }
@@ -1089,11 +1095,11 @@ module.exports = class LexisPlugin extends Plugin {
   }
   updateStatusBar() {
     if (!this.statusBarEl) return;
-    const aliasPart = this.settings.includeAliases && this.stats.aliases ? ` +${this.stats.aliases}别名` : "";
-    const inlinePart = this.stats.inlineEntries ? ` +${this.stats.inlineEntries}条目` : "";
+    const aliasPart = this.settings.includeAliases && this.stats.aliases ? this.t("status.aliases", { count: this.stats.aliases }) : "";
+    const inlinePart = this.stats.inlineEntries ? this.t("status.inline", { count: this.stats.inlineEntries }) : "";
     const duePart = this.stats.due ? ` · ⏰${this.stats.due}` : "";
     const bridgePart = this.bridge?.running ? " · 🌐" : "";
-    this.statusBarEl.setText(`📕 ${this.stats.words} 词${aliasPart}${inlinePart}${duePart}${bridgePart}`);
+    this.statusBarEl.setText(this.t("status.summary", { words: this.stats.words, aliases: aliasPart, inline: inlinePart, due: duePart, bridge: bridgePart }));
   }
 
   // ---------- 着色 ----------
@@ -1223,7 +1229,7 @@ module.exports = class LexisPlugin extends Plugin {
     state.hidden = !state.hidden;
     this.applyPageHighlightState(page, state);
     if (state.hidden) this.removePopover();
-    new Notice(`Lexis:当前页面高亮已${state.hidden ? "隐藏" : "显示"}`);
+    new Notice(this.t(state.hidden ? "notice.highlightsHidden" : "notice.highlightsShown"));
   }
   refreshAllViews() {
     this.app.workspace.iterateAllLeaves((leaf) => {
@@ -1963,7 +1969,7 @@ module.exports = class LexisPlugin extends Plugin {
   async addExampleToWord(wordFile, sentence, sourceFile) {
     if (sourceFile) {
       const curated = await this.getCuratedSourcePaths(wordFile);
-      if (curated.has(sourceFile.basename.toLowerCase())) { new Notice("Lexis:这条已经在出处里了"); return true; }
+      if (curated.has(sourceFile.basename.toLowerCase())) { new Notice(this.t("notice.occurrenceExists")); return true; }
     }
     const link = sourceFile ? ` —— [[${sourceFile.basename}]]` : "";
     const line = `> ${(sentence || "").trim()}${link}`;
@@ -1973,9 +1979,9 @@ module.exports = class LexisPlugin extends Plugin {
       if (this.app.vault.process) await this.app.vault.process(wordFile, apply);
       else { const d = await this.app.vault.read(wordFile); await this.app.vault.modify(wordFile, apply(d)); }
       this.recordEncounter(wordFile, "add");
-      new Notice("Lexis:已收藏到出处");
+      new Notice(this.t("notice.occurrenceSaved"));
       return true;
-    } catch (err) { new Notice("Lexis 收藏失败:" + (err?.message || err)); return false; }
+    } catch (err) { new Notice(this.t("notice.occurrenceFailed", { error: err?.message || err })); return false; }
   }
 
   // ---------- 生命周期(归档/常驻/淘汰) ----------
@@ -2139,10 +2145,10 @@ module.exports = class LexisPlugin extends Plugin {
   }
   buildCloze(sentence, word) { return sentence.replace(new RegExp(boundedSource(word), "ig"), "______"); }
   humanInterval(days) {
-    if (days < 1) return "<1天";
-    if (days < 30) return days + "天";
-    if (days < 365) return Math.round(days / 30) + "个月";
-    return (days / 365).toFixed(1) + "年";
+    if (days < 1) return this.t("interval.ltDay");
+    if (days < 30) return this.t("interval.days", { count: days });
+    if (days < 365) return this.t("interval.months", { count: Math.round(days / 30) });
+    return this.t("interval.years", { count: (days / 365).toFixed(1) });
   }
   freqVal(file) { const fm = this.app.metadataCache.getFileCache(file)?.frontmatter; const n = parseInt(String(fm && fm.frequency).replace(/[^0-9]/g, ""), 10); return isNaN(n) ? Infinity : n; }
   collectVocabTags() { const s = new Set(); for (const f of this.app.vault.getMarkdownFiles()) { if (!this.inVocabFolder(f.path)) continue; for (const t of this.getTags(f)) s.add(t); } return [...s].sort(); }
@@ -2256,13 +2262,13 @@ module.exports = class LexisPlugin extends Plugin {
     let word = "", editor = null;
     if (view && view.editor && view.getMode && view.getMode() === "source") { word = (view.editor.getSelection() || "").trim(); editor = view.editor; }
     if (!word) { const sel = window.getSelection(); word = (sel ? sel.toString() : "").trim(); }
-    if (!word) { new Notice("Lexis:请先选中一个词"); return; }
+    if (!word) { new Notice(this.t("notice.selectWord")); return; }
     this.addWordFromSelection(word, editor, view);
   }
   async addWordFromSelection(word, editor, view, targetFolder) {
     const clean = (word || "").trim();
     const fileName = this.sanitizeName(clean);
-    if (!fileName) { new Notice("Lexis:无效的单词"); return; }
+    if (!fileName) { new Notice(this.t("notice.invalidWord")); return; }
     const reqFolder = this.normalizeFolder(targetFolder || "");
     const folder = (reqFolder && this.dictFolders().includes(reqFolder)) ? reqFolder : this.primaryVocabFolder();
     const targetPath = (folder ? folder + "/" : "") + fileName + ".md";
@@ -2277,7 +2283,7 @@ module.exports = class LexisPlugin extends Plugin {
     // 从 PDF 划词加词时,新词笔记开到新标签页,免得把正在读的 PDF 顶掉
     const fromPdf = srcFile && srcFile.extension === "pdf" && !editor;
     if (existing) {
-      new Notice(`Lexis:「${existing.basename}」已存在,打开它`);
+      new Notice(this.t("notice.exists", { word: existing.basename }));
       this.app.workspace.getLeaf(fromPdf ? "tab" : false).openFile(existing);
       return;
     }
@@ -2300,17 +2306,17 @@ module.exports = class LexisPlugin extends Plugin {
       this.recordEncounter(file, "add");
       if (fromPdf) {
         // 从 PDF 加词:留在 PDF 页面,不打开新词笔记;立刻重建索引→当场高亮
-        new Notice(`Lexis:已加入「${fileName}」,已在 PDF 高亮`);
+        new Notice(this.t("notice.addedPdf", { word: fileName }));
         this.rebuildIndex(false);
       } else if (this.settings.openNoteAfterAdd) {
-        new Notice(`Lexis:已创建「${fileName}」`);
+        new Notice(this.t("notice.created", { word: fileName }));
         await this.app.workspace.getLeaf(false).openFile(file);
         this.scheduleRebuild();
       } else {
-        new Notice(`Lexis:已创建「${fileName}」`);
+        new Notice(this.t("notice.created", { word: fileName }));
         this.rebuildIndex(false);
       }
-    } catch (err) { new Notice("Lexis 创建失败:" + (err?.message || err)); }
+    } catch (err) { new Notice(this.t("notice.createFailed", { error: err?.message || err })); }
   }
   // 遗忘曲线 SVG(FSRS 衰减)
   buildCurveSVG(card) {
@@ -2452,33 +2458,33 @@ module.exports = class LexisPlugin extends Plugin {
     // 阻止 mousedown 收起选区/夺焦(事件冒泡到 pill 即可覆盖子按钮)
     pill.addEventListener("mousedown", (ev) => ev.preventDefault());
     if (known) {
-      const b = pill.createSpan({ cls: "lexis-sel-pill-btn", text: "📖 已有,打开" });
+      const b = pill.createSpan({ cls: "lexis-sel-pill-btn", text: `📖 ${this.t("selection.openExisting")}` });
       b.addEventListener("click", (ev) => { ev.preventDefault(); ev.stopPropagation(); this.addFromPill(text); });
     } else {
       const dicts = this.dictFolders();
       let selectedFolder = dicts[0] || "";
-      const folderLabel = (f) => String(f || "(库根目录)").split("/").pop();
+      const folderLabel = (f) => String(f || this.t("common.root")).split("/").pop();
       const addB = pill.createSpan({ cls: "lexis-sel-pill-btn", text: "＋" });
-      addB.setAttribute("title", "把选中内容加入词库");
-      addB.setAttribute("aria-label", "加入词库");
+      addB.setAttribute("title", this.t("selection.add"));
+      addB.setAttribute("aria-label", this.t("selection.add"));
       addB.addEventListener("click", (ev) => {
         ev.preventDefault(); ev.stopPropagation();
         this.addFromPill(text, selectedFolder);
       });
       if (dicts.length > 1) {
         const folderB = pill.createSpan({ cls: "lexis-sel-pill-btn lexis-sel-pill-folder", text: `📁 ${folderLabel(selectedFolder)}` });
-        folderB.setAttribute("title", "选择加到哪个词典（文件夹）");
+        folderB.setAttribute("title", this.t("selection.chooseDictionary"));
         folderB.addEventListener("click", (ev) => {
           ev.preventDefault(); ev.stopPropagation();
           const menu = new obsidian.Menu();
-          for (const f of dicts) menu.addItem((it) => it.setTitle(f || "(库根目录)").setIcon(f === selectedFolder ? "check" : "folder").onClick(() => { selectedFolder = f; folderB.setText(`📁 ${folderLabel(f)}`); }));
+          for (const f of dicts) menu.addItem((it) => it.setTitle(f || this.t("common.root")).setIcon(f === selectedFolder ? "check" : "folder").onClick(() => { selectedFolder = f; folderB.setText(`📁 ${folderLabel(f)}`); }));
           menu.showAtPosition({ x: ev.clientX, y: ev.clientY });
         });
       }
       // 设为别名:选一个已有词条(标题或别名都行),把当前选中的词并入它的 aliases
       const aliasB = pill.createSpan({ cls: "lexis-sel-pill-btn", text: "🔗" });
-      aliasB.setAttribute("title", "把选中内容设为已有词条的别名");
-      aliasB.setAttribute("aria-label", "设为别名");
+      aliasB.setAttribute("title", this.t("selection.alias"));
+      aliasB.setAttribute("aria-label", this.t("selection.alias"));
       aliasB.addEventListener("click", (ev) => {
         ev.preventDefault(); ev.stopPropagation();
         this.removeSelPill();
@@ -2519,14 +2525,14 @@ module.exports = class LexisPlugin extends Plugin {
   async attachAlias(aliasText, file) {
     aliasText = (aliasText || "").trim();
     if (!aliasText || !(file instanceof TFile)) return;
-    if (aliasText.toLowerCase() === file.basename.toLowerCase()) { new Notice(`Lexis:「${aliasText}」就是这个词本身`); return; }
+    if (aliasText.toLowerCase() === file.basename.toLowerCase()) { new Notice(this.t("notice.aliasSelf", { word: aliasText })); return; }
     try {
       await this.addAliasToFile(file, aliasText);
       this.rebuildIndex(false);
       const ak = aliasText.toLowerCase();
       if (!this.index.has(ak)) this.index.set(ak, { display: aliasText, file, isAlias: true, tags: this.getTags(file) });
-      new Notice(`Lexis:已把「${aliasText}」加为「${file.basename}」的别名`);
-    } catch (err) { new Notice("Lexis 加别名失败:" + (err?.message || err)); }
+      new Notice(this.t("notice.aliasAdded", { alias: aliasText, word: file.basename }));
+    } catch (err) { new Notice(this.t("notice.aliasFailed", { error: err?.message || err })); }
   }
   openAndClose(file) { this.app.workspace.getLeaf(false).openFile(file); this.removePopover(); }
   async openInlineEntry(entry, newTab) {
@@ -2573,28 +2579,28 @@ module.exports = class LexisPlugin extends Plugin {
         const ds = fmtDate(cur);
         const cell = col.createDiv({ cls: "lexis-hm-cell" });
         if (cur > today) cell.addClass("lexis-hm-future");
-        else { const c = Number(log[ds]) || 0; total += c; if (c > 0) { cell.addClass("lexis-hm-l" + Math.min(4, Math.ceil((c / max) * 4))); cell.setAttribute("title", ds + ":" + c + " 次"); } else cell.setAttribute("title", ds + ":0"); }
+        else { const c = Number(log[ds]) || 0; total += c; if (c > 0) cell.addClass("lexis-hm-l" + Math.min(4, Math.ceil((c / max) * 4))); cell.setAttribute("title", this.t("home.heatmapDay", { date: ds, count: c })); }
         cur.setDate(cur.getDate() + 1);
       }
     }
-    el.createDiv({ cls: "lexis-hm-caption", text: `近 ${weeks} 周 · 共 ${total} 次复习` });
+    el.createDiv({ cls: "lexis-hm-caption", text: this.t("home.heatmapCaption", { weeks, count: total }) });
   }
   // ```lexis-home``` 代码块:笔记里内嵌一份主页摘要(统计 + 热力图),点热力图或按钮跳到真正的主页/开始复习
   renderHomeBlock(el) {
     el.addClass("lexis-home-block");
     const st = this.computeStats();
     const stats = el.createDiv({ cls: "lexis-home-stats" });
-    stats.createDiv({ cls: "lexis-stat", text: `⏰ 待复习 ${st.due}` });
-    stats.createDiv({ cls: "lexis-stat", text: `✨ 新词 ${st.fresh}` });
-    stats.createDiv({ cls: "lexis-stat", text: `📚 总计 ${st.total}` });
+    stats.createDiv({ cls: "lexis-stat", text: `⏰ ${this.t("home.due", { count: st.due })}` });
+    stats.createDiv({ cls: "lexis-stat", text: `✨ ${this.t("home.new", { count: st.fresh })}` });
+    stats.createDiv({ cls: "lexis-stat", text: `📚 ${this.t("home.total", { count: st.total })}` });
     const hmWrap = el.createDiv({ cls: "lexis-hm-wrap lexis-home-block-hm" });
-    hmWrap.setAttribute("title", "点击打开 Lexis 主页");
+    hmWrap.setAttribute("title", this.t("home.openTitle"));
     this.renderHeatmap(hmWrap);
     hmWrap.addEventListener("click", () => this.openHome());
     const btnRow = el.createDiv({ cls: "lexis-home-block-btns" });
-    const reviewBtn = btnRow.createEl("button", { cls: "mod-cta", text: "▶ 开始复习" });
+    const reviewBtn = btnRow.createEl("button", { cls: "mod-cta", text: `▶ ${this.t("home.start")}` });
     reviewBtn.addEventListener("click", (e) => { e.stopPropagation(); this.openReview(); });
-    const homeBtn = btnRow.createEl("button", { text: "📕 打开主页" });
+    const homeBtn = btnRow.createEl("button", { text: `📕 ${this.t("home.open")}` });
     homeBtn.addEventListener("click", (e) => { e.stopPropagation(); this.openHome(); });
   }
   // 把 el 内命中 word 的文本包一层 <b>(渲染完的 DOM 上原地操作,供出处预览统一复用)
@@ -2672,33 +2678,33 @@ module.exports = class LexisPlugin extends Plugin {
     const path = entry.file?.path || "";
     const slash = path.lastIndexOf("/");
     const folder = slash > 0 ? path.slice(0, slash) : "";
-    const shortFolder = (f) => String(f || "(根目录)").split("/").pop();
+    const shortFolder = (f) => String(f || this.t("common.root")).split("/").pop();
     const folderChip = meta.createSpan({ cls: "lexis-popover-chip", text: shortFolder(folder) });
-    folderChip.setAttribute("title", folder || "根目录");
+    folderChip.setAttribute("title", folder || this.t("common.root"));
     const dicts = this.dictFolders();
     if (dicts.length > 1) {
       folderChip.addClass("is-clickable");
-      folderChip.setAttribute("title", `${folder || "根目录"} —— 点击移到其他词典`);
+      folderChip.setAttribute("title", `${folder || this.t("common.root")} — ${this.t("popover.moveDictionary")}`);
       folderChip.addEventListener("click", (ev) => {
         ev.preventDefault(); ev.stopPropagation();
         const menu = new obsidian.Menu();
         for (const target of dicts) menu.addItem((it) => it.setTitle(shortFolder(target)).setIcon(target === folder ? "check" : "folder").onClick(async () => {
           if (target === folder) return;
           const result = await this.bridgeMoveWord({ key: baseKey, folder: target });
-          new Notice(result.ok ? `Lexis:已移到 ${shortFolder(target)}` : `Lexis:移动失败 ${result.error || ""}`);
+          new Notice(result.ok ? this.t("notice.moved", { folder: shortFolder(target) }) : this.t("notice.moveFailed", { error: result.error || this.t("common.failed") }));
           if (result.ok) this.removePopover();
         }));
         menu.showAtPosition({ x: ev.clientX, y: ev.clientY });
       });
     }
     const noteBtn = corner.createEl("button", { cls: "lexis-popover-action", text: "✎" });
-    noteBtn.setAttribute("title", "添加批注");
+    noteBtn.setAttribute("title", this.t("popover.addNote"));
     noteBtn.addEventListener("click", (ev) => {
       ev.preventDefault(); ev.stopPropagation();
       const existing = body.querySelector(".lexis-popover-note-row");
       if (existing) { existing.querySelector("input")?.focus(); return; }
       const row = body.createDiv({ cls: "lexis-popover-note-row" });
-      const input = row.createEl("input", { attr: { type: "text", placeholder: "写批注，回车保存，Esc 取消" } });
+      const input = row.createEl("input", { attr: { type: "text", placeholder: this.t("popover.notePlaceholder") } });
       input.addEventListener("click", (e) => e.stopPropagation());
       input.addEventListener("keydown", async (e) => {
         if (e.key === "Escape") { row.remove(); return; }
@@ -2708,19 +2714,19 @@ module.exports = class LexisPlugin extends Plugin {
         if (!note) { row.remove(); return; }
         input.disabled = true;
         const result = await this.bridgeAnnotate({ key: baseKey, note });
-        new Notice(result.ok ? `Lexis:已给「${entry.display}」添加批注` : `Lexis:批注失败 ${result.error || ""}`);
+        new Notice(result.ok ? this.t("notice.noteAdded", { word: entry.display }) : this.t("notice.noteFailed", { error: result.error || this.t("common.failed") }));
         this.removePopover();
       });
       body.prepend(row);
       input.focus();
     });
     const delBtn = corner.createEl("button", { cls: "lexis-popover-action is-danger", text: "🗑" });
-    delBtn.setAttribute("title", "从词库中删除");
+    delBtn.setAttribute("title", this.t("popover.deleteEntry"));
     delBtn.addEventListener("click", async (ev) => {
       ev.preventDefault(); ev.stopPropagation();
-      if (!window.confirm(`删除「${entry.display}」？`)) return;
+      if (!window.confirm(this.t("popover.deleteConfirm", { word: entry.display }))) return;
       const result = await this.bridgeDeleteWord(baseKey);
-      new Notice(result.ok ? `Lexis:已删除「${entry.display}」` : `Lexis:删除失败 ${result.error || ""}`);
+      new Notice(result.ok ? this.t("notice.deleted", { word: entry.display }) : this.t("notice.deleteFailed", { error: result.error || this.t("common.failed") }));
       this.removePopover();
     });
 
@@ -2731,14 +2737,14 @@ module.exports = class LexisPlugin extends Plugin {
       for (const tag of [...tags].sort()) {
         const pill = tagWrap.createSpan({ cls: "lexis-popover-tag", text: `#${tag}` });
         const remove = pill.createSpan({ cls: "lexis-popover-tag-remove", text: " ×" });
-        remove.setAttribute("title", "删除标签");
+        remove.setAttribute("title", this.t("popover.deleteTag"));
         remove.addEventListener("click", async (ev) => {
           ev.preventDefault(); ev.stopPropagation();
           const result = await this.bridgeTagWord({ key: baseKey, tag, action: "remove" });
           if (result.ok) { tags.delete(tag); entry.tags = new Set(result.tags); renderTags(); }
         });
       }
-      const add = tagWrap.createSpan({ cls: "lexis-popover-tag is-add", text: tags.size ? "+" : "+ 标签" });
+      const add = tagWrap.createSpan({ cls: "lexis-popover-tag is-add", text: tags.size ? "+" : this.t("popover.addTag") });
       add.addEventListener("click", (ev) => {
         ev.preventDefault(); ev.stopPropagation();
         const menu = new obsidian.Menu();
@@ -2771,17 +2777,17 @@ module.exports = class LexisPlugin extends Plugin {
     const meta = pop.createDiv({ cls: "lexis-popover-meta" });
     if (!entry.inline) {
       pop.addClass("has-corner-actions");
-      const archiveBtn = meta.createSpan({ cls: "lexis-popover-archive", text: entry.archived ? "↩ 恢复" : "📦 归档" });
-      archiveBtn.setAttribute("title", entry.archived ? "取消归档,重新收进复习队列" : "退出高亮 + 暂停复习,悬停仍可查");
+      const archiveBtn = meta.createSpan({ cls: "lexis-popover-archive", text: entry.archived ? `↩ ${this.t("popover.restore")}` : `📦 ${this.t("popover.archive")}` });
+      archiveBtn.setAttribute("title", this.t(entry.archived ? "popover.restoreTitle" : "popover.archiveTitle"));
       archiveBtn.addEventListener("click", (ev) => {
         ev.stopPropagation();
         if (entry.archived) new LexisRestoreModal(this.app, this, entry.file).open();
-        else this.setArchived(entry.file, true).then(() => new Notice(`Lexis:「${entry.file.basename}」已标为归档`));
+        else this.setArchived(entry.file, true).then(() => new Notice(this.t("notice.archived", { word: entry.file.basename })));
         this.removePopover();
       });
     }
     const body = pop.createDiv({ cls: "lexis-popover-body" });
-    body.setText("加载中…");
+    body.setText(this.t("common.loading"));
     pop.addEventListener("mouseenter", () => window.clearTimeout(this._hideTimer));
     pop.addEventListener("mouseleave", () => this.scheduleHide());
     spanEl.addEventListener("mouseleave", () => this.scheduleHide(), { once: true });
@@ -2802,21 +2808,21 @@ module.exports = class LexisPlugin extends Plugin {
       }
       if (!entry.inline && this.settings.showOccurrences) {
         body.createDiv({ cls: "lexis-divider" });
-        const occTitle = body.createDiv({ cls: "lexis-section-title", text: "📍 出现过的地方 …" });
+        const occTitle = body.createDiv({ cls: "lexis-section-title", text: `📍 ${this.t("popover.occurrences", { count: "…" })}` });
         const occWrap = body.createDiv();
-        occWrap.setText("搜索中…");
+        occWrap.setText(this.t("common.searching"));
         this.findOccurrences(entry.display).then(async (rawList) => {
           if (this._popover !== pop) return;
           const curated = await this.getCuratedSourcePaths(entry.file);
           const list = rawList.filter((o) => !curated.has(o.file.basename.toLowerCase()));
-          occTitle.setText(`📍 出现过的地方 (${list.length})`);
+          occTitle.setText(`📍 ${this.t("popover.occurrences", { count: list.length })}`);
           occWrap.empty();
-          if (!list.length) occWrap.createDiv({ cls: "lexis-occ", text: "(没有未收藏的新出处)" });
+          if (!list.length) occWrap.createDiv({ cls: "lexis-occ", text: this.t("popover.noOccurrences") });
           else for (const o of list) {
             const d = occWrap.createDiv({ cls: "lexis-occ" });
             await this.renderSentence(d, o.sentence, entry.display, this._popoverComp);
             const add = d.createSpan({ cls: "lexis-occ-add", text: " ➕" });
-            add.setAttribute("title", "收藏到出处");
+            add.setAttribute("title", this.t("popover.addOccurrence"));
             add.addEventListener("click", async () => {
               if (add.dataset.done) return;
               add.dataset.done = "1";
@@ -2829,7 +2835,7 @@ module.exports = class LexisPlugin extends Plugin {
         });
       }
       this.positionPopover(pop, spanEl);
-    } catch (err) { body.setText("读取失败:" + (err?.message || err)); }
+    } catch (err) { body.setText(this.t("popover.readFailed", { error: err?.message || err })); }
   }
   positionPopover(pop, spanEl) {
     const r = spanEl.getBoundingClientRect();
@@ -2867,7 +2873,7 @@ class LexisAliasPicker extends (obsidian.FuzzySuggestModal || class {}) {
     this.plugin = plugin;
     this.aliasText = aliasText;
     this.onPick = onPick;
-    if (this.setPlaceholder) this.setPlaceholder(`把「${aliasText}」设为谁的别名(搜标题或已有别名)`);
+    if (this.setPlaceholder) this.setPlaceholder(this.plugin.t("selection.aliasPrompt", { alias: aliasText }));
   }
   getItems() {
     const seen = new Set(), out = [];
@@ -2880,7 +2886,7 @@ class LexisAliasPicker extends (obsidian.FuzzySuggestModal || class {}) {
     }
     return out;
   }
-  getItemText(e) { return e.isAlias ? `${e.display}  —「${e.file.basename}」的别名` : e.display; }
+  getItemText(e) { return e.isAlias ? this.plugin.t("selection.aliasItem", { alias: e.display, word: e.file.basename }) : e.display; }
   onChooseItem(e) { if (e && e.file) this.onPick(e); }
 }
 
@@ -2894,16 +2900,16 @@ class LexisRestoreModal extends Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.addClass("lexis-restore-modal");
-    contentEl.createEl("h3", { text: `恢复「${this.file.basename}」` });
-    contentEl.createEl("p", { text: "这个词已经归档。重新收进复习队列时,原来的 FSRS 记忆进度要保留还是重置?" });
+    contentEl.createEl("h3", { text: this.plugin.t("restore.title", { word: this.file.basename }) });
+    contentEl.createEl("p", { text: this.plugin.t("restore.question") });
     const row = contentEl.createDiv({ cls: "lexis-modal-btns" });
-    const keepBtn = row.createEl("button", { cls: "mod-cta", text: "保留原有进度" });
+    const keepBtn = row.createEl("button", { cls: "mod-cta", text: this.plugin.t("restore.keep") });
     keepBtn.addEventListener("click", async () => {
       await this.plugin.setArchived(this.file, false);
-      new Notice(`Lexis:「${this.file.basename}」已恢复(保留进度)`);
+      new Notice(this.plugin.t("restore.kept", { word: this.file.basename }));
       this.close();
     });
-    const resetBtn = row.createEl("button", { text: "重置为新词" });
+    const resetBtn = row.createEl("button", { text: this.plugin.t("restore.reset") });
     resetBtn.addEventListener("click", async () => {
       await this.app.fileManager.processFrontMatter(this.file, (fm) => {
         delete fm["lexis-status"];
@@ -2913,7 +2919,7 @@ class LexisRestoreModal extends Modal {
       delete this.plugin.settings.reviewHistory[this.file.path];
       await this.plugin.saveSettings();
       this.plugin.rebuildIndex(false);
-      new Notice(`Lexis:「${this.file.basename}」已恢复(重置为新词)`);
+      new Notice(this.plugin.t("restore.resetDone", { word: this.file.basename }));
       this.close();
     });
   }
@@ -2932,18 +2938,18 @@ class LexisHomeView extends ItemView {
     c.createEl("h3", { text: "📕 Lexis" });
     const st = this.plugin.computeStats();
     const stats = c.createDiv({ cls: "lexis-home-stats" });
-    stats.createDiv({ cls: "lexis-stat", text: `⏰ 待复习 ${st.due}` });
-    stats.createDiv({ cls: "lexis-stat", text: `✨ 新词 ${st.fresh}` });
-    stats.createDiv({ cls: "lexis-stat", text: `📚 总计 ${st.total}` });
+    stats.createDiv({ cls: "lexis-stat", text: `⏰ ${this.plugin.t("home.due", { count: st.due })}` });
+    stats.createDiv({ cls: "lexis-stat", text: `✨ ${this.plugin.t("home.new", { count: st.fresh })}` });
+    stats.createDiv({ cls: "lexis-stat", text: `📚 ${this.plugin.t("home.total", { count: st.total })}` });
     this.plugin.renderHeatmap(c.createDiv({ cls: "lexis-hm-wrap" }));
 
-    c.createEl("h4", { text: "开始复习" });
+    c.createEl("h4", { text: this.plugin.t("home.start") });
     const tags = this.plugin.collectVocabTags();
     let selTag = "", selOrder = "due";
-    new Setting(c).setName("集合").addDropdown((dd) => { dd.addOption("", "全部"); for (const t of tags) dd.addOption(t, "#" + t); dd.setValue(selTag); dd.onChange((v) => { selTag = v; }); });
-    new Setting(c).setName("顺序").addDropdown((dd) => { dd.addOption("due", "到期优先").addOption("frequency", "词频(高频先)").addOption("random", "随机").setValue(selOrder); dd.onChange((v) => { selOrder = v; }); });
-    new Setting(c).addButton((b) => b.setButtonText("▶ 开始复习").setCta().onClick(() => this.plugin.openReview({ tag: selTag, order: selOrder })))
-      .addExtraButton((b) => b.setIcon("refresh-cw").setTooltip("刷新").onClick(() => this.render()));
+    new Setting(c).setName(this.plugin.t("home.collection")).addDropdown((dd) => { dd.addOption("", this.plugin.t("common.all")); for (const t of tags) dd.addOption(t, "#" + t); dd.setValue(selTag); dd.onChange((v) => { selTag = v; }); });
+    new Setting(c).setName(this.plugin.t("home.order")).addDropdown((dd) => { dd.addOption("due", this.plugin.t("home.dueFirst")).addOption("frequency", this.plugin.t("home.frequency")).addOption("random", this.plugin.t("home.random")).setValue(selOrder); dd.onChange((v) => { selOrder = v; }); });
+    new Setting(c).addButton((b) => b.setButtonText(`▶ ${this.plugin.t("home.start")}`).setCta().onClick(() => this.plugin.openReview({ tag: selTag, order: selOrder })))
+      .addExtraButton((b) => b.setIcon("refresh-cw").setTooltip(this.plugin.t("common.refresh")).onClick(() => this.render()));
 
     this.renderRetireCandidates(c);
   }
@@ -2951,9 +2957,9 @@ class LexisHomeView extends ItemView {
   async renderRetireCandidates(c) {
     const days = this.plugin.settings.retireCandidateDays ?? 90;
     const wrap = c.createDiv({ cls: "lexis-retire-wrap" });
-    wrap.createEl("h4", { text: "🗑️ 淘汰候选" });
+    wrap.createEl("h4", { text: `🗑️ ${this.plugin.t("home.retire")}` });
     // 阈值直接在主页调,不用跑去设置页;拖动时防抖,别每挪一格就重算一遍(候选计算要挨个查出处数,不便宜)
-    new Setting(wrap).setName("入库/未相遇天数阈值").setDesc("入库满这么多天、且这么多天没自然相遇过的词才会入列。")
+    new Setting(wrap).setName(this.plugin.t("home.retireThreshold")).setDesc(this.plugin.t("home.retireThresholdDesc"))
       .addSlider((s) => s.setLimits(14, 365, 1).setValue(days).setDynamicTooltip().onChange((v) => {
         this.plugin.settings.retireCandidateDays = v;
         this.plugin.saveSettings();
@@ -2961,12 +2967,12 @@ class LexisHomeView extends ItemView {
         this._retireRenderTimer = window.setTimeout(() => this.render(), 400);
       }));
     const listWrap = wrap.createDiv();
-    listWrap.setText("计算中…");
+    listWrap.setText(this.plugin.t("home.calculating"));
     let candidates;
     try { candidates = await this.plugin.buildRetireCandidates(); } catch (_e) { candidates = []; }
     if (!listWrap.isConnected) return; // 算的过程中视图已经关掉/刷新了,別再画
     listWrap.empty();
-    if (!candidates.length) { listWrap.createDiv({ cls: "lexis-dim", text: "暂时没有候选。" }); return; }
+    if (!candidates.length) { listWrap.createDiv({ cls: "lexis-dim", text: this.plugin.t("home.noCandidates") }); return; }
     const selected = new Set();
     const rowByPath = new Map();
     const removeRows = (paths) => { for (const p of paths) { const row = rowByPath.get(p); if (row) row.remove(); rowByPath.delete(p); selected.delete(p); } };
@@ -2978,20 +2984,20 @@ class LexisHomeView extends ItemView {
       const info = row.createDiv({ cls: "lexis-retire-info" });
       const nameEl = info.createEl("a", { text: cand.display, href: "#", cls: "lexis-retire-name" });
       nameEl.addEventListener("click", (e) => { e.preventDefault(); this.plugin.app.workspace.getLeaf(false).openFile(cand.file); });
-      info.createDiv({ cls: "lexis-retire-meta", text: `入库 ${cand.created} · 相遇 ${cand.encounterCount} 次(悬停 ${cand.hoverCount})· 出处 ${cand.occCount} 条 · 距上次相遇 ${cand.sinceLast} 天` });
+      info.createDiv({ cls: "lexis-retire-meta", text: this.plugin.t("home.candidateMeta", { created: cand.created, encounters: cand.encounterCount, hovers: cand.hoverCount, occurrences: cand.occCount, days: cand.sinceLast }) });
       const btns = row.createDiv({ cls: "lexis-retire-btns" });
-      const evictBtn = btns.createEl("button", { text: "🗑️ 淘汰" });
+      const evictBtn = btns.createEl("button", { text: `🗑️ ${this.plugin.t("home.evict")}` });
       evictBtn.addEventListener("click", async () => { await this.plugin.setRetired(cand.file, true); removeRows([cand.file.path]); });
-      const pinBtn = btns.createEl("button", { text: "📌 留下" });
+      const pinBtn = btns.createEl("button", { text: `📌 ${this.plugin.t("home.keep")}` });
       pinBtn.addEventListener("click", async () => { await this.plugin.setPinned(cand.file, true); removeRows([cand.file.path]); });
-      const archiveBtn = btns.createEl("button", { text: "📦 已掌握" });
+      const archiveBtn = btns.createEl("button", { text: `📦 ${this.plugin.t("home.mastered")}` });
       archiveBtn.addEventListener("click", async () => { await this.plugin.setArchived(cand.file, true); removeRows([cand.file.path]); });
     }
     const bulk = wrap.createDiv({ cls: "lexis-retire-bulk" });
     const bulkRun = async (fn) => { const paths = [...selected]; for (const p of paths) { const f = this.plugin.app.vault.getAbstractFileByPath(p); if (f) await fn(f); } removeRows(paths); };
-    bulk.createEl("button", { text: "批量淘汰" }).addEventListener("click", () => bulkRun((f) => this.plugin.setRetired(f, true)));
-    bulk.createEl("button", { text: "批量留下" }).addEventListener("click", () => bulkRun((f) => this.plugin.setPinned(f, true)));
-    bulk.createEl("button", { text: "批量已掌握" }).addEventListener("click", () => bulkRun((f) => this.plugin.setArchived(f, true)));
+    bulk.createEl("button", { text: this.plugin.t("home.bulkEvict") }).addEventListener("click", () => bulkRun((f) => this.plugin.setRetired(f, true)));
+    bulk.createEl("button", { text: this.plugin.t("home.bulkKeep") }).addEventListener("click", () => bulkRun((f) => this.plugin.setPinned(f, true)));
+    bulk.createEl("button", { text: this.plugin.t("home.bulkMastered") }).addEventListener("click", () => bulkRun((f) => this.plugin.setArchived(f, true)));
   }
   onClose() {}
 }
@@ -3061,10 +3067,24 @@ class LexisSettingTab extends PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
+    const t = (key, vars) => this.plugin.t(key, vars);
     const accentHex = cssColorToHex(getComputedStyle(document.body).getPropertyValue("--text-accent"));
     const save = () => this.plugin.saveSettings();
     const refresh = () => this.plugin.refreshAllViews();
-    containerEl.createEl("h3", { text: "Lexis 设置" });
+    containerEl.createEl("h3", { text: t("settings.title") });
+
+    new Setting(containerEl).setName(t("language.name"))
+      .addDropdown((dd) => dd.addOption("zh", t("language.zh")).addOption("en", t("language.en")).setValue(this.plugin.settings.language || "zh").onChange(async (value) => {
+        this.plugin.settings.language = value === "en" ? "en" : "zh";
+        await save();
+        this.plugin.refreshAllViews();
+        this.app.workspace.iterateAllLeaves((leaf) => {
+          const type = leaf?.view?.getViewType?.();
+          if (type === LEXIS_HOME_VIEW || type === LEXIS_REVIEW_VIEW) leaf.view.render?.();
+        });
+        new Notice(t("language.reload"));
+        this.display();
+      }));
 
     const folders = this.app.vault.getAllLoadedFiles().filter((f) => f instanceof TFolder).map((f) => f.path).filter((p) => p && p !== "/").sort();
     const mdFiles = this.app.vault.getMarkdownFiles().map((f) => f.path).sort();
@@ -3080,8 +3100,8 @@ class LexisSettingTab extends PluginSettingTab {
     })();
     const tagSuggest = (comp, apply) => { if (hasSuggest) new PathSuggest(this.app, comp.inputEl, () => allTags, (v) => { comp.setValue(v); apply(v); }, { multi: true }); };
 
-    const dictSection = this.section(containerEl, "词典与词库来源", { open: true, desc: "文件夹、标签、别名——决定哪些笔记算词条" });
-    new Setting(dictSection).setDesc("每行一个词典:文件夹(含子文件夹)里每个笔记标题算一个词条,可选模板(留空=空白笔记)。新词默认落第一行。").setHeading();
+    const dictSection = this.section(containerEl, t("settings.dictionary"), { open: true });
+    new Setting(dictSection).setDesc(t("settings.dictionaryDesc")).setHeading();
     const dictsWrap = dictSection.createDiv();
     const renderDicts = () => {
       dictsWrap.empty();
@@ -3089,12 +3109,12 @@ class LexisSettingTab extends PluginSettingTab {
         const row = dictsWrap.createDiv();
         row.style.display = "flex"; row.style.gap = "6px"; row.style.marginBottom = "6px"; row.style.alignItems = "center";
         const fIn = new obsidian.TextComponent(row);
-        fIn.setPlaceholder("文件夹 如 01-word").setValue(d.folder || "");
+        fIn.setPlaceholder(t("settings.folderPlaceholder")).setValue(d.folder || "");
         fIn.inputEl.style.flex = "1";
         const onFolder = async (v) => { d.folder = (v || "").trim(); await save(); this.plugin.rebuildIndex(false); this.renderStats(); };
         fIn.onChange(onFolder);
         const tIn = new obsidian.TextComponent(row);
-        tIn.setPlaceholder("模板路径,留空=空白笔记").setValue(d.template || "");
+        tIn.setPlaceholder(t("settings.templatePlaceholder")).setValue(d.template || "");
         tIn.inputEl.style.flex = "1.4";
         const onTpl = async (v) => { d.template = (v || "").trim(); await save(); };
         tIn.onChange(onTpl);
@@ -3106,27 +3126,27 @@ class LexisSettingTab extends PluginSettingTab {
         const globalColor = this.plugin.settings.highlightColor || accentHex;
         const cComp = new obsidian.ColorComponent(row);
         const swatch = () => cComp.colorPickerEl || cComp.containerEl || null;
-        const markInherit = (inherit) => { const el = swatch(); if (el) { el.style.opacity = inherit ? "0.4" : "1"; el.title = inherit ? "未设置,跟随全局/主题色;点选即设为这个词典的专属色" : "这个词典的专属高亮色(库内+网页)"; } };
+        const markInherit = (inherit) => { const el = swatch(); if (el) { el.style.opacity = inherit ? "0.4" : "1"; el.title = inherit ? t("settings.followGlobal") : t("settings.dictionaryColor"); } };
         cComp.setValue(d.color || globalColor);
         markInherit(!d.color);
         cComp.onChange(async (v) => { d.color = v; markInherit(false); await save(); refresh(); });
-        new obsidian.ExtraButtonComponent(row).setIcon("reset").setTooltip("恢复跟随全局/主题色").onClick(async () => { d.color = ""; cComp.setValue(globalColor); markInherit(true); await save(); refresh(); });
-        new obsidian.ExtraButtonComponent(row).setIcon("trash").setTooltip("删除这个词典").onClick(async () => { this.plugin.settings.dicts.splice(i, 1); await save(); this.plugin.rebuildIndex(false); renderDicts(); this.renderStats(); });
+        new obsidian.ExtraButtonComponent(row).setIcon("reset").setTooltip(t("settings.resetGlobal")).onClick(async () => { d.color = ""; cComp.setValue(globalColor); markInherit(true); await save(); refresh(); });
+        new obsidian.ExtraButtonComponent(row).setIcon("trash").setTooltip(t("settings.deleteDictionary")).onClick(async () => { this.plugin.settings.dicts.splice(i, 1); await save(); this.plugin.rebuildIndex(false); renderDicts(); this.renderStats(); });
       });
-      const addDict = dictsWrap.createEl("button", { text: "+ 添加词典" });
+      const addDict = dictsWrap.createEl("button", { text: t("settings.addDictionary") });
       addDict.style.marginTop = "2px";
       addDict.addEventListener("click", async () => { this.plugin.settings.dicts.push({ folder: "", template: "" }); await save(); renderDicts(); });
     };
     renderDicts();
-    new Setting(dictSection).setName("按标签收录").setDesc("带这些标签的笔记也算词库(与文件夹并集),逗号或空格分隔。")
+    new Setting(dictSection).setName(t("settings.tagsAsEntries")).setDesc(t("settings.tagsAsEntriesDesc"))
       .addText((t) => {
         t.setPlaceholder("词汇 术语").setValue(this.plugin.settings.vocabTags);
         const apply = async (v) => { this.plugin.settings.vocabTags = v; await save(); this.plugin.rebuildIndex(true); this.renderStats(); };
         t.onChange(apply); tagSuggest(t, apply);
       });
-    new Setting(dictSection).setName("别名也算单词").setDesc("启用后,单词笔记 frontmatter 里的别名也会被识别与高亮。")
+    new Setting(dictSection).setName(t("settings.includeAliases"))
       .addToggle((t) => t.setValue(this.plugin.settings.includeAliases).onChange(async (v) => { this.plugin.settings.includeAliases = v; await save(); this.plugin.rebuildIndex(false); this.renderStats(); }));
-    new Setting(dictSection).setName("别名属性名").setDesc("除 aliases/alias 外还从哪些属性读别名(逗号分隔),例如存过去式/复数变形的 past,forms。")
+    new Setting(dictSection).setName(t("settings.aliasProperties")).setDesc(t("settings.aliasPropertiesDesc"))
       .addText((t) => {
         t.setPlaceholder("past,forms,variants").setValue(this.plugin.settings.aliasSources);
         const apply = async (v) => { this.plugin.settings.aliasSources = (v || "").trim(); await save(); if (this.plugin.settings.includeAliases) { this.plugin.rebuildIndex(false); this.renderStats(); } };
@@ -3134,17 +3154,17 @@ class LexisSettingTab extends PluginSettingTab {
         if (hasSuggest) new PathSuggest(this.app, t.inputEl, () => allProps, (v) => { t.setValue(v); apply(v); }, { multi: true, sep: "," });
       });
 
-    const inlineSection = this.section(containerEl, "内联条目库", { desc: "正文里 词条::批注 这种轻量词条,不参与复习" });
-    new Setting(inlineSection).setName("启用内联条目").setDesc("带 lexis-inline: true 属性或 #lexis-inline 标签的笔记可定义轻量词条,只高亮与悬浮批注。")
+    const inlineSection = this.section(containerEl, t("settings.inline"), { desc: t("settings.inlineDesc") });
+    new Setting(inlineSection).setName(t("settings.enableInline")).setDesc(t("settings.enableInlineDesc"))
       .addToggle((t) => t.setValue(this.plugin.settings.inlineEntriesEnabled).onChange(async (v) => { this.plugin.settings.inlineEntriesEnabled = v; await save(); await this.plugin.rebuildIndex(false); this.renderStats(); }));
-    new Setting(inlineSection).setName("内联条目分隔符").setDesc("默认 ::,例如 人物::批注。改动后会重新解析所有内联条目笔记。")
+    new Setting(inlineSection).setName(t("settings.inlineDelimiter")).setDesc(t("settings.inlineDelimiterDesc"))
       .addText((t) => t.setPlaceholder("::").setValue(this.plugin.inlineDelimiter()).onChange(async (v) => { this.plugin.settings.inlineEntryDelimiter = (v || "").trim() || "::"; await save(); await this.plugin.rebuildIndex(false); this.renderStats(); }));
     const categoryColorsWrap = inlineSection.createDiv();
     const renderCategoryColors = () => {
       categoryColorsWrap.empty();
       const categories = this.plugin.inlineCategories || [];
       if (!categories.length) {
-        categoryColorsWrap.createEl("p", { cls: "setting-item-description", text: "还没有识别到内联条目分类。给笔记加 lexis-inline: true，并在标题下写 词条::批注 后，点右侧刷新。" });
+        categoryColorsWrap.createEl("p", { cls: "setting-item-description", text: t("settings.noInlineCategories") });
         return;
       }
       for (const { name, count } of categories) {
@@ -3152,122 +3172,121 @@ class LexisSettingTab extends PluginSettingTab {
         const opacities = this.plugin.settings.inlineCategoryOpacity;
         const visibility = this.plugin.settings.inlineCategoryHighlight;
         const opacity = Object.prototype.hasOwnProperty.call(opacities, name) ? Number(opacities[name]) : this.plugin.settings.highlightOpacity;
-        new Setting(categoryColorsWrap).setName(name).setDesc(`${count} 条内联条目；颜色和透明度都可单独设置，未设置时跟随全局高亮。`)
-          .addToggle((t) => t.setTooltip("是否显示高亮；关闭后仍可悬浮查看批注").setValue(visibility[name] !== false).onChange(async (v) => { visibility[name] = v; await save(); refresh(); }))
+        new Setting(categoryColorsWrap).setName(name).setDesc(t("settings.entryCount", { count }))
+          .addToggle((toggle) => toggle.setTooltip(t("settings.showHighlight")).setValue(visibility[name] !== false).onChange(async (v) => { visibility[name] = v; await save(); refresh(); }))
           .addColorPicker((cp) => cp.setValue(colors[name] || accentHex).onChange(async (v) => { colors[name] = v; await save(); refresh(); }))
           .addSlider((s) => s.setLimits(0.1, 1, 0.05).setValue(isNaN(opacity) ? this.plugin.settings.highlightOpacity : opacity).setDynamicTooltip().onChange(async (v) => { opacities[name] = v; await save(); refresh(); }))
-          .addExtraButton((b) => b.setIcon("reset").setTooltip("颜色和透明度都恢复跟随全局高亮").onClick(async () => { delete colors[name]; delete opacities[name]; await save(); refresh(); renderCategoryColors(); }));
+          .addExtraButton((b) => b.setIcon("reset").setTooltip(t("settings.resetInlineStyle")).onClick(async () => { delete colors[name]; delete opacities[name]; await save(); refresh(); renderCategoryColors(); }));
       }
     };
-    new Setting(inlineSection).setName("按标题分类着色").setDesc("同名标题共享颜色;嵌套标题未设色时继承上级。")
-      .addButton((b) => b.setButtonText("刷新分类").onClick(async () => { await this.plugin.rebuildIndex(false); renderCategoryColors(); this.renderStats(); }));
+    new Setting(inlineSection).setName(t("settings.colorByHeading")).setDesc(t("settings.colorByHeadingDesc"))
+      .addButton((b) => b.setButtonText(t("settings.refreshCategories")).onClick(async () => { await this.plugin.rebuildIndex(false); renderCategoryColors(); this.renderStats(); }));
     renderCategoryColors();
 
-    const hlSection = this.section(containerEl, "高亮外观", { desc: "颜色、线型、渐隐、哪里生效" });
-    new Setting(hlSection).setName("启用高亮").addToggle((t) => t.setValue(this.plugin.settings.enableHighlight).onChange(async (v) => { this.plugin.settings.enableHighlight = v; await save(); refresh(); }));
-    new Setting(hlSection).setName("实时预览也高亮(编辑模式)").setDesc(this.plugin.liveAvailable ? "" : "⚠️ 当前环境无法加载 CodeMirror,不可用。")
+    const hlSection = this.section(containerEl, t("settings.highlight"));
+    new Setting(hlSection).setName(t("settings.enableHighlight")).addToggle((toggle) => toggle.setValue(this.plugin.settings.enableHighlight).onChange(async (v) => { this.plugin.settings.enableHighlight = v; await save(); refresh(); }));
+    new Setting(hlSection).setName(t("settings.livePreview")).setDesc(this.plugin.liveAvailable ? "" : t("settings.unsupported"))
       .addToggle((t) => t.setValue(this.plugin.settings.enableLivePreview).setDisabled(!this.plugin.liveAvailable).onChange(async (v) => { this.plugin.settings.enableLivePreview = v; await save(); refresh(); }));
-    new Setting(hlSection).setName("划词冒出「加入词库」药丸").setDesc("选中文字松手后出现浮动按钮,点一下建词并记出处。")
+    new Setting(hlSection).setName(t("settings.selectionPill"))
       .addToggle((t) => t.setValue(this.plugin.settings.selectionPill).onChange(async (v) => { this.plugin.settings.selectionPill = v; await save(); if (!v) this.plugin.removeSelPill(); }));
-    new Setting(hlSection).setName("加词后打开词笔记").setDesc("关闭后只创建词条,保持当前阅读位置。")
+    new Setting(hlSection).setName(t("settings.openAfterAdd"))
       .addToggle((t) => t.setValue(this.plugin.settings.openNoteAfterAdd).onChange(async (v) => { this.plugin.settings.openNoteAfterAdd = v; await save(); }));
-    new Setting(hlSection).setName("PDF 里也高亮").setDesc("仅对有文字层的 PDF 有效,扫描版/纯图片 PDF 无效。")
+    new Setting(hlSection).setName(t("settings.pdfHighlight")).setDesc(t("settings.pdfHighlightDesc"))
       .addToggle((t) => t.setValue(this.plugin.settings.enablePdfHighlight).onChange(async (v) => { this.plugin.settings.enablePdfHighlight = v; await save(); if (v) this.plugin.setupPdfHighlight(); else { this.plugin.teardownPdfHighlight(); this.plugin.rescanPdfLayers(); } }));
-    new Setting(hlSection).setName("默认高亮线型").setDesc("没被标签规则覆盖时使用。")
-      .addDropdown((dd) => dd.addOption("wavy", "波浪下划线").addOption("underline", "实线下划线").addOption("background", "背景色").setValue(this.plugin.settings.highlightStyle).onChange(async (v) => { this.plugin.settings.highlightStyle = v; await save(); refresh(); }));
-    new Setting(hlSection).setName("默认高亮颜色").setDesc("点色块选色;右侧按钮恢复主题色。")
+    new Setting(hlSection).setName(t("settings.highlightStyle"))
+      .addDropdown((dd) => dd.addOption("wavy", t("settings.wavy")).addOption("underline", t("settings.underline")).addOption("background", t("settings.background")).setValue(this.plugin.settings.highlightStyle).onChange(async (v) => { this.plugin.settings.highlightStyle = v; await save(); refresh(); }));
+    new Setting(hlSection).setName(t("settings.highlightColor"))
       .addColorPicker((cp) => { this._colorComp = cp; cp.setValue(this.plugin.settings.highlightColor || accentHex).onChange(async (v) => { this.plugin.settings.highlightColor = v; await save(); refresh(); }); })
-      .addExtraButton((b) => b.setIcon("reset").setTooltip("恢复主题色").onClick(async () => { this.plugin.settings.highlightColor = ""; if (this._colorComp) this._colorComp.setValue(accentHex); await save(); refresh(); }));
-    new Setting(hlSection).setName("透明度").setDesc("对所有颜色(含主题色)都生效。")
+      .addExtraButton((b) => b.setIcon("reset").setTooltip(t("settings.resetTheme")).onClick(async () => { this.plugin.settings.highlightColor = ""; if (this._colorComp) this._colorComp.setValue(accentHex); await save(); refresh(); }));
+    new Setting(hlSection).setName(t("settings.opacity"))
       .addSlider((s) => s.setLimits(0.1, 1, 0.05).setValue(this.plugin.settings.highlightOpacity).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.highlightOpacity = v; await save(); refresh(); }));
-    new Setting(hlSection).setName("按记忆强度渐隐高亮").setDesc("新词全强度;FSRS stability 越高越淡;归档的词不高亮但仍可悬停查。")
+    new Setting(hlSection).setName(t("settings.fade")).setDesc(t("settings.fadeDesc"))
       .addToggle((t) => t.setValue(this.plugin.settings.fadeByMemory).onChange(async (v) => { this.plugin.settings.fadeByMemory = v; await save(); refresh(); }));
-    new Setting(hlSection).setName("最淡不低于").setDesc("渐隐的下限透明度,防止熟词彻底看不见。")
+    new Setting(hlSection).setName(t("settings.fadeFloor"))
       .addSlider((s) => s.setLimits(0, 0.9, 0.05).setValue(this.plugin.settings.fadeFloor).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.fadeFloor = v; await save(); refresh(); }));
 
-    const tagColorSection = this.section(containerEl, "按标签着色", { desc: "给某标签的单词指定专属颜色/线型" });
+    const tagColorSection = this.section(containerEl, t("settings.tagColors"));
     const rulesWrap = tagColorSection.createDiv();
     const renderRules = () => {
       rulesWrap.empty();
       const grid = rulesWrap.createDiv({ cls: "lexis-rule-grid" });
       this.plugin.settings.tagRules.forEach((rule, i) => {
         const cell = grid.createDiv({ cls: "lexis-rule" });
-        const tagIn = new obsidian.TextComponent(cell).setPlaceholder("标签").setValue(rule.tag);
+        const tagIn = new obsidian.TextComponent(cell).setPlaceholder(t("settings.tagPlaceholder")).setValue(rule.tag);
         const applyTag = async (v) => { rule.tag = (v || "").trim(); await save(); refresh(); };
         tagIn.onChange(applyTag);
         if (hasSuggest) new PathSuggest(this.app, tagIn.inputEl, () => allTags, (v) => { tagIn.setValue(v); applyTag(v); });
         new obsidian.ColorComponent(cell).setValue(rule.color || accentHex).onChange(async (v) => { rule.color = v; await save(); refresh(); });
-        new obsidian.DropdownComponent(cell).addOption("", "默认").addOption("wavy", "波浪").addOption("underline", "实线").addOption("background", "背景").setValue(rule.style || "").onChange(async (v) => { rule.style = v; await save(); refresh(); });
-        new obsidian.ExtraButtonComponent(cell).setIcon("trash").setTooltip("删除").onClick(async () => { this.plugin.settings.tagRules.splice(i, 1); await save(); refresh(); renderRules(); });
+        new obsidian.DropdownComponent(cell).addOption("", t("common.default")).addOption("wavy", t("settings.wavy")).addOption("underline", t("settings.underline")).addOption("background", t("settings.background")).setValue(rule.style || "").onChange(async (v) => { rule.style = v; await save(); refresh(); });
+        new obsidian.ExtraButtonComponent(cell).setIcon("trash").setTooltip(t("common.delete")).onClick(async () => { this.plugin.settings.tagRules.splice(i, 1); await save(); refresh(); renderRules(); });
       });
-      const addRule = rulesWrap.createEl("button", { text: "+ 添加标签规则" });
+      const addRule = rulesWrap.createEl("button", { text: t("settings.addTagRule") });
       addRule.style.marginTop = "2px";
       addRule.addEventListener("click", async () => { this.plugin.settings.tagRules.push({ tag: "", color: accentHex, style: "" }); await save(); renderRules(); });
     };
     renderRules();
 
-    const cardSection = this.section(containerEl, "悬浮卡", { desc: "尺寸、延迟、显示哪些内容" });
+    const cardSection = this.section(containerEl, t("settings.popover"));
     const preview = cardSection.createDiv({ cls: "lexis-popover lexis-popover-preview" });
     preview.createDiv({ cls: "lexis-popover-title", text: "Yalda · 人物" });
-    preview.createDiv({ cls: "lexis-popover-body", text: "这是悬浮卡的实时预览。拖动下方滑块时，Obsidian 和浏览器卡片会使用同一组尺寸。" });
+    preview.createDiv({ cls: "lexis-popover-body", text: t("settings.popoverPreview") });
     const updateCards = () => {
       this.plugin.applyPopoverAppearance(preview);
       const doc = preview.ownerDocument || document;
       doc.querySelectorAll(".lexis-popover:not(.lexis-popover-preview)").forEach((el) => this.plugin.applyPopoverAppearance(el));
     };
     updateCards();
-    new Setting(cardSection).setName("卡片宽度").setDesc("像素；在小窗口中会自动收缩。")
+    new Setting(cardSection).setName(t("settings.popoverWidth"))
       .addSlider((s) => s.setLimits(280, 800, 10).setValue(this.plugin.settings.popoverWidth).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.popoverWidth = v; updateCards(); await save(); }));
-    new Setting(cardSection).setName("卡片最大高度").setDesc("像素；内容超出后在卡片内滚动。")
+    new Setting(cardSection).setName(t("settings.popoverHeight")).setDesc(t("settings.popoverHeightDesc"))
       .addSlider((s) => s.setLimits(200, 800, 10).setValue(this.plugin.settings.popoverMaxHeight).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.popoverMaxHeight = v; updateCards(); await save(); }));
-    new Setting(cardSection).setName("卡片字号").setDesc("像素。")
+    new Setting(cardSection).setName(t("settings.popoverFont"))
       .addSlider((s) => s.setLimits(11, 24, 1).setValue(this.plugin.settings.popoverFontSize).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.popoverFontSize = v; updateCards(); await save(); }));
-    new Setting(cardSection).setName("悬浮显示延迟").setDesc("鼠标停留多久后才显示卡片；0 表示立即显示。")
+    new Setting(cardSection).setName(t("settings.hoverDelay")).setDesc(t("settings.hoverDelayDesc"))
       .addSlider((s) => s.setLimits(0, 3, 0.1).setValue((this.plugin.settings.hoverDelayMs || 0) / 1000).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.hoverDelayMs = Math.round(v * 1000); await save(); }));
-    new Setting(cardSection).setName("显示相关词").addToggle((t) => t.setValue(this.plugin.settings.showRelated).onChange(async (v) => { this.plugin.settings.showRelated = v; await save(); }));
-    new Setting(cardSection).setName("显示「出现过的地方」").setDesc("全文搜索这个词出现过的句子(无需双链)。")
+    new Setting(cardSection).setName(t("settings.showRelated")).addToggle((toggle) => toggle.setValue(this.plugin.settings.showRelated).onChange(async (v) => { this.plugin.settings.showRelated = v; await save(); }));
+    new Setting(cardSection).setName(t("settings.showOccurrences")).setDesc(t("settings.showOccurrencesDesc"))
       .addToggle((t) => t.setValue(this.plugin.settings.showOccurrences).onChange(async (v) => { this.plugin.settings.showOccurrences = v; await save(); }));
-    new Setting(cardSection).setName("出处数量上限").addSlider((s) => s.setLimits(1, 15, 1).setValue(this.plugin.settings.occurrenceLimit).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.occurrenceLimit = v; await save(); this.plugin._occCache.clear(); }));
-    new Setting(cardSection).setName("出处搜索范围").setDesc("文件夹,逗号分隔;留空=全库。")
-      .addText((t) => t.setPlaceholder("留空=全库").setValue(this.plugin.settings.occurrenceFolders).onChange(async (v) => { this.plugin.settings.occurrenceFolders = v.trim(); await save(); this.plugin._occCache.clear(); }));
+    new Setting(cardSection).setName(t("settings.occurrenceLimit")).addSlider((s) => s.setLimits(1, 15, 1).setValue(this.plugin.settings.occurrenceLimit).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.occurrenceLimit = v; await save(); this.plugin._occCache.clear(); }));
+    new Setting(cardSection).setName(t("settings.occurrenceScope")).setDesc(t("settings.occurrenceScopeDesc"))
+      .addText((input) => input.setPlaceholder(t("settings.wholeVault")).setValue(this.plugin.settings.occurrenceFolders).onChange(async (v) => { this.plugin.settings.occurrenceFolders = v.trim(); await save(); this.plugin._occCache.clear(); }));
 
-    const addSection = this.section(containerEl, "划词添加", { desc: "新词落到没配模板的文件夹时用什么兜底" });
-    new Setting(addSection).setName("默认模板(兜底)").setDesc("词典模板留空=空白笔记,不回退到这里。可用 {{word}} {{date}} 占位。")
-      .addText((t) => {
-        t.setPlaceholder("template/单词模板.md").setValue(this.plugin.settings.newWordTemplate);
+    const addSection = this.section(containerEl, t("settings.selectionAdd"));
+    new Setting(addSection).setName(t("settings.defaultTemplate")).setDesc(t("settings.defaultTemplateDesc"))
+      .addText((input) => {
+        input.setPlaceholder("template/word.md").setValue(this.plugin.settings.newWordTemplate);
         const onTpl = async (v) => { this.plugin.settings.newWordTemplate = (v || "").trim(); await save(); };
-        t.onChange(onTpl);
-        if (hasSuggest) new PathSuggest(this.app, t.inputEl, () => mdFiles, (v) => { t.setValue(v); onTpl(v); });
+        input.onChange(onTpl);
+        if (hasSuggest) new PathSuggest(this.app, input.inputEl, () => mdFiles, (v) => { input.setValue(v); onTpl(v); });
       });
 
-    const fsrsSection = this.section(containerEl, "背单词 (FSRS)", { desc: "复习节奏、卡面、淘汰候选阈值" });
-    new Setting(fsrsSection).setName("目标记忆保留率").setDesc("越高复习越频繁。默认 0.9。")
+    const fsrsSection = this.section(containerEl, t("settings.review"));
+    new Setting(fsrsSection).setName(t("settings.retention")).setDesc(t("settings.retentionDesc"))
       .addSlider((s) => s.setLimits(0.8, 0.97, 0.01).setValue(this.plugin.settings.requestRetention).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.requestRetention = v; await save(); }));
-    new Setting(fsrsSection).setName("每天新词上限").addSlider((s) => s.setLimits(0, 100, 5).setValue(this.plugin.settings.newPerDay).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.newPerDay = v; await save(); }));
-    new Setting(fsrsSection).setName("每轮最多复习").addSlider((s) => s.setLimits(10, 500, 10).setValue(this.plugin.settings.maxReviewsPerSession).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.maxReviewsPerSession = v; await save(); }));
-    new Setting(fsrsSection).setName("卡片正面").setDesc("整篇=正面单词、背面笔记;填空=正面出处挖空(需先收藏出处,没有则退回显示单词)。")
-      .addDropdown((dd) => dd.addOption("note", "单词 → 整篇").addOption("cloze", "出处填空").setValue(this.plugin.settings.cardFront).onChange(async (v) => { this.plugin.settings.cardFront = v; await save(); }));
-    new Setting(fsrsSection).setName("评分按钮底部间距").setDesc("像素,手机版会自动避开工具栏。")
+    new Setting(fsrsSection).setName(t("settings.newLimit")).addSlider((s) => s.setLimits(0, 100, 5).setValue(this.plugin.settings.newPerDay).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.newPerDay = v; await save(); }));
+    new Setting(fsrsSection).setName(t("settings.sessionLimit")).addSlider((s) => s.setLimits(10, 500, 10).setValue(this.plugin.settings.maxReviewsPerSession).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.maxReviewsPerSession = v; await save(); }));
+    new Setting(fsrsSection).setName(t("settings.cardFront")).setDesc(t("settings.cardFrontDesc"))
+      .addDropdown((dd) => dd.addOption("note", t("settings.noteCard")).addOption("cloze", t("settings.clozeCard")).setValue(this.plugin.settings.cardFront).onChange(async (v) => { this.plugin.settings.cardFront = v; await save(); }));
+    new Setting(fsrsSection).setName(t("settings.ratingOffset")).setDesc(t("settings.ratingOffsetDesc"))
       .addSlider((s) => s.setLimits(0, 200, 5).setValue(this.plugin.settings.reviewBottomSpace).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.reviewBottomSpace = v; await save(); }));
-    new Setting(fsrsSection).setName("开始背单词").addButton((b) => b.setButtonText("打开复习").setCta().onClick(() => this.plugin.openReview()));
-    new Setting(fsrsSection).setName("悬停回流复习排期").setDesc("悬停查释义时,若到期日比设定天数还远就拉近到今天;只挪排期,不影响 stability/难度,不算一次复习。")
+    new Setting(fsrsSection).setName(t("home.start")).addButton((b) => b.setButtonText(t("settings.openReview")).setCta().onClick(() => this.plugin.openReview()));
+    new Setting(fsrsSection).setName(t("settings.hoverFeedback")).setDesc(t("settings.hoverFeedbackDesc"))
       .addToggle((t) => t.setValue(this.plugin.settings.hoverFeedback).onChange(async (v) => { this.plugin.settings.hoverFeedback = v; await save(); }));
-    new Setting(fsrsSection).setName("回流阈值(天)").setDesc("到期日超过这个天数才会被悬停拉近。")
+    new Setting(fsrsSection).setName(t("settings.feedbackDays")).setDesc(t("settings.feedbackDaysDesc"))
       .addSlider((s) => s.setLimits(1, 30, 1).setValue(this.plugin.settings.hoverFeedbackDays).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.hoverFeedbackDays = v; await save(); }));
-    new Setting(fsrsSection).setName("淘汰候选阈值(天)").setDesc("入库满这么多天、且这么多天没自然相遇过才入列(常驻/归档/淘汰的词永远不入)。")
+    new Setting(fsrsSection).setName(t("settings.retireDays")).setDesc(t("settings.retireDaysDesc"))
       .addSlider((s) => s.setLimits(14, 365, 1).setValue(this.plugin.settings.retireCandidateDays).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.retireCandidateDays = v; await save(); }));
 
-    const bridgeSection = this.section(containerEl, "浏览器扩展(桥接)", { desc: "本机 127.0.0.1 小服务,供 Chrome 扩展用;数据不出本机" });
-    const vocabTagsHint = this.plugin.collectVocabTags().slice(0, 10).join("、");
-    new Setting(bridgeSection).setName("排除标签").setDesc(`带这些标签的单词网页和 Obsidian 都不高亮(仍是词条),逗号或空格分隔。${vocabTagsHint ? "词库标签:" + vocabTagsHint : ""}`)
+    const bridgeSection = this.section(containerEl, t("settings.bridge"), { desc: t("settings.bridgeDesc") });
+    new Setting(bridgeSection).setName(t("settings.excludeTags")).setDesc(t("settings.excludeTagsDesc"))
       .addText((t) => {
         t.setPlaceholder("已掌握 暂缓").setValue(this.plugin.settings.excludeTags);
         const apply = async (v) => { this.plugin.settings.excludeTags = v; await save(); this.plugin.rebuildIndex(false); };
         t.onChange(apply); tagSuggest(t, apply);
       });
-    new Setting(bridgeSection).setName("批注小节标题").setDesc('可只填文字(默认按 #### 级别新建)或带级别(如 "## 引用")。留空用默认 "#### 批注";旧笔记的批注小节仍会被识别,不会重复建。')
+    new Setting(bridgeSection).setName(t("settings.annotationHeading")).setDesc(t("settings.annotationHeadingDesc"))
       .addText((t) => t.setPlaceholder("#### 批注").setValue(this.plugin.settings.annotationHeading).onChange(async (v) => { this.plugin.settings.annotationHeading = v; await save(); }));
-    new Setting(bridgeSection).setName("启用本地桥接").setDesc(`开启后浏览器访问 http://127.0.0.1:${this.plugin.settings.bridgePort}/ping 应返回 ok。`)
+    new Setting(bridgeSection).setName(t("settings.enableBridge"))
       .addToggle((t) => t.setValue(this.plugin.settings.bridgeEnabled).onChange(async (v) => {
         this.plugin.settings.bridgeEnabled = v;
         if (v && !this.plugin.settings.bridgeToken) this.plugin.settings.bridgeToken = this.plugin.bridge.generateToken();
@@ -3275,15 +3294,15 @@ class LexisSettingTab extends PluginSettingTab {
         this.plugin.bridge.restart();
         this.display();
       }));
-    new Setting(bridgeSection).setName("端口").setDesc("改完需要重新开关一次桥接生效。")
+    new Setting(bridgeSection).setName(t("settings.port")).setDesc(t("settings.portDesc"))
       .addText((t) => t.setValue(String(this.plugin.settings.bridgePort)).onChange(async (v) => { const n = parseInt(v, 10); if (n >= 1024 && n <= 65535) { this.plugin.settings.bridgePort = n; await save(); } }))
-      .addExtraButton((b) => b.setIcon("rotate-ccw").setTooltip("重启桥接").onClick(() => { this.plugin.bridge.restart(); new Notice("Lexis:桥接已重启"); }));
-    new Setting(bridgeSection).setName("访问令牌").setDesc("扩展用它连接,防止别的网页乱连。点复制粘到扩展里。")
-      .addText((t) => { t.setValue(this.plugin.settings.bridgeToken || "(启用后生成)").setDisabled(true); t.inputEl.style.width = "260px"; })
-      .addExtraButton((b) => b.setIcon("copy").setTooltip("复制令牌").onClick(async () => { if (this.plugin.settings.bridgeToken) { await navigator.clipboard.writeText(this.plugin.settings.bridgeToken); new Notice("Lexis:令牌已复制"); } }))
-      .addExtraButton((b) => b.setIcon("refresh-cw").setTooltip("重新生成(旧扩展需重填)").onClick(async () => { this.plugin.settings.bridgeToken = this.plugin.bridge.generateToken(); await save(); this.plugin.bridge.restart(); this.display(); }));
+      .addExtraButton((b) => b.setIcon("rotate-ccw").setTooltip(t("settings.restartBridge")).onClick(() => { this.plugin.bridge.restart(); new Notice(t("notice.bridgeRestarted")); }));
+    new Setting(bridgeSection).setName(t("settings.token")).setDesc(t("settings.tokenDesc"))
+      .addText((input) => { input.setValue(this.plugin.settings.bridgeToken || t("settings.tokenPending")).setDisabled(true); input.inputEl.style.width = "260px"; })
+      .addExtraButton((b) => b.setIcon("copy").setTooltip(t("settings.copyToken")).onClick(async () => { if (this.plugin.settings.bridgeToken) { await navigator.clipboard.writeText(this.plugin.settings.bridgeToken); new Notice(t("notice.tokenCopied")); } }))
+      .addExtraButton((b) => b.setIcon("refresh-cw").setTooltip(t("settings.regenerateToken")).onClick(async () => { this.plugin.settings.bridgeToken = this.plugin.bridge.generateToken(); await save(); this.plugin.bridge.restart(); this.display(); }));
 
-    new Setting(containerEl).setName("重建索引").addButton((b) => b.setButtonText("立即重建").onClick(() => { this.plugin.rebuildIndex(true); this.renderStats(); }));
+    new Setting(containerEl).setName(t("settings.rebuild")).addButton((b) => b.setButtonText(t("settings.rebuildNow")).onClick(() => { this.plugin.rebuildIndex(true); this.renderStats(); }));
     this.statsEl = containerEl.createEl("p", { cls: "lexis-stats" });
     this.renderStats();
   }
@@ -3291,6 +3310,6 @@ class LexisSettingTab extends PluginSettingTab {
   renderStats() {
     if (!this.statsEl) return;
     const s = this.plugin.stats;
-    this.statsEl.setText(`当前索引:${s.words} 个单词,${s.aliases} 个别名,${s.inlineEntries || 0} 条内联条目,${s.due || 0} 个待复习。`);
+    this.statsEl.setText(this.plugin.t("settings.stats", { words: s.words, aliases: s.aliases, inline: s.inlineEntries || 0, due: s.due || 0 }));
   }
 }

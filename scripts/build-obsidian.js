@@ -14,6 +14,7 @@ function moduleBody(name) {
 }
 
 const imports = [
+  'const { createI18n } = require("./i18n");',
   'const { buildCurveSVG } = require("./curve");',
   'const { createReviewView } = require("./review-view");',
 ].join("\n");
@@ -22,6 +23,9 @@ let main = src("main.js");
 if (!main.includes(imports)) throw new Error("找不到待合并的 Lexis 模块入口");
 
 main = main.replace(imports, [
+  "// ---------- 生成自 src/i18n.js ----------",
+  moduleBody("i18n.js").trim(),
+  "",
   "// ---------- 生成自 src/curve.js ----------",
   moduleBody("curve.js").trim(),
   "",

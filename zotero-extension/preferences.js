@@ -24,17 +24,17 @@ var LexisZoteroPreferences = {
     for (const input of [view.host, view.port, view.token, view.sync]) {
       input.addEventListener("change", () => this.save(view));
     }
-    view.test.addEventListener("click", () => this.run(view, view.test, "正在测试连接…", async (plugin) => {
+    view.test.addEventListener("click", () => this.run(view, view.test, "连接中…", async (plugin) => {
       const result = await plugin.testConnection();
       if (!result?.ok) throw new Error(this.errorText(result));
       this.renderDicts(root);
-      return `连接正常 · ${result.vault || "Lexis"} · ${result.count ?? 0} 个词`;
+      return `已连接 · ${result.vault || "Lexis"} · ${result.count ?? 0} 个词`;
     }));
-    view.syncNow.addEventListener("click", () => this.run(view, view.syncNow, "正在同步…", async (plugin) => {
+    view.syncNow.addEventListener("click", () => this.run(view, view.syncNow, "同步中…", async (plugin) => {
       const result = await plugin.syncNow();
       if (!result?.ok) throw new Error(this.errorText(result));
       this.renderDicts(root);
-      return `同步完成 · ${result.count ?? 0} 个词`;
+      return `已同步 · ${result.count ?? 0} 个词`;
     }));
 
     this.renderDicts(root);
@@ -50,7 +50,7 @@ var LexisZoteroPreferences = {
     if (!dicts.length) {
       const empty = document.createElement("p");
       empty.className = "lexis-pref-files-empty";
-      empty.textContent = "词典文件夹列表为空，先「测试连接」或「立即同步」拉取一次";
+      empty.textContent = "同步后显示词典。";
       container.appendChild(empty);
       return;
     }

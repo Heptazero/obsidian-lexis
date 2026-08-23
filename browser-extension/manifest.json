@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Lexis Web",
-  "version": "1.0.24",
-  "description": "在任意网页高亮你 Obsidian Lexis 词库里的单词、悬停看释义。与本机的 Lexis 桥接通信,数据不出本机。",
+  "version": "1.0.25",
+  "description": "Highlight your Obsidian Lexis entries on the web, open notes on hover, and send selections back over a local-only bridge.",
   "permissions": ["storage"],
   "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
   "action": {

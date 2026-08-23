@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
   "name": "Lexis for Zotero",
-  "version": "0.1.25",
-  "description": "在 Zotero PDF Reader 中复用 Obsidian Lexis 的高亮、卡片与划词操作。",
+  "version": "0.1.26",
+  "description": "Use Obsidian Lexis highlights, hover cards, and selection actions in Zotero Reader.",
   "author": "Hzero",
   "icons": {
     "48": "icons/lexis.svg",

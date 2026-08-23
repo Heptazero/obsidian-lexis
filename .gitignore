@@ -4,3 +4,4 @@ data.sync-conflict-*.json
 .DS_Store
 node_modules/
 zotero-extension/dist/
+browser-extension/dist/

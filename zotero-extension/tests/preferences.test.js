@@ -65,7 +65,7 @@ vm.runInContext(source, context);
   await elements["lexis-zotero-test"].dispatch("click");
 
   assert.equal(preferences.get("extensions.lexis-zotero.token"), "secret");
-  assert.equal(elements["lexis-zotero-status"].textContent, "连接正常 · Test Vault · 7 个词");
+  assert.equal(elements["lexis-zotero-status"].textContent, "已连接 · Test Vault · 7 个词");
   assert.equal(elements["lexis-zotero-status"].dataset.state, "ok");
   assert.equal(elements["lexis-zotero-test"].disabled, false);
 
