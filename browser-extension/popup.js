@@ -1,5 +1,5 @@
 // Lexis Web —— popup:读写配置、测试连接、同步词库
-const DEFAULT_CFG = { host: "127.0.0.1", port: 45945, token: "", highlight: true, color: "#7c5cff", style: "wavy", useObsidianStyle: true, opacity: 100 };
+const DEFAULT_CFG = { host: "127.0.0.1", port: 45945, token: "", highlight: true, showMemoryCurve: true, color: "#7c5cff", style: "wavy", useObsidianStyle: true, opacity: 100 };
 const $ = (id) => document.getElementById(id);
 
 let cfg = DEFAULT_CFG;
@@ -13,6 +13,7 @@ async function load() {
   $("port").value = cfg.port;
   $("token").value = cfg.token;
   $("highlight").checked = !!cfg.highlight;
+  $("showMemoryCurve").checked = cfg.showMemoryCurve !== false;
   $("style").value = cfg.style;
   $("color").value = cfg.color;
   $("opacity").value = cfg.opacity || 100;
@@ -63,6 +64,7 @@ async function save() {
     port: parseInt($("port").value, 10) || 45945,
     token: $("token").value.trim(),
     highlight: $("highlight").checked,
+    showMemoryCurve: $("showMemoryCurve").checked,
     color: $("color").value,
     style: $("style").value,
     opacity: parseInt($("opacity").value, 10) || 100,
@@ -96,7 +98,7 @@ $("sync").addEventListener("click", async () => {
   else status("❌ 同步失败。Obsidian 开着且桥接启用?", "err");
 });
 
-for (const id of ["highlight", "style", "color"]) $(id).addEventListener("change", save);
+for (const id of ["highlight", "showMemoryCurve", "style", "color"]) $(id).addEventListener("change", save);
 for (const id of ["host", "port", "token"]) $(id).addEventListener("input", save);
 $("opacity").addEventListener("input", save);
 $("opacity").addEventListener("input", () => { $("opacityVal").textContent = $("opacity").value + "%"; });

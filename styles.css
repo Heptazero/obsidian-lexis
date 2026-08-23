@@ -6,6 +6,51 @@
     text-underline-offset: 3px;
 }
 
+/* 当前标签页隐藏视觉高亮；保留命中节点，悬浮卡和点击跳转仍可用。 */
+.lexis-page-highlights-hidden .lexis-hl {
+    text-decoration: none !important;
+    background-color: transparent !important;
+}
+.lexis-page-highlights-hidden .lexis-pdf-hl {
+    background: transparent !important;
+}
+
+/* 设置页:功能分组折叠区 */
+.lexis-settings-section {
+    margin: 10px 0;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    padding: 0 12px;
+}
+.lexis-settings-section > summary {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 10px 0;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 15px;
+    list-style: none;
+}
+.lexis-settings-section > summary::-webkit-details-marker { display: none; }
+.lexis-settings-section > summary::before {
+    content: "▸";
+    display: inline-block;
+    color: var(--text-faint);
+    transition: transform .12s ease;
+}
+.lexis-settings-section[open] > summary::before { transform: rotate(90deg); }
+.lexis-settings-section-hint {
+    font-weight: 400;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+.lexis-settings-section-body {
+    padding-bottom: 10px;
+    border-top: 1px solid var(--background-modifier-border);
+}
+.lexis-settings-section-body .setting-item:first-child { border-top: none; }
+
 /* 标签规则:一行多个紧凑卡片 */
 .lexis-rule-grid {
     display: grid;
@@ -239,9 +284,20 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    user-select: text;
+    -webkit-user-select: text;
+    -webkit-touch-callout: default;
+}
+.lexis-rv-back * {
+    user-select: text !important;
+    -webkit-user-select: text !important;
+    -webkit-touch-callout: default;
 }
 .lexis-rv-back img {
     max-width: 100%;
+}
+.lexis-rv-back img.lexis-rv-zoomable {
+    cursor: zoom-in;
 }
 .lexis-rv-rate {
     display: flex;
@@ -366,12 +422,58 @@
 }
 .lexis-curve {
     margin: 2px 0 4px;
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    -webkit-overflow-scrolling: touch;
 }
 .lexis-curve svg {
-    width: 100%;
-    height: auto;
-    max-width: 340px;
+    width: auto;
+    height: 122px;
+    max-width: none;
     display: block;
+}
+
+/* 复习答案图片：点开后可在适应屏幕/原始尺寸之间切换。 */
+.lexis-rv-image-preview {
+    position: fixed;
+    inset: 0;
+    z-index: var(--layer-modal, 1000);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: auto;
+    padding: max(18px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    background: rgba(0, 0, 0, 0.88);
+    touch-action: pan-x pan-y pinch-zoom;
+}
+.lexis-rv-image-preview img {
+    flex: 0 0 auto;
+    max-width: none;
+    max-height: none;
+    cursor: zoom-out;
+}
+.lexis-rv-image-preview.is-actual {
+    align-items: flex-start;
+    justify-content: flex-start;
+}
+.lexis-rv-image-preview img.is-fit {
+    max-width: 96vw;
+    max-height: 88vh;
+    cursor: zoom-in;
+}
+.lexis-rv-image-close {
+    position: fixed;
+    top: max(10px, env(safe-area-inset-top));
+    right: max(10px, env(safe-area-inset-right));
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border-radius: 50%;
+    background: rgba(30, 30, 30, 0.76);
+    color: white;
+    font-size: 28px;
+    line-height: 1;
 }
 
 /* 复习热力图 */
@@ -571,11 +673,34 @@
 /* 手机端底部安全区 */
 body.is-phone
     .workspace-leaf-content[data-type="lexis-review-view"]
-    .view-content,
+    .view-content {
+    padding-bottom: 136px !important;
+}
 body.is-phone
     .workspace-leaf-content[data-type="lexis-home-view"]
     .view-content {
     padding-bottom: 30px !important;
+}
+body.is-phone .workspace-leaf-content[data-type="lexis-review-view"] .lexis-rv-rate {
+    position: fixed;
+    left: max(8px, env(safe-area-inset-left));
+    right: max(8px, env(safe-area-inset-right));
+    bottom: var(--lexis-mobile-navbar-height, calc(58px + env(safe-area-inset-bottom, 0px)));
+    z-index: var(--layer-popover, 50);
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    width: auto;
+    margin: 0 !important;
+    padding: 8px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--background-primary) 92%, transparent);
+    box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.18);
+    backdrop-filter: blur(12px);
+}
+body.is-phone .workspace-leaf-content[data-type="lexis-review-view"] .lexis-review {
+    padding-bottom: 124px;
 }
 
 /* 移动端适配 */
@@ -681,6 +806,9 @@ body.is-phone
 /* PDF 高亮独立层:叠在 Canvas 上、textLayer 下,不沾 textLayer 的 opacity */
 .lexis-pdf-hl-layer {
     pointer-events: none;
+}
+.lexis-pdf-hl-layer.is-geometry-changing {
+    visibility: hidden;
 }
 .lexis-pdf-hl {
     cursor: pointer;
