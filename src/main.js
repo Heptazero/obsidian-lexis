@@ -71,6 +71,8 @@ const DEFAULT_SETTINGS = {
   bridgeToken: "",
   // 在 Obsidian 笔记里划词后,选区旁冒出"+ 加入词库"浮动药丸(阅读/编辑两种模式都生效)
   selectionPill: true,
+  // 划词加词后是否自动打开该词笔记
+  openNoteAfterAdd: true,
   // 在 Obsidian 内置 PDF 阅读器里也高亮词库词(钩 pdf.js 文字层;扫描版无文字层则无效)
   enablePdfHighlight: true,
 };
@@ -2300,10 +2302,13 @@ module.exports = class LexisPlugin extends Plugin {
         // 从 PDF 加词:留在 PDF 页面,不打开新词笔记;立刻重建索引→当场高亮
         new Notice(`Lexis:已加入「${fileName}」,已在 PDF 高亮`);
         this.rebuildIndex(false);
-      } else {
+      } else if (this.settings.openNoteAfterAdd) {
         new Notice(`Lexis:已创建「${fileName}」`);
         await this.app.workspace.getLeaf(false).openFile(file);
         this.scheduleRebuild();
+      } else {
+        new Notice(`Lexis:已创建「${fileName}」`);
+        this.rebuildIndex(false);
       }
     } catch (err) { new Notice("Lexis 创建失败:" + (err?.message || err)); }
   }
@@ -3164,6 +3169,8 @@ class LexisSettingTab extends PluginSettingTab {
       .addToggle((t) => t.setValue(this.plugin.settings.enableLivePreview).setDisabled(!this.plugin.liveAvailable).onChange(async (v) => { this.plugin.settings.enableLivePreview = v; await save(); refresh(); }));
     new Setting(hlSection).setName("划词冒出「加入词库」药丸").setDesc("选中文字松手后出现浮动按钮,点一下建词并记出处。")
       .addToggle((t) => t.setValue(this.plugin.settings.selectionPill).onChange(async (v) => { this.plugin.settings.selectionPill = v; await save(); if (!v) this.plugin.removeSelPill(); }));
+    new Setting(hlSection).setName("加词后打开词笔记").setDesc("关闭后只创建词条,保持当前阅读位置。")
+      .addToggle((t) => t.setValue(this.plugin.settings.openNoteAfterAdd).onChange(async (v) => { this.plugin.settings.openNoteAfterAdd = v; await save(); }));
     new Setting(hlSection).setName("PDF 里也高亮").setDesc("仅对有文字层的 PDF 有效,扫描版/纯图片 PDF 无效。")
       .addToggle((t) => t.setValue(this.plugin.settings.enablePdfHighlight).onChange(async (v) => { this.plugin.settings.enablePdfHighlight = v; await save(); if (v) this.plugin.setupPdfHighlight(); else { this.plugin.teardownPdfHighlight(); this.plugin.rescanPdfLayers(); } }));
     new Setting(hlSection).setName("默认高亮线型").setDesc("没被标签规则覆盖时使用。")
