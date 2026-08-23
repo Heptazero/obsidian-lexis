@@ -8,8 +8,17 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }) => 
   getViewType() { return reviewViewType; }
   getDisplayText() { return "Lexis 背单词"; }
   getIcon() { return "brain"; }
-  async onOpen() { this.registerDomEvent(window, "keydown", (e) => this.onKey(e)); this.refresh(); }
-  onClose() { if (this._comp) this._comp.unload(); if (this._frontComp) this._frontComp.unload(); }
+  async onOpen() {
+    this.registerDomEvent(window, "keydown", (e) => this.onKey(e));
+    this.registerDomEvent(window, "resize", () => this.updateMobileRateBarOffset());
+    const saved = this.plugin.takeReviewSession(this.leaf);
+    if (!saved) { this.refresh(); return; }
+    this.queue = saved.queue; this.pos = saved.pos; this.reviewed = saved.reviewed;
+    this.undoStack = saved.undoStack; this.options = saved.options;
+    this.render();
+    if (saved.revealed) await this.reveal();
+  }
+  onClose() { if (this._comp) this._comp.unload(); if (this._frontComp) this._frontComp.unload(); this.closeImagePreview(); }
   refresh() { this.queue = this.plugin.buildQueue(this.options); this.pos = 0; this.reviewed = 0; this.revealed = false; this.undoStack = []; this.render(); }
 
   render() {
@@ -29,7 +38,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }) => 
     sb.addEventListener("click", () => this.skip());
     const card = c.createDiv({ cls: "lexis-rv-card" });
     const wordEl = card.createDiv({ cls: "lexis-rv-word", text: item.file.basename });
-    wordEl.setAttribute("title", "点击在旁边打开原文");
+    wordEl.setAttribute("title", "在当前标签页打开原文");
     wordEl.addEventListener("click", () => this.openSource(item.file));
     if (this.plugin.settings.cardFront === "cloze") this.applyClozeFront(wordEl, item);
     const tagsSet = this.plugin.getTags(item.file);
@@ -49,14 +58,8 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }) => 
     this.rateBar.style.display = "none";
     const bs = this.plugin.settings.reviewBottomSpace || 70;
     const isPhone = document.body.classList.contains("is-phone");
-    if (isPhone) {
-      const spacer = document.createElement("div");
-      spacer.style.flex = "1";
-      c.insertBefore(spacer, this.rateBar);
-    }
-    this.rateBar.style.marginBottom = isPhone
-      ? `max(${Math.max(bs, 112)}px, calc(24px + env(safe-area-inset-bottom)))`
-      : bs + "px";
+    this.rateBar.style.marginBottom = isPhone ? "" : bs + "px";
+    if (isPhone) this.updateMobileRateBarOffset();
     const grades = [[1, "重来"], [2, "较难"], [3, "记得"], [4, "简单"]];
     for (const [g, label] of grades) {
       const ivl = this.plugin.scheduleCard(item.card, g).interval;
@@ -78,10 +81,16 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }) => 
       await this.plugin.renderNoteInto(this.backEl, this.currentItem.file, this._comp, true);
       const openOcc = () => this.backEl.querySelectorAll("details.lexis-occ-details").forEach((d) => { d.open = true; });
       openOcc(); window.setTimeout(openOcc, 60);
+      this.installAnswerInteractions();
     } catch (err) {
       this.backEl.setText("内容渲染出错:" + (err?.message || err));
       console.error("[Lexis] reveal error", err);
     }
+  }
+  updateMobileRateBarOffset() {
+    if (!this.rateBar || !document.body.classList.contains("is-phone")) return;
+    const navbarHeight = Math.ceil(document.querySelector(".mobile-navbar")?.getBoundingClientRect().height || 58);
+    this.rateBar.style.setProperty("--lexis-mobile-navbar-height", `${navbarHeight}px`);
   }
   async grade(g) {
     if (!this.revealed) { new Notice("Lexis:请先点「显示答案」"); return; }
@@ -89,9 +98,10 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }) => 
     try {
       const prev = { s: item.card.s, d: item.card.d, due: item.card.due, last: item.card.last, reps: item.card.reps, lapses: item.card.lapses };
       const wasNew = item.card.s == null || isNaN(Number(item.card.s));
+      const retentionBefore = this.plugin.cardRetrievability(item.card);
       const sched = this.plugin.scheduleCard(item.card, g);
       await this.plugin.applySchedule(item.file, sched);
-      await this.plugin.logReview();
+      await this.plugin.logReview(item.file, sched, g, retentionBefore);
       this.undoStack.push({ item, prev, wasNew, pos: this.pos, requeued: g === 1 });
       this.reviewed++;
       if (g === 1) this.queue.push({ file: item.file, card: { s: sched.s, d: sched.d, due: sched.due, last: todayStr(), reps: sched.reps, lapses: sched.lapses } });
@@ -110,22 +120,24 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }) => 
         if (u.wasNew) { delete fm["lexis-s"]; delete fm["lexis-d"]; delete fm["lexis-due"]; delete fm["lexis-last"]; delete fm["lexis-reps"]; delete fm["lexis-lapses"]; }
         else { fm["lexis-s"] = u.prev.s; fm["lexis-d"] = u.prev.d; fm["lexis-due"] = u.prev.due; fm["lexis-last"] = u.prev.last; fm["lexis-reps"] = u.prev.reps; fm["lexis-lapses"] = u.prev.lapses; }
       });
-      const t = todayStr();
-      if (this.plugin.settings.reviewLog[t]) { this.plugin.settings.reviewLog[t]--; if (this.plugin.settings.reviewLog[t] <= 0) delete this.plugin.settings.reviewLog[t]; await this.plugin.saveSettings(); }
+      await this.plugin.undoReviewLog(u.item.file);
       if (u.requeued && this.queue.length) this.queue.pop();
       this.pos = u.pos;
       this.reviewed = Math.max(0, this.reviewed - 1);
       this.render();
     } catch (err) { new Notice("Lexis 撤销出错:" + (err?.message || err)); }
   }
-  openSource(file) {
-    let target = this.app.workspace.getLeavesOfType("markdown").find((l) => l !== this.leaf);
-    if (!target) target = this.app.workspace.getLeaf("split", "vertical");
-    target.openFile(file);
-    this.app.workspace.revealLeaf(target);
+  async openSource(file) {
+    this.plugin.saveReviewSession(this.leaf, {
+      queue: this.queue, pos: this.pos, reviewed: this.reviewed, revealed: this.revealed,
+      undoStack: this.undoStack, options: this.options,
+    });
+    await this.leaf.openFile(file, { active: true });
+    this.app.workspace.revealLeaf(this.leaf);
   }
   onKey(e) {
     if (this.app.workspace.activeLeaf !== this.leaf) return;
+    if (e.key === "Escape" && this._imagePreview) { e.preventDefault(); this.closeImagePreview(); return; }
     const tag = (e.target && e.target.tagName) || "";
     if (/INPUT|TEXTAREA/.test(tag) || (e.target && e.target.isContentEditable)) return;
     if (e.key === "z" || e.key === "Z") { e.preventDefault(); this.undo(); return; }
@@ -143,6 +155,40 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }) => 
     this._frontComp = new Component(); this._frontComp.load();
     const cloze = this.plugin.buildCloze(ex, item.file.basename);
     await renderLexisMarkdown(this.app, cloze, wordEl, item.file.path, this._frontComp);
+  }
+  installAnswerInteractions() {
+    this.backEl.querySelectorAll("img").forEach((img) => {
+      img.classList.add("lexis-rv-zoomable");
+      img.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); this.openImagePreview(img); });
+    });
+  }
+  openImagePreview(source) {
+    this.closeImagePreview();
+    const overlay = document.createElement("div");
+    overlay.className = "lexis-rv-image-preview";
+    const image = document.createElement("img");
+    image.src = source.currentSrc || source.src;
+    image.alt = source.alt || "";
+    image.className = "is-fit";
+    image.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const fit = image.classList.toggle("is-fit");
+      overlay.classList.toggle("is-actual", !fit);
+    });
+    const close = document.createElement("button");
+    close.className = "lexis-rv-image-close";
+    close.type = "button";
+    close.textContent = "×";
+    close.setAttribute("aria-label", "关闭大图");
+    close.addEventListener("click", () => this.closeImagePreview());
+    overlay.addEventListener("click", () => this.closeImagePreview());
+    overlay.append(image, close);
+    document.body.appendChild(overlay);
+    this._imagePreview = overlay;
+  }
+  closeImagePreview() {
+    if (this._imagePreview) this._imagePreview.remove();
+    this._imagePreview = null;
   }
   skip() {
     if (this.pos >= this.queue.length) return;

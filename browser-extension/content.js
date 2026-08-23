@@ -2,7 +2,7 @@
 (() => {
   const HL = "lexis-web-hl";
   const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "INPUT", "CODE", "PRE", "SELECT", "OPTION", "KBD", "SAMP"]);
-  const DEFAULT_CFG = { highlight: true, color: "#7c5cff", style: "wavy", useObsidianStyle: true, opacity: 100 };
+  const DEFAULT_CFG = { highlight: true, showMemoryCurve: true, color: "#7c5cff", style: "wavy", useObsidianStyle: true, opacity: 100 };
 
   let cfg = null;
   let keySet = null;
@@ -645,6 +645,13 @@
     content.className = "lexis-web-pop-content";
     if (data.html && data.html.trim()) content.innerHTML = data.html;
     else content.textContent = (data.meaning || data.markdown || "").trim() || "(这个词笔记里还没写内容)";
+    if (cfg.showMemoryCurve === false) {
+      content.querySelectorAll(".lexis-web-curve").forEach((curve) => {
+        const title = curve.previousElementSibling;
+        if (title?.classList.contains("lexis-web-sec") && title.textContent.includes("记忆曲线")) title.remove();
+        curve.remove();
+      });
+    }
     body.appendChild(content);
 
     if (data.extraHtml && data.extraHtml.trim()) {
@@ -866,6 +873,7 @@
       if (changes.words) build(changes.words.newValue || []);
       const styleChanged = oldCfg && cfg && (oldCfg.useObsidianStyle !== cfg.useObsidianStyle
         || oldCfg.color !== cfg.color || oldCfg.style !== cfg.style || oldCfg.opacity !== cfg.opacity);
+      if (oldCfg && oldCfg.showMemoryCurve !== cfg.showMemoryCurve) removePop();
       if (cfg && cfg.highlight) {
         if (changes.words || changes.styleConfig || styleChanged || (changes.cfg && changes.cfg.newValue && changes.cfg.newValue.highlight && !(changes.cfg.oldValue || {}).highlight)) {
           unwrapAll();
