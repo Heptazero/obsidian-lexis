@@ -74,7 +74,8 @@
       this.logger(`卡片开始渲染: ${meta?.key}`);
       if (!span?.isConnected || this.currentSpan !== span) return;
       this.host?.remove();
-      const host = this.doc.createElement("lexis-zotero-popover");
+      const host = this.doc.createElement("div");
+      host.className = "lexis-zotero-popover";
       // attachShadow 的字典参数和 convertToViewportRectangle 是同一类问题：
       // chrome 侧现造的 {mode:"open"} 传进内容域方法，对方读不到里面的字段，需要 cloneInto。
       const shadowInit = typeof Components === "undefined"

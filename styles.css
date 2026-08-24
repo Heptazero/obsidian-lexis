@@ -14,17 +14,20 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
 
 .lexis-hl {
     cursor: pointer;
-    text-decoration: underline wavy var(--text-accent);
+    background-color: var(--lexis-hl-background, transparent);
+    text-decoration-line: var(--lexis-hl-line, underline);
+    text-decoration-style: var(--lexis-hl-line-style, wavy);
+    text-decoration-color: var(--lexis-hl-line-color, var(--text-accent));
     text-underline-offset: 3px;
 }
 
 /* 当前标签页隐藏视觉高亮；保留命中节点，悬浮卡和点击跳转仍可用。 */
 .lexis-page-highlights-hidden .lexis-hl {
-    text-decoration: none !important;
-    background-color: transparent !important;
+    --lexis-hl-line-color: transparent;
+    --lexis-hl-background: transparent;
 }
-.lexis-page-highlights-hidden .lexis-pdf-hl {
-    background: transparent !important;
+.lexis-page-highlights-hidden .lexis-pdf-hl-layer {
+    visibility: hidden;
 }
 
 /* 设置页:功能分组折叠区 */
@@ -71,6 +74,149 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
 .lexis-template-setting .setting-item-control,
 .lexis-template-setting textarea {
     width: 100%;
+}
+
+/* 可重复设置项共用同一套紧凑卡片与排序交互；拖动柄始终位于行尾。 */
+.lexis-setting-row {
+    box-sizing: border-box;
+    min-height: 40px;
+    padding: 4px 6px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    background: transparent;
+}
+.lexis-settings-section .lexis-setting-row,
+.lexis-settings-section .lexis-setting-row:hover {
+    background-color: transparent;
+}
+.lexis-sortable-item {
+    position: relative;
+    min-width: 0;
+}
+.lexis-sortable-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+}
+.lexis-dictionary-row {
+    margin-bottom: 6px;
+}
+.lexis-sortable-row > .setting-item {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.lexis-drag-handle {
+    flex: 0 0 auto;
+    order: 100;
+    margin-left: auto;
+    color: var(--text-faint);
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+.lexis-drag-handle:active,
+.lexis-sortable-item.is-dragging .lexis-drag-handle {
+    cursor: grabbing;
+    color: var(--text-accent);
+}
+.lexis-sortable-item.is-floating {
+    z-index: var(--layer-popover, 50);
+    opacity: .96;
+    border-radius: 8px;
+    background: var(--background-primary);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, .24);
+    transform: scale(1.015);
+}
+.lexis-sortable-placeholder {
+    min-width: 0;
+    border: 1px dashed var(--interactive-accent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--interactive-accent) 8%, transparent);
+}
+.lexis-inline-tree,
+.lexis-inline-siblings {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+.lexis-inline-group > .lexis-inline-siblings {
+    margin-top: 4px;
+}
+.lexis-inline-group-row {
+    cursor: pointer;
+    list-style: none;
+}
+.lexis-inline-group-row::-webkit-details-marker {
+    display: none;
+}
+.lexis-inline-chevron {
+    display: inline-flex;
+    flex: 0 0 auto;
+    color: var(--text-faint);
+    transition: transform 120ms ease;
+}
+.lexis-inline-group[open] > .lexis-inline-group-row .lexis-inline-chevron {
+    transform: rotate(90deg);
+}
+.lexis-inline-group-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    font-weight: var(--font-semibold);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.lexis-inline-group-children {
+    margin-left: 18px;
+}
+.lexis-inline-category-row {
+    width: 100%;
+}
+.lexis-inline-category-row.is-disabled {
+    opacity: .45;
+}
+.lexis-inline-category-row button.lexis-inline-category-link {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: auto;
+    padding: 0;
+    overflow: hidden;
+    border: 0;
+    background-color: transparent;
+    box-shadow: none;
+    color: var(--text-normal);
+    font: inherit;
+    justify-content: flex-start;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.lexis-inline-category-row button.lexis-inline-category-link:hover,
+.lexis-inline-category-row button.lexis-inline-category-link:focus-visible {
+    background-color: transparent;
+    box-shadow: none;
+    color: var(--text-accent);
+    text-decoration-line: underline;
+}
+.lexis-inline-category-controls {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 5px;
+    margin-left: auto;
+}
+.lexis-inline-count {
+    min-width: 22px;
+    padding: 1px 3px;
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 18px;
+    text-align: center;
 }
 .lexis-template-setting textarea {
     min-height: 88px;
@@ -131,12 +277,7 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     margin: 8px 0 4px;
 }
 .lexis-rule {
-    display: flex;
-    align-items: center;
-    gap: 6px;
     padding: 6px 8px;
-    border: 1px solid var(--background-modifier-border);
-    border-radius: 8px;
 }
 .lexis-rule input[type="text"] {
     flex: 1 1 auto;
@@ -243,7 +384,7 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     border-radius: 7px;
 }
 .lexis-popover-title:hover {
-    text-decoration: underline;
+    text-decoration-line: underline;
 }
 .lexis-popover-alias {
     font-size: calc(var(--lexis-popover-font-size, 14px) - 2px);
@@ -270,7 +411,7 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
 .lexis-popover-archive:hover {
     background: var(--interactive-accent);
     color: var(--text-on-accent);
-    text-decoration: none;
+    text-decoration-line: none;
 }
 .lexis-restore-modal .lexis-modal-btns {
     display: flex;
@@ -315,7 +456,7 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     margin-left: 6px;
 }
 .lexis-occ-src:hover {
-    text-decoration: underline;
+    text-decoration-line: underline;
 }
 
 /* 背单词复习视图 */
@@ -360,9 +501,10 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     -webkit-user-select: text;
     -webkit-touch-callout: default;
 }
-.lexis-rv-back * {
-    user-select: text !important;
-    -webkit-user-select: text !important;
+.lexis-review .lexis-rv-back,
+.lexis-review .lexis-rv-back * {
+    user-select: text;
+    -webkit-user-select: text;
     -webkit-touch-callout: default;
 }
 .lexis-rv-back img {
@@ -377,21 +519,21 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     justify-content: center;
     flex-wrap: wrap;
 }
-.lexis-rv-btn {
-    display: inline-flex !important;
-    flex-direction: column !important;
-    align-items: center !important;
-    justify-content: center !important;
+.lexis-review button.lexis-rv-btn {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
     gap: 4px;
-    height: auto !important;
-    min-height: 64px !important;
-    padding: 12px 20px !important;
+    height: auto;
+    min-height: 64px;
+    padding: 12px 20px;
     border-radius: 10px;
     cursor: pointer;
     border: 2px solid var(--background-modifier-border);
     background: var(--background-primary);
     min-width: 100px;
-    line-height: 1.3 !important;
+    line-height: 1.3;
     white-space: nowrap;
     overflow: visible;
     box-sizing: border-box;
@@ -418,7 +560,7 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     margin: 0;
 }
 .lexis-rv-word:hover {
-    text-decoration: underline;
+    text-decoration-line: underline;
     text-decoration-thickness: 1px;
 }
 .lexis-rv-label {
@@ -714,8 +856,8 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
 .lexis-occ-add:hover {
     opacity: 1;
 }
-.lexis-rv-cloze {
-    font-size: 22px !important;
+.lexis-rv-word.lexis-rv-cloze {
+    font-size: 22px;
     font-weight: 600;
     line-height: 1.5;
     text-align: center;
@@ -746,12 +888,12 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
 body.is-phone
     .workspace-leaf-content[data-type="lexis-review-view"]
     .view-content {
-    padding-bottom: 136px !important;
+    padding-bottom: 136px;
 }
 body.is-phone
     .workspace-leaf-content[data-type="lexis-home-view"]
     .view-content {
-    padding-bottom: 30px !important;
+    padding-bottom: 30px;
 }
 body.is-phone .workspace-leaf-content[data-type="lexis-review-view"] .lexis-rv-rate {
     position: fixed;
@@ -763,7 +905,7 @@ body.is-phone .workspace-leaf-content[data-type="lexis-review-view"] .lexis-rv-r
     grid-template-columns: repeat(4, 1fr);
     gap: 6px;
     width: auto;
-    margin: 0 !important;
+    margin: 0;
     padding: 8px;
     border: 1px solid var(--background-modifier-border);
     border-radius: 12px;
@@ -801,8 +943,8 @@ body.is-phone .workspace-leaf-content[data-type="lexis-review-view"] .lexis-revi
     .lexis-rv-word {
         font-size: 32px;
     }
-    .lexis-rv-cloze {
-        font-size: 20px !important;
+    .lexis-rv-word.lexis-rv-cloze {
+        font-size: 20px;
     }
     .lexis-rv-back {
         margin-top: 14px;
@@ -828,10 +970,10 @@ body.is-phone .workspace-leaf-content[data-type="lexis-review-view"] .lexis-revi
         gap: 6px;
         width: 100%;
     }
-    .lexis-rv-btn {
+    .lexis-review button.lexis-rv-btn {
         min-width: 0;
         min-height: 52px;
-        padding: 8px 4px !important;
+        padding: 8px 4px;
     }
     .lexis-rv-label {
         font-size: 13px;

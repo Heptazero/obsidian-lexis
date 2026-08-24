@@ -17,7 +17,7 @@
   pointer-events: auto;
 }
 
-lexis-zotero-popover {
+.lexis-zotero-popover {
   position: absolute;
   z-index: 2147483647;
   display: block;

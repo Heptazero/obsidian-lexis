@@ -187,16 +187,16 @@
 
   // 对标 Obsidian 的 inlineStyleForEntry:词典色/标签规则 → 颜色/线型,带透明度
   function inlineStyleFor(key) {
-    if (keyVisible && keyVisible.get(key) === false) return "text-decoration:none;background:none";
+    if (keyVisible && keyVisible.get(key) === false) return "text-decoration-line:none;background:none";
     // 用户关了「使用 Obsidian 标签着色」→ 只用全局色
     if (cfg.useObsidianStyle === false || !styleCfg) {
       let c = cfg.color || "#7c5cff";
       const s = cfg.style || "wavy";
       const a = (cfg.opacity != null ? cfg.opacity : 100) / 100;
       if (a < 1) c = `color-mix(in srgb, ${c} ${Math.round(a * 100)}%, transparent)`;
-      if (s === "background") return `background-color:${c};border-radius:3px;padding:0 1px;text-decoration:none`;
+      if (s === "background") return `background-color:${c};border-radius:3px;padding:0 1px;text-decoration-line:none`;
       const line = s === "underline" ? "solid" : "wavy";
-      return `text-decoration:underline ${line} ${c};text-underline-offset:2px`;
+      return `text-decoration-line:underline;text-decoration-style:${line};text-decoration-color:${c};text-underline-offset:2px`;
     }
     // 颜色/线型优先用服务端按「标签规则 > 词典色 > 全局」算好的值(与 ob 完全一致);没有则客户端兜底解析
     let color = keyColor.get(key);
@@ -213,9 +213,9 @@
     if (!styleKind) styleKind = styleCfg.highlightStyle || cfg.style || "wavy";
     const alpha = keyOpacity.has(key) ? keyOpacity.get(key) : (styleCfg.highlightOpacity != null ? styleCfg.highlightOpacity : 1);
     if (alpha < 1) color = `color-mix(in srgb, ${color} ${Math.round(alpha * 100)}%, transparent)`;
-    if (styleKind === "background") return `background-color:${color};border-radius:3px;padding:0 1px;text-decoration:none`;
+    if (styleKind === "background") return `background-color:${color};border-radius:3px;padding:0 1px;text-decoration-line:none`;
     const line = styleKind === "underline" ? "solid" : "wavy";
-    return `text-decoration:underline ${line} ${color};text-underline-offset:2px`;
+    return `text-decoration-line:underline;text-decoration-style:${line};text-decoration-color:${color};text-underline-offset:2px`;
   }
 
   function skip(node) {

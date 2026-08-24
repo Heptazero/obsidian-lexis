@@ -74,23 +74,23 @@
 }
 
 .lexis-pref-field input {
-  appearance: none !important;
-  -moz-appearance: none !important;
+  appearance: none;
+  -moz-appearance: none;
   width: 100%;
   min-width: 0;
   height: 32px;
   padding: 5px 8px;
-  border: var(--material-border, 1px solid rgba(127, 127, 127, .38)) !important;
+  border: var(--material-border, 1px solid rgba(127, 127, 127, .38));
   border-radius: 6px;
-  background: var(--material-background, Field) !important;
-  color: var(--fill-primary, inherit) !important;
+  background: var(--material-background, Field);
+  color: var(--fill-primary, inherit);
   font: inherit;
   font-weight: 400;
-  text-align: start !important;
+  text-align: start;
 }
 
 .lexis-pref-field input:focus {
-  border-color: #7c5cff !important;
+  border-color: #7c5cff;
   outline: 2px solid color-mix(in srgb, #7c5cff 22%, transparent);
   outline-offset: 0;
 }

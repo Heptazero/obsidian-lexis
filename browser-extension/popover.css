@@ -1,9 +1,13 @@
 :host {
-  all: initial;
   position: absolute;
   z-index: 2147483647;
   display: block;
   color-scheme: light dark;
+  font-style: normal;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-align: left;
+  text-transform: none;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -46,9 +50,9 @@
 }
 .lexis-web-pop .lexis-web-pop-title,
 .lexis-web-pop .lexis-web-title-main {
-  font-size: calc(var(--lexis-popover-font-size, 14px) + 3px) !important;
-  font-weight: 700 !important;
-  line-height: 1.3 !important;
+  font-size: calc(var(--lexis-popover-font-size, 14px) + 3px);
+  font-weight: 700;
+  line-height: 1.3;
 }
 .lexis-web-pop .lexis-web-open {
   display: flex;
@@ -57,21 +61,21 @@
   gap: 7px;
   min-width: 0;
   color: var(--lexis-web-color, #7c5cff);
-  text-decoration: none;
+  text-decoration-line: none;
   overflow-wrap: anywhere;
   cursor: pointer;
 }
 .lexis-web-pop .lexis-web-title-sub {
   color: #6e7781;
-  font-size: calc(var(--lexis-popover-font-size, 14px) - 2px) !important;
-  font-weight: 400 !important;
+  font-size: calc(var(--lexis-popover-font-size, 14px) - 2px);
+  font-weight: 400;
   opacity: .78;
 }
 @media (prefers-color-scheme: dark) {
   .lexis-web-pop .lexis-web-title-sub { color: #a8adb4; }
 }
-.lexis-web-pop .lexis-web-open:hover { text-decoration: underline; }
-.lexis-web-pen { font-size: 12px !important; font-weight: 400; opacity: .55; }
+.lexis-web-pop .lexis-web-open:hover { text-decoration-line: underline; }
+.lexis-web-pen { font-size: 12px; font-weight: 400; opacity: .55; }
 .lexis-web-pop.has-corner-actions .lexis-web-pop-title { padding-right: 62px; }
 
 .lexis-web-pop-corner {
@@ -112,17 +116,17 @@
 .lexis-web-addbtn-del:hover { background: color-mix(in srgb, #e5534b 28%, transparent); }
 
 .lexis-web-pop-extra { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(128, 128, 128, .22); }
-.lexis-web-sec { margin: 8px 0 3px; font-size: 13px !important; font-weight: 700; opacity: .7; }
+.lexis-web-sec { margin: 8px 0 3px; font-size: 13px; font-weight: 700; opacity: .7; }
 .lexis-web-sec:first-child { margin-top: 0; }
 .lexis-web-rel { display: flex; flex-wrap: wrap; gap: 6px; }
 .lexis-web-rel a,
 .lexis-web-occ-src a,
-.lexis-web-ilink { color: var(--lexis-web-color, #7c5cff); text-decoration: none; }
-.lexis-web-rel a:hover { text-decoration: underline; }
+.lexis-web-ilink { color: var(--lexis-web-color, #7c5cff); text-decoration-line: none; }
+.lexis-web-rel a:hover { text-decoration-line: underline; }
 .lexis-web-occ { margin: 8px 0; }
 .lexis-web-occ p { display: inline; margin: 0; }
 .lexis-web-occ b { color: var(--lexis-web-color, #7c5cff); }
-.lexis-web-occ-src { font-size: 11px !important; opacity: .6; }
+.lexis-web-occ-src { font-size: 11px; opacity: .6; }
 .lexis-web-dim { opacity: .55; }
 
 .lexis-web-dict {
@@ -133,7 +137,7 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--lexis-web-color, #7c5cff) 14%, transparent);
   color: var(--lexis-web-color, #7c5cff);
-  font-size: 11px !important;
+  font-size: 11px;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -147,7 +151,7 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--lexis-web-color, #7c5cff) 16%, transparent);
   color: var(--lexis-web-color, #7c5cff);
-  font-size: 11px !important;
+  font-size: 11px;
   cursor: default;
 }
 .lexis-web-tag-excl { background: color-mix(in srgb, #e5534b 16%, transparent); color: #e5534b; }
@@ -205,7 +209,7 @@
 .lexis-web-pop-content h5,
 .lexis-web-pop-content h6 {
   margin: 10px 0 4px;
-  font-size: 15px !important;
+  font-size: 15px;
   font-weight: 700;
   text-transform: none;
   opacity: .8;
@@ -232,8 +236,8 @@
 }
 .lexis-web-pop-content pre { max-width: 100%; overflow-x: auto; }
 .lexis-web-pop-content a,
-.lexis-web-pop-content .lexis-web-ilink { color: var(--lexis-web-color, #7c5cff); text-decoration: none; }
-.lexis-web-pop-content a:hover { text-decoration: underline; }
+.lexis-web-pop-content .lexis-web-ilink { color: var(--lexis-web-color, #7c5cff); text-decoration-line: none; }
+.lexis-web-pop-content a:hover { text-decoration-line: underline; }
 .lexis-web-pop-content hr { margin: 8px 0; border: 0; border-top: 1px solid rgba(128, 128, 128, .25); }
 .lexis-web-pop-content img,
 .lexis-web-pop-content svg { max-width: 100%; height: auto; }

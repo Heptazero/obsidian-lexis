@@ -27,6 +27,7 @@ const MESSAGES = {
   "common.empty": { zh: "空", en: "Empty" },
   "common.failed": { zh: "失败", en: "Failed" },
   "common.cancel": { zh: "取消", en: "Cancel" },
+  "common.done": { zh: "完成", en: "Done" },
 
   "command.rebuild": { zh: "重建词条索引", en: "Rebuild entry index" },
   "command.review": { zh: "开始复习", en: "Start review" },
@@ -176,11 +177,14 @@ const MESSAGES = {
   "settings.dictionaryDesc": { zh: "每行一个词典；新词默认进入第一行。", en: "One dictionary per row; new entries go to the first." },
   "settings.folderPlaceholder": { zh: "文件夹，如 01-word", en: "Folder, e.g. 01-word" },
   "settings.templatePlaceholder": { zh: "模板路径；留空为白纸", en: "Template path; blank for an empty note" },
+  "settings.templaterTemplate": { zh: "由 Templater 文件夹模板接管：{path}", en: "Managed by the Templater folder template: {path}" },
   "settings.followGlobal": { zh: "跟随全局颜色", en: "Use global color" },
   "settings.dictionaryColor": { zh: "词典颜色", en: "Dictionary color" },
+  "settings.dictionaryAppearance": { zh: "词典高亮外观", en: "Dictionary highlight appearance" },
   "settings.resetGlobal": { zh: "恢复全局颜色", en: "Reset to global color" },
   "settings.deleteDictionary": { zh: "删除这个词典", en: "Delete this dictionary" },
   "settings.addDictionary": { zh: "+ 添加词典", en: "+ Add dictionary" },
+  "settings.reorder": { zh: "长按并拖动排序", en: "Press and drag to reorder" },
   "settings.tagsAsEntries": { zh: "按标签收录", en: "Include by tag" },
   "settings.tagsAsEntriesDesc": { zh: "与词典文件夹取并集。", en: "Combined with dictionary folders." },
   "settings.includeAliases": { zh: "别名也算词条", en: "Include aliases" },
@@ -195,7 +199,14 @@ const MESSAGES = {
   "settings.noInlineCategories": { zh: "暂无内联分类。", en: "No inline categories." },
   "settings.entryCount": { zh: "{count} 条", en: "{count} entries" },
   "settings.showHighlight": { zh: "显示高亮；关闭后仍可悬停", en: "Show highlight; hover remains available when off" },
+  "settings.showGroupHighlight": { zh: "启用这一组；关闭后子项不生效", en: "Enable this group; child rules are inactive when off" },
+  "settings.showSubsetHighlight": { zh: "启用这个子集", en: "Enable this subset" },
   "settings.resetInlineStyle": { zh: "恢复全局颜色和透明度", en: "Reset global color and opacity" },
+  "settings.categoryAppearance": { zh: "“{name}”的高亮外观", en: "Highlight appearance for “{name}”" },
+  "settings.inlineClassification": { zh: "分类方式", en: "Group by" },
+  "settings.inlineClassificationDesc": { zh: "最近标题共享标题颜色；按文件则整份文件共享颜色。", en: "Matching nearest headings share a color, or use one color per source file." },
+  "settings.classifyByHeading": { zh: "最近标题", en: "Nearest heading" },
+  "settings.classifyByFile": { zh: "文件", en: "File" },
   "settings.colorByHeading": { zh: "按标题分类着色", en: "Color by heading" },
   "settings.colorByHeadingDesc": { zh: "嵌套标题继承上级。", en: "Nested headings inherit from parents." },
   "settings.refreshCategories": { zh: "刷新分类", en: "Refresh categories" },
@@ -219,6 +230,8 @@ const MESSAGES = {
   "settings.tagColors": { zh: "按标签着色", en: "Color by tag" },
   "settings.tagPlaceholder": { zh: "标签", en: "Tag" },
   "settings.addTagRule": { zh: "+ 添加标签规则", en: "+ Add tag rule" },
+  "settings.tagAppearance": { zh: "标签规则外观", en: "Tag rule appearance" },
+  "settings.resetAppearance": { zh: "跟随全局", en: "Use global appearance" },
   "settings.popover": { zh: "悬浮卡", en: "Hover card" },
   "settings.popoverPreview": { zh: "悬浮卡预览", en: "Hover card preview" },
   "settings.popoverWidth": { zh: "卡片宽度", en: "Card width" },
@@ -715,469 +728,104 @@ function createOccurrenceSearch(options) {
   };
 }
 
-const LEXIS_REVIEW_VIEW = "lexis-review-view";
-const LEXIS_HOME_VIEW = "lexis-home-view";
-
-const DEFAULT_SETTINGS = {
-  language: "zh",
-  // 收录范围:多个文件夹(逗号/换行分隔) ∪ 携带任一标签的笔记(并集)。
-  // vocabFolders / excludeTags 不放默认值,迁移与兜底在 loadSettings 里做(留默认会盖掉用户老值)。
-  vocabTags: "", // 带任一此标签的笔记也算词库(与文件夹取并集)
-  includeAliases: true,
-  aliasSources: "", // 额外的别名来源属性名,逗号分隔(如 past,forms,variants)。留空只读 aliases/alias。
-  // 内联条目库:带 lexis-inline 属性(或 #lexis-inline 标签)的笔记可用「词条::批注」维护轻量词条。
-  inlineEntriesEnabled: true,
-  inlineEntryDelimiter: "::",
-  inlineCategoryColors: {}, // { "人物": "#d9534f" }，由资料笔记的标题分类自动生成设置项
-  inlineCategoryOpacity: {}, // { "人物": 0.65 }，留空时跟随全局高亮透明度
-  inlineCategoryHighlight: {}, // { "人物": false }，关闭后仍识别和显示悬浮批注，只隐藏高亮
-  enableHighlight: true,
-  enableLivePreview: true,
-  highlightStyle: "wavy",
-  highlightColor: "",
-  highlightOpacity: 1,
-  popoverWidth: 460,
-  popoverMaxHeight: 420,
-  popoverFontSize: 14,
-  hoverDelayMs: 250,
-  // 高亮渐隐:强度随 FSRS stability 单调变淡,归档词完全不高亮(见 fadeAlphaFor)
-  fadeByMemory: true,
-  fadeFloor: 0.25, // 淡到最后不低于这个透明度(0~1)
-  // 悬停回流:悬停查释义时,如果到期日比 N 天后还远,拉近到今天,提醒尽快复习(只挪 due,不碰 stability)
-  hoverFeedback: true,
-  hoverFeedbackDays: 3,
-  // 淘汰候选:入库满这么多天、且这么多天没自然相遇过,才会进候选列表(同一个阈值管两个条件)
-  retireCandidateDays: 90,
-  tagRules: [],
-  showRelated: true,
-  showOccurrences: true,
-  includePdfOccurrences: true,
-  occurrenceLimit: 6,
-  occurrenceFolders: "",
-  // Stage 3 (FSRS)
-  requestRetention: 0.9,
-  newPerDay: 20,
-  maxReviewsPerSession: 200,
-  reviewLog: {}, // { "YYYY-MM-DD": count } 供热力图(Stage 5)
-  reviewHistory: {}, // { "词条路径": [{date, s, grade, retention}] } 供单词级记忆曲线
-  showReviewMetadata: false,
-  // Stage 4
-  newWordTemplate: "template/单词模板.md",
-  emptyNotePreset: "blank",
-  // 划词出处模板:首行若为 Markdown 标题,其余内容作为每条出处的格式;留空则不自动写出处。
-  occurrenceTemplate: "#### 出处\n> {{sentence}}{{sourceSuffix}}",
-  // 批注小节标题:可以只填文字(默认按 #### 级别),也可以带级别(比如 "## 引用");留空用默认 "#### 批注"
-  annotationHeading: "",
-  // 卡片正面:note=单词→整篇;cloze=出处填空
-  cardFront: "note",
-  // 桌面端评分按钮底部间距(px)；移动端固定在原生工具栏上方。
-  reviewBottomSpace: 70,
-  // 浏览器扩展排除标签:打上任一此标签的单词不在网页高亮(多标签,逗号/空格分隔)。
-  // excludeTags 不放默认值,迁移在 loadSettings 里做。
-  // 浏览器桥接(本地 HTTP,只听 127.0.0.1,供 Chrome 扩展拉词库/划词添加)
-  bridgeEnabled: false,
-  bridgePort: 45945,
-  bridgeToken: "",
-  // 在 Obsidian 笔记里划词后,选区旁冒出"+ 加入词库"浮动药丸(阅读/编辑两种模式都生效)
-  selectionPill: true,
-  // 划词药丸上次选中的词典
-  lastSelectionFolder: "",
-  // 在 Obsidian 内置 PDF 阅读器里也高亮词库词(钩 pdf.js 文字层;扫描版无文字层则无效)
-  enablePdfHighlight: true,
-};
-
-// ---------- 小工具 ----------
-const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-// 词边界(支持中文):只有当词以英文字母/数字/下划线开头或结尾时才加 ASCII 边界
-// (避免 cat 命中 category);中文/日文等无空格语言不加边界,否则 \b 永不命中。
-const boundedSource = (word) => {
-  const lb = /^[A-Za-z0-9_]/.test(word) ? "(?<![A-Za-z0-9_])" : "";
-  const rb = /[A-Za-z0-9_]$/.test(word) ? "(?![A-Za-z0-9_])" : "";
-  return lb + escapeRe(word) + rb;
-};
-const escHtml = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-// 从网页/富文本粘贴来的不换行空格会被 MarkdownRenderer 转成 &nbsp;，落进 TeX 后触发 MathJax 的 Misplaced &。
-// 只规范传给渲染器的副本，不改用户笔记原文。
-const renderLexisMarkdown = (app, md, el, sourcePath, comp) => {
-  const clean = String(md == null ? "" : md).replace(/\u00a0/g, " ");
-  return MarkdownRenderer.render
-    ? MarkdownRenderer.render(app, clean, el, sourcePath, comp)
-    : MarkdownRenderer.renderMarkdown(clean, el, sourcePath, comp);
-};
-const round2 = (x) => Math.round(x * 100) / 100;
-function cssColorToHex(c) {
-  if (!c) return "#888888";
-  if (/^#[0-9a-fA-F]{6}$/.test(c.trim())) return c.trim();
-  const tmp = document.createElement("div");
-  tmp.style.color = c; document.body.appendChild(tmp);
-  const rgb = getComputedStyle(tmp).color; tmp.remove();
-  const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(rgb);
-  if (!m) return "#888888";
-  return "#" + [m[1], m[2], m[3]].map((x) => (+x).toString(16).padStart(2, "0")).join("");
-}
-function fmtDate(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
-function todayStr() { return fmtDate(new Date()); }
-function parseDate(s) { const [y, m, d] = String(s).slice(0, 10).split("-").map(Number); return new Date(y, (m || 1) - 1, d || 1); }
-function addDaysStr(baseStr, days) { const d = baseStr ? parseDate(baseStr) : new Date(); d.setDate(d.getDate() + days); return fmtDate(d); }
-function daysBetween(aStr, bStr) { return Math.max(0, Math.round((parseDate(bStr) - parseDate(aStr)) / 86400000)); }
-
-// ---------- FSRS ----------
-const FSRS_W = [0.40255, 1.18385, 3.173, 15.69105, 7.1949, 0.5345, 1.4604, 0.0046, 1.54575, 0.1192, 1.01925, 1.9395, 0.11, 0.29605, 2.2698, 0.2315, 2.9898, 0.51655, 0.6621];
-const FSRS_DECAY = -0.5;
-const FSRS_FACTOR = Math.pow(0.9, 1 / FSRS_DECAY) - 1;
-const MAX_IVL = 36500;
-const FSRS = {
-  clampD: (d) => Math.min(10, Math.max(1, d)),
-  initStability: (g) => Math.max(0.1, FSRS_W[g - 1]),
-  initDifficulty: (g) => FSRS.clampD(FSRS_W[4] - Math.exp(FSRS_W[5] * (g - 1)) + 1),
-  linearDamping: (delta, d) => (delta * (10 - d)) / 9,
-  meanReversion: (init, cur) => FSRS_W[7] * init + (1 - FSRS_W[7]) * cur,
-  nextDifficulty(d, g) { const delta = -FSRS_W[6] * (g - 3); const dd = d + FSRS.linearDamping(delta, d); return FSRS.clampD(FSRS.meanReversion(FSRS.initDifficulty(4), dd)); },
-  retrievability(t, s) { return Math.pow(1 + FSRS_FACTOR * t / s, FSRS_DECAY); },
-  nextRecallStability(d, s, r, g) { const hard = g === 2 ? FSRS_W[15] : 1; const easy = g === 4 ? FSRS_W[16] : 1; return s * (1 + Math.exp(FSRS_W[8]) * (11 - d) * Math.pow(s, -FSRS_W[9]) * (Math.exp((1 - r) * FSRS_W[10]) - 1) * hard * easy); },
-  nextForgetStability(d, s, r) { return FSRS_W[11] * Math.pow(d, -FSRS_W[12]) * (Math.pow(s + 1, FSRS_W[13]) - 1) * Math.exp((1 - r) * FSRS_W[14]); },
-  nextInterval(s, R) { const ivl = (s / FSRS_FACTOR) * (Math.pow(R, 1 / FSRS_DECAY) - 1); return Math.min(MAX_IVL, Math.max(1, Math.round(ivl))); },
-};
-
-const LexisReviewView = createReviewView({
-  reviewViewType: LEXIS_REVIEW_VIEW,
-  todayStr,
-  renderLexisMarkdown,
-});
-
-// 外部阅读端（浏览器、未来的 Zotero）只通过这条本机桥接访问 Lexis。
-// 这里负责 HTTP 生命周期与路由；词典规则和写入动作仍由 LexisPlugin 作为唯一真相处理。
-class LexisBridge {
-  constructor(plugin) {
-    this.plugin = plugin;
-    this.server = null;
-  }
-
-  get running() { return !!this.server; }
-
-  generateToken() {
-    const bytes = new Uint8Array(16);
-    (window.crypto || crypto).getRandomValues(bytes);
-    return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
-  }
-
-  start() {
-    if (this.server) return;
-    let http;
-    try { http = require("http"); } catch (_e) {}
-    if (!http) { new Notice(this.plugin.t("notice.desktopBridge")); return; }
-    const port = Number(this.plugin.settings.bridgePort) || 45945;
-    const server = http.createServer((req, res) => {
-      this.handle(req, res).catch((err) => {
-        try { res.writeHead(500); res.end(String(err && err.message || err)); } catch (_e) {}
-      });
-    });
-    server.on("error", (err) => {
+// ---------- 生成自 src/bridge-server.js ----------
+function createBridgeServer({ Notice }) {
+  // 外部阅读端（浏览器、未来的 Zotero）只通过这条本机桥接访问 Lexis。
+  // 这里负责 HTTP 生命周期与路由；词典规则和写入动作仍由 LexisPlugin 作为唯一真相处理。
+  class LexisBridge {
+    constructor(plugin) {
+      this.plugin = plugin;
       this.server = null;
-      const reason = err.code === "EADDRINUSE" ? this.plugin.t("notice.portBusy", { port }) : (err.code || err.message);
-      new Notice(this.plugin.t("notice.bridgeFailed", { reason }));
-    });
-    server.listen(port, "127.0.0.1", () => this.plugin.updateStatusBar());
-    this.server = server;
+    }
+
+    get running() { return !!this.server; }
+
+    generateToken() {
+      const bytes = new Uint8Array(16);
+      (window.crypto || crypto).getRandomValues(bytes);
+      return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+    }
+
+    start() {
+      if (this.server) return;
+      let http;
+      try { http = require("http"); } catch (_e) {}
+      if (!http) { new Notice(this.plugin.t("notice.desktopBridge")); return; }
+      const port = Number(this.plugin.settings.bridgePort) || 45945;
+      const server = http.createServer((req, res) => {
+        this.handle(req, res).catch((err) => {
+          try { res.writeHead(500); res.end(String(err && err.message || err)); } catch (_e) {}
+        });
+      });
+      server.on("error", (err) => {
+        this.server = null;
+        const reason = err.code === "EADDRINUSE" ? this.plugin.t("notice.portBusy", { port }) : (err.code || err.message);
+        new Notice(this.plugin.t("notice.bridgeFailed", { reason }));
+      });
+      server.listen(port, "127.0.0.1", () => this.plugin.updateStatusBar());
+      this.server = server;
+    }
+
+    stop() {
+      if (!this.server) return;
+      try { this.server.close(); } catch (_e) {}
+      this.server = null;
+      this.plugin.updateStatusBar();
+    }
+
+    restart() {
+      this.stop();
+      if (this.plugin.settings.bridgeEnabled) this.start();
+    }
+
+    cors() {
+      return {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "X-Lexis-Token, Content-Type",
+        "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+      };
+    }
+
+    async handle(req, res) {
+      const plugin = this.plugin;
+      const cors = this.cors();
+      const send = (code, obj) => {
+        res.writeHead(code, Object.assign({ "Content-Type": "application/json; charset=utf-8" }, cors));
+        res.end(JSON.stringify(obj));
+      };
+      if (req.method === "OPTIONS") { res.writeHead(204, cors); res.end(); return; }
+      const url = new URL(req.url, "http://127.0.0.1");
+      const path = url.pathname.replace(/\/+$/, "") || "/";
+      if (path === "/ping" || path === "/") return send(200, { ok: true, app: "lexis", version: plugin.manifest.version, vault: plugin.app.vault.getName() });
+      const token = req.headers["x-lexis-token"] || url.searchParams.get("token") || "";
+      if (!plugin.settings.bridgeToken || token !== plugin.settings.bridgeToken) return send(401, { ok: false, error: "bad-token" });
+      if (path === "/words" && req.method === "GET") return send(200, plugin.bridgeWordList());
+      if (path === "/word" && req.method === "GET") return send(200, await plugin.bridgeWordDetail(url.searchParams.get("key") || url.searchParams.get("w")));
+      if (path === "/word" && req.method === "DELETE") return send(200, await plugin.bridgeDeleteWord(url.searchParams.get("key") || ""));
+      if (path === "/add" && req.method === "POST") return send(200, await plugin.bridgeAddWord(await this.readBody(req)));
+      if (path === "/tag" && req.method === "POST") return send(200, await plugin.bridgeTagWord(await this.readBody(req)));
+      if (path === "/note" && req.method === "POST") return send(200, await plugin.bridgeAnnotate(await this.readBody(req)));
+      if (path === "/move" && req.method === "POST") return send(200, await plugin.bridgeMoveWord(await this.readBody(req)));
+      if (path === "/encounter" && req.method === "POST") return send(200, await plugin.bridgeEncounter(await this.readBody(req)));
+      return send(404, { ok: false, error: "not-found" });
+    }
+
+    readBody(req) {
+      return new Promise((resolve) => {
+        let data = "";
+        req.on("data", (chunk) => { data += chunk; if (data.length > 1e6) req.destroy(); });
+        req.on("end", () => { try { resolve(JSON.parse(data || "{}")); } catch (_e) { resolve({}); } });
+        req.on("error", () => resolve({}));
+      });
+    }
   }
 
-  stop() {
-    if (!this.server) return;
-    try { this.server.close(); } catch (_e) {}
-    this.server = null;
-    this.plugin.updateStatusBar();
-  }
-
-  restart() {
-    this.stop();
-    if (this.plugin.settings.bridgeEnabled) this.start();
-  }
-
-  cors() {
-    return {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers": "X-Lexis-Token, Content-Type",
-      "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-    };
-  }
-
-  async handle(req, res) {
-    const plugin = this.plugin;
-    const cors = this.cors();
-    const send = (code, obj) => {
-      res.writeHead(code, Object.assign({ "Content-Type": "application/json; charset=utf-8" }, cors));
-      res.end(JSON.stringify(obj));
-    };
-    if (req.method === "OPTIONS") { res.writeHead(204, cors); res.end(); return; }
-    const url = new URL(req.url, "http://127.0.0.1");
-    const path = url.pathname.replace(/\/+$/, "") || "/";
-    if (path === "/ping" || path === "/") return send(200, { ok: true, app: "lexis", version: plugin.manifest.version, vault: plugin.app.vault.getName() });
-    const token = req.headers["x-lexis-token"] || url.searchParams.get("token") || "";
-    if (!plugin.settings.bridgeToken || token !== plugin.settings.bridgeToken) return send(401, { ok: false, error: "bad-token" });
-    if (path === "/words" && req.method === "GET") return send(200, plugin.bridgeWordList());
-    if (path === "/word" && req.method === "GET") return send(200, await plugin.bridgeWordDetail(url.searchParams.get("key") || url.searchParams.get("w")));
-    if (path === "/word" && req.method === "DELETE") return send(200, await plugin.bridgeDeleteWord(url.searchParams.get("key") || ""));
-    if (path === "/add" && req.method === "POST") return send(200, await plugin.bridgeAddWord(await this.readBody(req)));
-    if (path === "/tag" && req.method === "POST") return send(200, await plugin.bridgeTagWord(await this.readBody(req)));
-    if (path === "/note" && req.method === "POST") return send(200, await plugin.bridgeAnnotate(await this.readBody(req)));
-    if (path === "/move" && req.method === "POST") return send(200, await plugin.bridgeMoveWord(await this.readBody(req)));
-    if (path === "/encounter" && req.method === "POST") return send(200, await plugin.bridgeEncounter(await this.readBody(req)));
-    return send(404, { ok: false, error: "not-found" });
-  }
-
-  readBody(req) {
-    return new Promise((resolve) => {
-      let data = "";
-      req.on("data", (chunk) => { data += chunk; if (data.length > 1e6) req.destroy(); });
-      req.on("end", () => { try { resolve(JSON.parse(data || "{}")); } catch (_e) { resolve({}); } });
-      req.on("error", () => resolve({}));
-    });
-  }
+  return LexisBridge;
 }
 
-module.exports = class LexisPlugin extends Plugin {
-  async onload() {
-    try {
-    await this.loadSettings();
-    this.i18n = createI18n(() => this.settings.language);
-    this.applyReviewMetadataVisibility();
-
-    this.index = new Map();
-    this.vocabPaths = new Set();
-    this.stats = { words: 0, aliases: 0, due: 0 };
-    this._pattern = null;
-    this._rebuildTimer = null;
-    this._popover = null;
-    this._popoverComp = null;
-    this._hideTimer = null;
-    this._showTimer = null;
-    this._showTarget = null;
-    this._occCache = new Map();
-    this.occurrenceSearch = createOccurrenceSearch({
-      app: this.app,
-      loadPdfJs: () => obsidian.loadPdfJs(),
-      boundedSource,
-      extractSentence: (content, index) => this.extractSentence(content, index),
-      markdownAllowed: (file) => !this.inVocabFolder(file.path) && !this.inlineSourcePaths?.has(file.path),
-      inScope: (path, scope) => this.inScope(path, scope),
-    });
-    this.liveAvailable = false;
-    this._encounters = {};
-    this._encSaveTimer = 0;
-    this._encounterDedup = {};
-    this._passiveSeenToday = new Set();
-    this._pageHighlightState = new WeakMap();
-    this._reviewSessions = new WeakMap();
-    await this.loadEncounters();
-    this.registerEvent(this.app.workspace.on("file-open", (file) => {
-      if (file instanceof TFile && this.inVocabFolder(file.path)) this.recordEncounter(file, "open");
-      window.requestAnimationFrame(() => this.syncActivePageHighlightState());
-    }));
-    this.registerEvent(this.app.workspace.on("active-leaf-change", (leaf) => this.syncActivePageHighlightState(leaf)));
-
-    this.statusBarEl = this.addStatusBarItem();
-    if (this.statusBarEl) {
-      this.statusBarEl.style.cursor = "pointer";
-      this.statusBarEl.setAttribute("aria-label", this.t("status.rebuildAria"));
-      this.registerDomEvent(this.statusBarEl, "click", () => this.rebuildIndex(true));
-    }
-
-    this.addCommand({ id: "rebuild-index", name: this.t("command.rebuild"), callback: () => this.rebuildIndex(true) });
-    this.addCommand({ id: "open-review", name: this.t("command.review"), callback: () => this.openReview() });
-    this.addCommand({ id: "add-selected-word", name: this.t("command.addSelection"), callback: () => this.addSelectedWordCommand() });
-    this.addCommand({ id: "open-home", name: this.t("command.home"), callback: () => this.openHome() });
-    this.addCommand({
-      id: "toggle-current-page-highlights",
-      name: this.t("command.toggleHighlights"),
-      checkCallback: (checking) => {
-        const page = this.currentHighlightPage();
-        if (!page) return false;
-        if (checking) return true;
-        this.toggleCurrentPageHighlights(page);
-        return true;
-      },
-    });
-    this.addRibbonIcon("graduation-cap", this.t("ribbon.home"), () => this.openHome());
-    this.addRibbonIcon("brain", this.t("ribbon.review"), () => this.openReview());
-
-    // ---------- 生命周期命令(归档/恢复/常驻),只对当前打开的词条笔记生效 ----------
-    this.addCommand({
-      id: "archive-word",
-      name: this.t("command.archive"),
-      checkCallback: (checking) => {
-        const file = this.app.workspace.getActiveFile();
-        if (!file || !this.inVocabFolder(file.path) || this.readLifecycle(file).archived) return false;
-        if (checking) return true;
-        this.setArchived(file, true).then(() => new Notice(this.t("notice.archived", { word: file.basename })));
-        return true;
-      },
-    });
-    this.addCommand({
-      id: "restore-word",
-      name: this.t("command.restore"),
-      checkCallback: (checking) => {
-        const file = this.app.workspace.getActiveFile();
-        if (!file || !this.inVocabFolder(file.path) || !this.readLifecycle(file).archived) return false;
-        if (checking) return true;
-        new LexisRestoreModal(this.app, this, file).open();
-        return true;
-      },
-    });
-    this.addCommand({
-      id: "toggle-pin-word",
-      name: this.t("command.pin"),
-      checkCallback: (checking) => {
-        const file = this.app.workspace.getActiveFile();
-        if (!file || !this.inVocabFolder(file.path)) return false;
-        if (checking) return true;
-        const pinned = this.readLifecycle(file).pinned;
-        this.setPinned(file, !pinned).then(() => new Notice(this.t(!pinned ? "notice.pinned" : "notice.unpinned", { word: file.basename })));
-        return true;
-      },
-    });
-    this.addCommand({
-      id: "migrate-familiar-tag-to-archived",
-      name: this.t("command.migrate"),
-      callback: async () => {
-        const files = this.app.vault.getMarkdownFiles().filter((f) => this.inVocabFolder(f.path) && this.getTags(f).has("熟悉") && !this.readLifecycle(f).archived && !this.readLifecycle(f).retired);
-        if (!files.length) { new Notice(this.t("notice.noFamiliar")); return; }
-        for (const f of files) await this.app.fileManager.processFrontMatter(f, (fm) => { fm["lexis-status"] = "archived"; });
-        this.rebuildIndex(false);
-        new Notice(this.t("notice.migrated", { count: files.length }));
-      },
-    });
-    this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => {
-      if (!(file instanceof TFile) || !this.inVocabFolder(file.path)) return;
-      const { archived, pinned } = this.readLifecycle(file);
-      menu.addItem((it) => it.setTitle(this.t(archived ? "menu.restore" : "menu.archive")).setIcon(archived ? "archive-restore" : "archive").onClick(() => {
-        if (archived) new LexisRestoreModal(this.app, this, file).open();
-        else this.setArchived(file, true).then(() => new Notice(this.t("notice.archived", { word: file.basename })));
-      }));
-      menu.addItem((it) => it.setTitle(this.t(pinned ? "menu.unpin" : "menu.pin")).setIcon(pinned ? "pin-off" : "pin").onClick(() => {
-        this.setPinned(file, !pinned).then(() => new Notice(this.t(!pinned ? "notice.pinned" : "notice.unpinned", { word: file.basename })));
-      }));
-    }));
-
-    this.registerView(LEXIS_REVIEW_VIEW, (leaf) => new LexisReviewView(leaf, this));
-    this.registerView(LEXIS_HOME_VIEW, (leaf) => new LexisHomeView(leaf, this));
-
-    this.addSettingTab(new LexisSettingTab(this.app, this));
-
-    this.registerMarkdownPostProcessor((el, ctx) => this.highlightElement(el, ctx));
-    this.registerMarkdownCodeBlockProcessor("lexis", (src, el, ctx) => this.renderLexisBlock(el, ctx, src));
-    this.registerMarkdownCodeBlockProcessor("lexis-heatmap", (src, el) => this.renderHeatmap(el));
-    this.registerMarkdownCodeBlockProcessor("lexis-home", (src, el) => this.renderHomeBlock(el));
-    this.setupLiveExtension();
-    this.setupPdfHighlight();
-    this.setupEpubIframeHighlight();
-
-    this.registerDomEvent(document, "mouseover", (e) => this.onMouseOver(e));
-    this.registerDomEvent(document, "mouseout", (e) => this.onMouseOut(e));
-    this.registerDomEvent(document, "click", (e) => this.onClick(e));
-    this.registerDomEvent(window, "scroll", (e) => { if (this._popover && e.target instanceof Node && this._popover.contains(e.target)) return; this.removePopover(); this.removeSelPill(); }, { capture: true });
-    // 划词添加:松开鼠标后,若选区在笔记里则冒出"+ 加入词库"药丸
-    this.registerDomEvent(document, "mouseup", (e) => this.maybeShowSelPill(e));
-    this.registerDomEvent(document, "keydown", (e) => { if (e.key === "Escape") this.removeSelPill(); });
-
-    this.app.workspace.onLayoutReady(() => { this.rebuildIndex(false); this.syncActivePageHighlightState(); });
-    this.registerEvent(this.app.vault.on("create", (f) => this.maybeRebuild(f)));
-    this.registerEvent(this.app.vault.on("delete", (f) => this.maybeRebuild(f)));
-    this.registerEvent(this.app.vault.on("rename", (f, old) => this.maybeRebuild(f, old)));
-    this.registerEvent(this.app.vault.on("modify", (file) => {
-      this._occCache.clear();
-      if (file?.extension === "pdf") this.occurrenceSearch.invalidatePdf(file.path);
-      if (this.isInlineSourceFile(file) || this.inlineSourcePaths?.has(file?.path)) this.scheduleRebuild();
-    }));
-    // 词条元数据变化会影响别名、排除标签、配色和生命周期；无论是否启用“按标签收录”都要重建。
-    // 同时保留未收录文件的判断，让它能因新增收录标签进入词库。
-    this.registerEvent(this.app.metadataCache.on("changed", (file) => {
-      if (this.vocabPaths.has(file.path) || this.isVocabFile(file) || this.isInlineSourceFile(file) || this.inlineSourcePaths?.has(file?.path)) this.scheduleRebuild();
-    }));
-
-    // 划词添加(右键菜单)
-    this.registerEvent(this.app.workspace.on("editor-menu", (menu, editor, view) => {
-      const sel = (editor.getSelection() || "").trim();
-      if (!sel || sel.length > 60) return;
-      const label = sel.length > 16 ? sel.slice(0, 16) + "…" : sel;
-      const dicts = this.dictFolders();
-      if (dicts.length > 1) {
-        // 多词典:每个文件夹一项「添加到 <folder>」
-        for (const f of dicts) {
-          menu.addItem((item) => item
-            .setTitle(this.t("menu.addTo", { word: label, folder: f }))
-            .setIcon("book-plus")
-            .onClick(() => this.addWordFromSelection(sel, editor, view, f)));
-        }
-      } else {
-        menu.addItem((item) => item
-          .setTitle(this.t("menu.add", { word: label }))
-          .setIcon("book-plus")
-          .onClick(() => this.addWordFromSelection(sel, editor, view)));
-      }
-    }));
-
-    // 外部阅读端桥接:Chrome 与未来 Zotero 共用同一条本机协议。
-    this.bridge = new LexisBridge(this);
-    if (this.settings.bridgeEnabled) {
-      if (!this.settings.bridgeToken) { this.settings.bridgeToken = this.bridge.generateToken(); await this.saveSettings(); }
-      this.bridge.start();
-    }
-    } catch (err) {
-      console.error("[Lexis] onload 失败:", err?.stack || err);
-      if (typeof Notice !== "undefined") new Notice(this.t("notice.loadFailed", { error: err?.message || err }));
-    }
-  }
-
-  onunload() {
-    window.clearTimeout(this._rebuildTimer);
-    window.clearTimeout(this._hideTimer);
-    window.clearTimeout(this._showTimer);
-    if (this._encSaveTimer) { window.clearTimeout(this._encSaveTimer); this.saveEncounters(); }
-    this.removePopover();
-    this.removeSelPill();
-    this.teardownPdfHighlight();
-    this.teardownEpubIframeHighlight();
-    this.bridge?.stop();
-    document.body?.classList.remove("lexis-show-review-metadata");
-  }
-
-  async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-    if ((!this.settings.tagRules || !this.settings.tagRules.length) && this.settings.tagRulesText) {
-      this.settings.tagRules = this.parseTagRulesText(this.settings.tagRulesText);
-      delete this.settings.tagRulesText;
-      await this.saveData(this.settings);
-    }
-    if (!Array.isArray(this.settings.tagRules)) this.settings.tagRules = [];
-    if (!this.settings.inlineCategoryColors || typeof this.settings.inlineCategoryColors !== "object" || Array.isArray(this.settings.inlineCategoryColors)) this.settings.inlineCategoryColors = {};
-    if (!this.settings.inlineCategoryOpacity || typeof this.settings.inlineCategoryOpacity !== "object" || Array.isArray(this.settings.inlineCategoryOpacity)) this.settings.inlineCategoryOpacity = {};
-    if (!this.settings.inlineCategoryHighlight || typeof this.settings.inlineCategoryHighlight !== "object" || Array.isArray(this.settings.inlineCategoryHighlight)) this.settings.inlineCategoryHighlight = {};
-    if (!this.settings.reviewLog) this.settings.reviewLog = {};
-    if (!this.settings.reviewHistory || typeof this.settings.reviewHistory !== "object" || Array.isArray(this.settings.reviewHistory)) this.settings.reviewHistory = {};
-    // 单值 → 多值迁移(收录文件夹 / 网页排除标签)。旧键不在 DEFAULT_SETTINGS,故能区分"未迁移"。
-    if (this.settings.vocabFolders == null) this.settings.vocabFolders = this.settings.vocabFolder != null ? this.settings.vocabFolder : "01-word";
-    if (this.settings.excludeTags == null) this.settings.excludeTags = this.settings.excludeTag || "";
-    if (this.settings.vocabTags == null) this.settings.vocabTags = "";
-    // 词典表:文件夹来源升级成 [{folder, template}]。从旧 vocabFolders 迁移(模板留空=用全局默认)。
-    if (!Array.isArray(this.settings.dicts)) {
-      this.settings.dicts = this.parseFolders(this.settings.vocabFolders).map((f) => ({ folder: f, template: "" }));
-    }
-  }
-
-  t(key, vars) { return this.i18n ? this.i18n.t(key, vars) : key; }
-  async saveSettings() { await this.saveData(this.settings); }
-  applyReviewMetadataVisibility() {
-    document.body?.classList.toggle("lexis-show-review-metadata", !!this.settings.showReviewMetadata);
-  }
-  parseTagRulesText(text) {
-    const rules = [];
-    for (const line of (text || "").split("\n")) {
-      const m = /^\s*#?([^:：]+)[:：]\s*(\S+)(?:\s+(wavy|underline|background))?\s*$/.exec(line);
-      if (m) rules.push({ tag: m[1].trim(), color: m[2].trim(), style: m[3] || "" });
-    }
-    return rules;
-  }
-
+// ---------- 生成自 src/bridge-api.js ----------
+function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, escapeRe, renderLexisMarkdown, finishRenderMath, escHtml }) {
+  class BridgeApi {
   // ---------- 词典桥接动作（由 Obsidian 卡片与外部阅读端共同调用） ----------
   // 网页划词/加出处:词不在库→新建,在库→加出处。来源是网址链接 [标题](url),不是 [[内链]]
   async bridgeAddWord(payload) {
@@ -1239,11 +887,14 @@ module.exports = class LexisPlugin extends Plugin {
       }
       await this.ensureFolder(folder);
       const tpl = await this.templateForFolder(folder);
-      let content = this.renderTemplate(tpl != null ? tpl : this.minimalSkeleton(), { word, date: todayStr() });
-      if (occurrence) content = this.insertOccurrence(content, occurrence);
-      // 别名注入到 frontmatter 再建文件,保证 metadataCache 第一时间就包含别名
-      if (alias) content = injectAlias(content);
-      const file = await this.app.vault.create(targetPath, content);
+      const content = this.renderTemplate(tpl != null ? tpl : this.minimalSkeleton(), { word, date: todayStr() });
+      const file = await this.createEntryFile(targetPath, folder, content, (templateContent) => {
+        let next = templateContent;
+        if (occurrence) next = this.insertOccurrence(next, occurrence);
+        // 别名注入到 frontmatter 再建文件,保证 metadataCache 第一时间就包含别名
+        if (alias) next = injectAlias(next);
+        return next;
+      });
       this.recordEncounter(file, "add");
       this.rebuildIndex(false);
       // 保险:metadataCache 偶尔延迟,手动确保别名进索引
@@ -1480,7 +1131,7 @@ module.exports = class LexisPlugin extends Plugin {
   bridgeWordList() {
     const words = [];
     // 已归档/已淘汰的词不发给浏览器扩展——扩展自己没有这套生命周期概念,最简单的处理是压根不让它高亮
-    for (const [key, e] of this.index) { if (e.archived || e.retired) continue; words.push({ key, word: e.display, alias: !!e.isAlias, inline: !!e.inline, tags: [...(e.tags || [])], file: e.file && e.file.path, color: this.colorForEntry(e), opacity: e.inline ? this.highlightAlphaForEntry(e) : undefined, visible: this.highlightVisibleForEntry(e), wstyle: this.styleKindForEntry(e) }); }
+    for (const [key, e] of this.index) { if (e.archived || e.retired) continue; words.push({ key, word: e.display, alias: !!e.isAlias, inline: !!e.inline, tags: [...(e.tags || [])], file: e.file && e.file.path, color: this.colorForEntry(e), opacity: this.highlightAlphaForEntry(e), visible: this.highlightVisibleForEntry(e), wstyle: this.styleKindForEntry(e) }); }
     return {
       ok: true, version: this.manifest.version, count: words.length, words,
       styleConfig: {
@@ -1709,6 +1360,15 @@ module.exports = class LexisPlugin extends Plugin {
     return html;
   }
 
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(BridgeApi.prototype);
+  delete descriptors.constructor;
+  return descriptors;
+}
+
+// ---------- 生成自 src/highlight-engine.js ----------
+function createHighlightEngine({ FSRS, Notice, boundedSource, todayStr }) {
+  class HighlightEngine {
   // ---------- 索引 ----------
   normalizeFolder(p) { return (p || "").trim().replace(/^\/+|\/+$/g, ""); }
   // 单一真相:rebuildIndex 算出的命中路径集合。支持"文件夹∪标签"两种收录,且 14 处调用点签名不变。
@@ -1739,7 +1399,7 @@ module.exports = class LexisPlugin extends Plugin {
     if (marker === true || marker === 1 || /^(true|yes|1)$/i.test(String(marker || ""))) return true;
     return this.getTags(file).has("lexis-inline");
   }
-  // 轻量词条只存在于一份资料笔记里,不建单独文件、也不参与 FSRS。最近标题是分类;设置页按分类统一配色。
+  // 轻量词条只存在于一份资料笔记里,不建单独文件、也不参与 FSRS。最近标题负责分组,上级标题只提供设置页层级与精确跳转。
   parseInlineEntries(content, file) {
     const delimiter = this.inlineDelimiter();
     const lines = String(content || "").split(/\r?\n/);
@@ -1759,7 +1419,7 @@ module.exports = class LexisPlugin extends Plugin {
       if (heading) {
         const level = heading[1].length;
         headingStack.length = level;
-        headingStack[level - 1] = heading[2].trim();
+        headingStack[level - 1] = { name: heading[2].trim(), level, line: lineNo };
         continue;
       }
       const at = line.indexOf(delimiter);
@@ -1769,9 +1429,10 @@ module.exports = class LexisPlugin extends Plugin {
       if (!left || /^#/.test(left)) continue;
       // 旧版 color:: 指令不再参与配色,但继续跳过它,避免被错误识别为词条。
       if (left.toLowerCase() === "color") continue;
-      const categories = headingStack.filter(Boolean).reverse();
+      const headingPath = headingStack.filter(Boolean).map((item) => ({ ...item }));
+      const categories = headingPath.map((item) => item.name).reverse();
       const category = categories[0] || "";
-      out.push({ display: left, file, isAlias: false, tags: new Set(), inline: true, annotation: right, category, categories, line: lineNo });
+      out.push({ display: left, file, isAlias: false, tags: new Set(), inline: true, annotation: right, category, categories, headingPath, line: lineNo });
     }
     return out;
   }
@@ -1816,7 +1477,7 @@ module.exports = class LexisPlugin extends Plugin {
     const selfKeysByPath = new Map();
     const today = todayStr();
     let words = 0, aliases = 0, inlineEntries = 0, due = 0;
-    const inlineCategoryCounts = new Map();
+    const inlineCategoryOccurrences = new Map();
     const files = this.app.vault.getMarkdownFiles().filter((f) => this.isVocabFile(f));
     const vocabPaths = new Set(files.map((f) => f.path));
     for (const file of files) {
@@ -1856,7 +1517,18 @@ module.exports = class LexisPlugin extends Plugin {
       for (const entry of entries) {
         const key = entry.display.toLowerCase();
         own.add(key);
-        for (const category of entry.categories || []) inlineCategoryCounts.set(category, (inlineCategoryCounts.get(category) || 0) + 1);
+        const headingPath = entry.headingPath || [];
+        const heading = headingPath[headingPath.length - 1];
+        if (heading) {
+          // 同一文件内的同名最近标题视为一个子集；Markdown 祖先标题不参与分类。
+          const id = `${entry.file.path}::${heading.name}`;
+          let node = inlineCategoryOccurrences.get(id);
+          if (!node) {
+            node = { id, name: heading.name, level: heading.level, line: heading.line, file: entry.file, count: 0 };
+            inlineCategoryOccurrences.set(id, node);
+          }
+          node.count++;
+        }
         // 单文件词典优先,避免同名人名/术语意外覆盖已有可复习词条。
         if (!index.has(key)) { index.set(key, entry); inlineEntries++; }
       }
@@ -1864,7 +1536,23 @@ module.exports = class LexisPlugin extends Plugin {
     }
     this.vocabPaths = vocabPaths;
     this.inlineSourcePaths = inlineSourcePaths;
-    this.inlineCategories = [...inlineCategoryCounts.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
+    const legacyRank = new Map((this.settings.inlineCategoryOrder || []).map((name, index) => [name, index]));
+    this.inlineCategoryOccurrences = [...inlineCategoryOccurrences.values()].sort((a, b) => {
+      const ar = legacyRank.has(a.name) ? legacyRank.get(a.name) : Number.MAX_SAFE_INTEGER;
+      const br = legacyRank.has(b.name) ? legacyRank.get(b.name) : Number.MAX_SAFE_INTEGER;
+      return ar - br || a.name.localeCompare(b.name) || a.file.path.localeCompare(b.file.path) || a.line - b.line;
+    });
+    const categories = new Map();
+    for (const node of this.inlineCategoryOccurrences) {
+      const current = categories.get(node.name) || { name: node.name, count: 0 };
+      current.count += node.count;
+      categories.set(node.name, current);
+    }
+    this.inlineCategories = [...categories.values()].sort((a, b) => {
+      const ar = legacyRank.has(a.name) ? legacyRank.get(a.name) : Number.MAX_SAFE_INTEGER;
+      const br = legacyRank.has(b.name) ? legacyRank.get(b.name) : Number.MAX_SAFE_INTEGER;
+      return ar - br || a.name.localeCompare(b.name);
+    });
     this.index = index;
     this._selfKeysByPath = selfKeysByPath;
     this.stats = { words, aliases, inlineEntries, due };
@@ -1921,52 +1609,67 @@ module.exports = class LexisPlugin extends Plugin {
     const floor = Math.max(0, Math.min(1, this.settings.fadeFloor ?? 0.25));
     return 1 - progress * (1 - floor);
   }
-  // 先取最近标题;没有专属色就依次回退到父标题。同名标题在所有资料笔记中共享一条设置规则。
+  inlineClassificationMode() { return this.settings.inlineClassificationMode === "file" ? "file" : "heading"; }
+  inlineSourceKey(entry) { return entry?.file?.path && entry?.category ? `${entry.file.path}::${entry.category}` : ""; }
+  // 最近标题模式让所有同名标题共享外观；文件模式让同一来源文件共享外观。Markdown 祖先标题不参与。
   inlineCategoryColor(entry) {
     if (!entry?.inline) return "";
-    const colors = this.settings.inlineCategoryColors || {};
-    for (const category of entry.categories || [entry.category]) {
-      const color = String(colors[category] || "").trim();
-      if (color) return color;
-    }
-    return "";
+    const fileMode = this.inlineClassificationMode() === "file";
+    const colors = fileMode ? (this.settings.inlineFileColors || {}) : (this.settings.inlineCategoryColors || {});
+    const key = fileMode ? entry.file?.path : entry.category;
+    return String(colors[key] || "").trim();
   }
-  // 分类透明度和颜色一样按「最近标题 → 父标题」回退；没有单独配置时，沿用全局透明度。
+  // 分类透明度使用和颜色相同的分类键；没有单独配置时沿用全局透明度。
   inlineCategoryOpacity(entry) {
     if (!entry?.inline) return null;
-    const opacities = this.settings.inlineCategoryOpacity || {};
-    for (const category of entry.categories || [entry.category]) {
-      if (!Object.prototype.hasOwnProperty.call(opacities, category)) continue;
-      const opacity = Number(opacities[category]);
-      if (!isNaN(opacity)) return Math.max(0.1, Math.min(1, opacity));
-    }
-    return null;
+    const fileMode = this.inlineClassificationMode() === "file";
+    const opacities = fileMode ? (this.settings.inlineFileOpacity || {}) : (this.settings.inlineCategoryOpacity || {});
+    const key = fileMode ? entry.file?.path : entry.category;
+    if (!Object.prototype.hasOwnProperty.call(opacities, key)) return null;
+    const opacity = Number(opacities[key]);
+    return isNaN(opacity) ? null : Math.max(0.1, Math.min(1, opacity));
   }
   highlightVisibleForEntry(entry) {
     if (!entry?.inline) return true;
-    const visibility = this.settings.inlineCategoryHighlight || {};
-    for (const category of entry.categories || [entry.category]) {
-      if (Object.prototype.hasOwnProperty.call(visibility, category)) return visibility[category] !== false;
-    }
-    return true;
+    const fileMode = this.inlineClassificationMode() === "file";
+    const parents = fileMode ? (this.settings.inlineFileHighlight || {}) : (this.settings.inlineCategoryHighlight || {});
+    const parentKey = fileMode ? entry.file?.path : entry.category;
+    if (parents[parentKey] === false) return false;
+    const sourceKey = this.inlineSourceKey(entry);
+    return !sourceKey || (this.settings.inlineSourceHighlight || {})[sourceKey] !== false;
   }
   highlightAlphaForEntry(entry) {
+    let opacity = this.settings.highlightOpacity ?? 1;
+    const dictionaryOpacity = this.dictOpacityForFile(entry?.file);
+    if (dictionaryOpacity != null) opacity = dictionaryOpacity;
+    if (entry?.tags && this.settings.tagRules?.length) {
+      const rule = this.settings.tagRules.find((item) => item.tag && entry.tags.has(item.tag.toLowerCase()));
+      if (rule?.opacity != null && !isNaN(Number(rule.opacity))) opacity = Number(rule.opacity);
+    }
     const inlineOpacity = this.inlineCategoryOpacity(entry);
-    const opacity = inlineOpacity == null ? (this.settings.highlightOpacity ?? 1) : inlineOpacity;
-    return opacity * this.fadeAlphaFor(entry);
+    if (inlineOpacity != null) opacity = inlineOpacity;
+    return Math.max(0.1, Math.min(1, opacity)) * this.fadeAlphaFor(entry);
   }
   // 某文件所属词典(文件夹)的专属色;子文件夹归父词典,取最长匹配。网页和 ob 内共用同一份 dictColorMap
   dictColorForFile(file) {
+    const row = this.dictSettingForFile(file);
+    return row && String(row.color || "").trim() || null;
+  }
+  dictOpacityForFile(file) {
+    const row = this.dictSettingForFile(file);
+    if (!row || row.opacity == null || isNaN(Number(row.opacity))) return null;
+    return Math.max(0.1, Math.min(1, Number(row.opacity)));
+  }
+  dictSettingForFile(file) {
     const path = file && file.path;
     if (!path) return null;
     const i = path.lastIndexOf("/");
     const wf = i > 0 ? path.slice(0, i) : "";
     if (!wf) return null;
-    const map = this.dictColorMap();
-    if (map[wf]) return map[wf];
     let best = null, bestLen = -1;
-    for (const df in map) {
-      if (df && (wf === df || wf.startsWith(df + "/")) && df.length > bestLen) { best = map[df]; bestLen = df.length; }
+    for (const row of this.settings.dicts || []) {
+      const folder = this.normalizeFolder(row?.folder);
+      if (folder && (wf === folder || wf.startsWith(folder + "/")) && folder.length > bestLen) { best = row; bestLen = folder.length; }
     }
     return best;
   }
@@ -1985,15 +1688,15 @@ module.exports = class LexisPlugin extends Plugin {
     if (inlineColor) color = inlineColor;
     // PDF:文字层 opacity 0.2,内嵌高亮不可见 → 单独建一层叠在 Canvas 之上、textLayer 之下,
     // 用内联 .lexis-hl 隐形做事件代理,视觉高亮画在独立 overlay 层里。
-    if (opts && opts.pdf) return "text-decoration:none;";
+    if (opts && opts.pdf) return "--lexis-hl-line:none;--lexis-hl-background:transparent;";
     // 已归档:span 照样包(hover/click 事件代理不能丢),但视觉上完全不显示——跟 PDF 那层"隐形代理"是同一个思路。
-    if (entry && entry.archived) return "text-decoration:none;";
-    if (!this.highlightVisibleForEntry(entry)) return "text-decoration:none;background:none;";
+    if (entry && entry.archived) return "--lexis-hl-line:none;--lexis-hl-background:transparent;";
+    if (!this.highlightVisibleForEntry(entry)) return "--lexis-hl-line:none;--lexis-hl-background:transparent;";
     const alpha = this.highlightAlphaForEntry(entry);
     const c = this.applyAlpha(color, alpha);
-    if (styleKind === "background") return `background-color:${c};border-radius:3px;padding:0 1px;text-decoration:none;`;
+    if (styleKind === "background") return `--lexis-hl-line:none;--lexis-hl-background:${c};border-radius:3px;padding:0 1px;`;
     const line = styleKind === "underline" ? "solid" : "wavy";
-    return `text-decoration:underline ${line} ${c};text-underline-offset:3px;`;
+    return `--lexis-hl-line:underline;--lexis-hl-line-style:${line};--lexis-hl-line-color:${c};--lexis-hl-background:transparent;`;
   }
   currentHighlightPage(leaf = this.app.workspace.activeLeaf) {
     const view = leaf?.view;
@@ -2575,552 +2278,15 @@ module.exports = class LexisPlugin extends Plugin {
     }
   }
 
-  // ---------- 出处 & 相关词 ----------
-  parseFolders(text) { return (text || "").split(/[,，\n]/).map((s) => this.normalizeFolder(s)).filter(Boolean); }
-  parseTags(text) { return (text || "").split(/[,，;；\s]+/).map((s) => s.trim().replace(/^#/, "").toLowerCase()).filter(Boolean); }
-  vocabTagSet() { return new Set(this.parseTags(this.settings.vocabTags)); }
-  excludeTagSet() { return new Set(this.parseTags(this.settings.excludeTags)); }
-  // 词典表的文件夹列表 = 文件夹来源的单一真相
-  dictFolders() { return (this.settings.dicts || []).map((d) => this.normalizeFolder(d && d.folder)).filter(Boolean); }
-  // 一条词的最终高亮色(优先级:标签规则 > 词典色 > 全局兜底),返回解析后的真实 hex —— 网页和 ob 同一套优先级
-  colorForEntry(e) {
-    let color = this.effectiveHighlightColor();           // 全局兜底(留空=主题色,已解析)
-    const dc = this.dictColorForFile(e && e.file);         // 词典映射
-    if (dc) color = dc;
-    if (e && e.tags && this.settings.tagRules && this.settings.tagRules.length) { // 标签映射(最高)
-      const rule = this.settings.tagRules.find((r) => r.tag && e.tags.has(r.tag.toLowerCase()));
-      if (rule && rule.color) color = rule.color;
-    }
-    const inlineColor = this.inlineCategoryColor(e);
-    if (inlineColor) color = inlineColor;
-    return color;
   }
-  // 一条词的最终线型(标签规则可覆盖全局)
-  styleKindForEntry(e) {
-    let s = this.settings.highlightStyle || "wavy";
-    if (e && e.tags && this.settings.tagRules && this.settings.tagRules.length) {
-      const rule = this.settings.tagRules.find((r) => r.tag && e.tags.has(r.tag.toLowerCase()));
-      if (rule && rule.style) s = rule.style;
-    }
-    return s;
-  }
-  // 全局高亮色的"实际值":留空(=主题强调色)时解析成真实 hex 发给网页,否则网页只能看到 var(--text-accent) 这种 ob 专用变量、读不到
-  effectiveHighlightColor() {
-    const c = (this.settings.highlightColor || "").trim();
-    if (c) return c;
-    try { return cssColorToHex(getComputedStyle(document.body).getPropertyValue("--text-accent")); }
-    catch (_e) { return "#7c5cff"; }
-  }
-  // { 规范化文件夹: 颜色 },只含设了专属色的词典;供网页按所属词典着色
-  dictColorMap() {
-    const m = {};
-    for (const d of this.settings.dicts || []) {
-      const f = this.normalizeFolder(d && d.folder);
-      const c = (d && d.color || "").trim();
-      if (f && c) m[f] = c;
-    }
-    return m;
-  }
-  primaryVocabFolder() { return this.dictFolders()[0] || ""; } // 新建单词时落地的文件夹(取第一个)
-  inFolderScope(path) { const fs = this.dictFolders(); return fs.length ? this.inScope(path, fs) : false; }
-  // 某文件夹对应的模板:命中某词典行 → 完全按它的 template(留空=空白笔记,不再回退全局);
-  // 没有对应词典行(极少见)→ 才用全局默认 newWordTemplate。这样"没给这个词典选模板"= 空白,符合直觉。
-  templateForFolder(folder) {
-    const f = this.normalizeFolder(folder);
-    const row = (this.settings.dicts || []).find((d) => d && this.normalizeFolder(d.folder) === f);
-    const p = (row ? (row.template || "") : (this.settings.newWordTemplate || "")).trim();
-    return this.readTemplatePath(p);
-  }
-  isVocabFile(file) {
-    if (!file || !file.path) return false;
-    if (this.inFolderScope(file.path)) return true;
-    const ts = this.vocabTagSet();
-    if (ts.size) { for (const t of this.getTags(file)) if (ts.has(t)) return true; }
-    return false;
-  }
-  inScope(path, scope) { if (!scope.length) return true; return scope.some((f) => path === f || path.startsWith(f + "/")); }
-  extractSentence(content, idx) {
-    const bound = /[.!?。！？\n]/;
-    let s = idx; while (s > 0 && !bound.test(content[s - 1])) s--;
-    let e = idx; while (e < content.length && !bound.test(content[e])) e++;
-    let sent = content.slice(s, e + 1).replace(/\s+/g, " ").trim();
-    if (sent.length > 220) sent = sent.slice(0, 220) + "…";
-    return sent;
-  }
-  async findOccurrences(word) {
-    const key = word.toLowerCase();
-    if (this._occCache.has(key)) return this._occCache.get(key);
-    const limit = this.settings.occurrenceLimit || 6;
-    const scope = this.parseFolders(this.settings.occurrenceFolders);
-    const results = await this.occurrenceSearch.find(word, { limit, scope, includePdf: this.settings.includePdfOccurrences !== false });
-    this._occCache.set(key, results);
-    return results;
-  }
-  findRelated(file) {
-    const resolved = this.app.metadataCache.resolvedLinks || {};
-    const set = new Set();
-    for (const src in resolved) { if (resolved[src][file.path] && this.inVocabFolder(src) && src !== file.path) set.add(src); }
-    const out = resolved[file.path] || {};
-    for (const dest in out) { if (this.inVocabFolder(dest) && dest !== file.path) set.add(dest); }
-    return [...set].map((p) => this.app.vault.getAbstractFileByPath(p)).filter(Boolean);
-  }
-  parseSectionLinks(raw, known) {
-    const clean = raw.replace(/```[\s\S]*?```/g, "").replace(/^---\n[\s\S]*?\n---/, "");
-    const out = [];
-    let cur = "相关";
-    const linkRe = /\[\[([^\]|#\n]+)(?:\|[^\]\n]*)?\]\]/g;
-    for (const line of clean.split("\n")) {
-      const h = /^#{1,6}\s*(.+?)\s*$/.exec(line);
-      if (h) { cur = known.find((t) => h[1].includes(t)) || "相关"; continue; }
-      let m; linkRe.lastIndex = 0;
-      while ((m = linkRe.exec(line))) out.push({ type: cur, target: m[1].trim() });
-    }
-    return out;
-  }
-  async findTypedRelations(file) {
-    const KNOWN = ["近义词", "同根词", "形近词", "辨析"];
-    const out = {}, inc = {};
-    const put = (bag, type, tf) => { if (!tf || tf.path === file.path) return; (bag[type] = bag[type] || new Map()).set(tf.path, tf.basename); };
-    // 出链:本词笔记里每个 [[link]] 在哪个段下
-    try {
-      const raw = await this.app.vault.cachedRead(file);
-      for (const { type, target } of this.parseSectionLinks(raw, KNOWN)) {
-        const tf = this.app.metadataCache.getFirstLinkpathDest(target, file.path);
-        if (tf && this.inVocabFolder(tf.path)) put(out, type, tf);
-      }
-    } catch (_e) {}
-    // 入链:其它词在哪个段下链了本词(实现双向)
-    const resolved = this.app.metadataCache.resolvedLinks || {};
-    for (const src in resolved) {
-      if (!this.inVocabFolder(src) || src === file.path || !resolved[src][file.path]) continue;
-      const srcFile = this.app.vault.getAbstractFileByPath(src);
-      if (!srcFile) continue;
-      try {
-        const raw = await this.app.vault.cachedRead(srcFile);
-        let matched = false;
-        for (const { type, target } of this.parseSectionLinks(raw, KNOWN)) {
-          const tf = this.app.metadataCache.getFirstLinkpathDest(target, src);
-          if (tf && tf.path === file.path) { put(inc, type, srcFile); matched = true; }
-        }
-        if (!matched) put(inc, "相关", srcFile);
-      } catch (_e) {}
-    }
-    const toArr = (bag) => { const o = {}; for (const t in bag) o[t] = [...bag[t].entries()].map(([path, basename]) => ({ path, basename })); return o; };
-    return { out: toArr(out), inc: toArr(inc) };
-  }
-  async renderDerivedWords(container, file) {
-    const resolved = this.app.metadataCache.resolvedLinks || {};
-    const map = new Map();
-    for (const src in resolved) {
-      if (this.inVocabFolder(src) && resolved[src] && resolved[src][file.path]) {
-        const sf = this.app.vault.getAbstractFileByPath(src);
-        if (sf) map.set(src, sf.basename);
-      }
-    }
-    if (!map.size) return;
-    container.createDiv({ cls: "lexis-section-title", text: `🌱 派生词 (${map.size})` });
-    const w = container.createDiv({ cls: "lexis-related" });
-    for (const [path, basename] of map) this.relLink(w, path, basename);
-  }
-  relLink(w, path, basename) {
-    const a = w.createEl("a", { text: basename, href: "#" });
-    a.addEventListener("click", (e) => { e.preventDefault(); const f = this.app.vault.getAbstractFileByPath(path); if (f) { this.app.workspace.getLeaf(false).openFile(f); this.removePopover(); } });
-  }
-  async renderTypedRelations(container, file) {
-    const { out, inc } = await this.findTypedRelations(file);
-    const order = ["近义词", "同根词", "形近词", "辨析", "相关"];
-    let n = 0;
-    for (const t of order) {
-      const map = new Map();
-      for (const r of (out[t] || [])) map.set(r.path, r.basename);
-      for (const r of (inc[t] || [])) map.set(r.path, r.basename);
-      if (!map.size) continue;
-      container.createDiv({ cls: "lexis-section-title", text: "🔗 " + t });
-      const w = container.createDiv({ cls: "lexis-related" });
-      for (const [path, basename] of map) { this.relLink(w, path, basename); n++; }
-    }
-    return n;
-  }
-  async renderReverseRelations(container, file, type) {
-    const { out, inc } = await this.findTypedRelations(file);
-    const types = type === "辨析" ? ["辨析", "相关"] : [type];
-    const outPaths = new Set();
-    for (const t of types) for (const r of (out[t] || [])) outPaths.add(r.path);
-    const map = new Map();
-    for (const t of types) for (const r of (inc[t] || [])) if (!outPaths.has(r.path)) map.set(r.path, r.basename);
-    if (!map.size) return 0;
-    const w = container.createDiv({ cls: "lexis-related lexis-rel-reverse" });
-    for (const [path, basename] of map) this.relLink(w, path, basename);
-    return map.size;
-  }
-  async getCuratedSourcePaths(wordFile) {
-    try {
-      const raw = await this.app.vault.cachedRead(wordFile);
-      const names = [this.occurrenceHeadingText(), "例句", "出处"].filter(Boolean).map(escapeRe).join("|");
-      const m = new RegExp("#{1,6}\\s*(?:" + names + ")([^\\n]*\\n[\\s\\S]*?)(?=\\n#{1,6}\\s|\\n```|$)").exec(raw);
-      if (!m) return new Set();
-      const set = new Set();
-      const re = /\[\[([^\]|#]+)(?:\|[^\]]*)?\]\]/g;
-      let mm;
-      while ((mm = re.exec(m[1]))) {
-        const base = mm[1].trim().split("/").pop().replace(/\.(?:md|pdf)$/i, "");
-        set.add(base.toLowerCase());
-      }
-      return set;
-    } catch (_e) { return new Set(); }
-  }
-  sourceLinkTarget(file) { return file?.extension === "md" ? file.basename : file?.name || ""; }
-  async addExampleToWord(wordFile, sentence, sourceFile, page) {
-    if (sourceFile) {
-      const curated = await this.getCuratedSourcePaths(wordFile);
-      if (curated.has(sourceFile.basename.toLowerCase())) { new Notice(this.t("notice.occurrenceExists")); return true; }
-    }
-    const occurrence = {
-      word: wordFile.basename,
-      sentence: (sentence || "").trim(),
-      source: sourceFile ? (page ? `[[${this.sourceLinkTarget(sourceFile)}#page=${page}|${sourceFile.basename} p.${page}]]` : `[[${this.sourceLinkTarget(sourceFile)}]]`) : "",
-      date: todayStr(),
-    };
-    const apply = (data) => this.insertOccurrence(data, occurrence);
-    try {
-      if (this.app.vault.process) await this.app.vault.process(wordFile, apply);
-      else { const d = await this.app.vault.read(wordFile); await this.app.vault.modify(wordFile, apply(d)); }
-      this.recordEncounter(wordFile, "add");
-      new Notice(this.t("notice.occurrenceSaved"));
-      return true;
-    } catch (err) { new Notice(this.t("notice.occurrenceFailed", { error: err?.message || err })); return false; }
-  }
+  const descriptors = Object.getOwnPropertyDescriptors(HighlightEngine.prototype);
+  delete descriptors.constructor;
+  return descriptors;
+}
 
-  // ---------- 生命周期(归档/常驻/淘汰) ----------
-  // 只叠加在算法结果之上:这里不碰 lexis-s/d/due 等 FSRS 内部字段,那些只由真实复习事件驱动(applySchedule)。
-  readLifecycle(file) {
-    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter || {};
-    const status = fm["lexis-status"];
-    return { archived: status === "archived", retired: status === "retired", pinned: !!fm["lexis-pinned"] };
-  }
-  // 归档 = 退出高亮 + 暂停复习队列,悬停仍可查;取消归档("恢复")默认走这条,FSRS 进度原样保留。
-  // 重置为新词是恢复时的另一个选项,见 LexisRestoreModal,不在这个函数里做。
-  async setArchived(file, archived) {
-    await this.app.fileManager.processFrontMatter(file, (fm) => {
-      if (archived) fm["lexis-status"] = "archived";
-      else delete fm["lexis-status"];
-    });
-    this.rebuildIndex(false);
-  }
-  async setPinned(file, pinned) {
-    await this.app.fileManager.processFrontMatter(file, (fm) => {
-      if (pinned) fm["lexis-pinned"] = true;
-      else delete fm["lexis-pinned"];
-    });
-    this.rebuildIndex(false);
-  }
-  // 淘汰 = 归档而非删除:退出高亮与复习,文件保留,但比"归档"更彻底——悬停也不再触发(不像归档还留一个隐形代理 span)。
-  // 只从"淘汰法庭"候选列表的操作按钮触发,没有独立的命令/右键菜单入口(候选判定本身已经是入口了)。
-  async setRetired(file, retired) {
-    await this.app.fileManager.processFrontMatter(file, (fm) => {
-      if (retired) fm["lexis-status"] = "retired";
-      else delete fm["lexis-status"];
-    });
-    this.rebuildIndex(false);
-  }
-
-  // ---------- 相遇记账(阶段 2) ----------
-  // 只做"强相遇"记账:悬停查释义 / 划词加出处 / 打开词条笔记本身,都是现成代码路径上加一行记账,
-  // 不额外采集停留时长/滚动/点击深度。数据存进插件自己 data 目录下的 sidecar JSON,不写 frontmatter——
-  // 悬停很频繁,写 frontmatter 会不停刷新笔记 mtime 和 git 历史。
-  encountersPath() { return `${this.app.vault.configDir}/plugins/${this.manifest.id}/encounters.json`; }
-  async loadEncounters() {
-    try { this._encounters = JSON.parse(await this.app.vault.adapter.read(this.encountersPath())) || {}; }
-    catch (_e) { this._encounters = {}; }
-  }
-  // key 用词条文件的标题(不是命中它的具体别名/拼法)——别名和标题指向同一个文件,相遇次数要合并,不能按 key 分裂计数
-  // 短时间内反复触发同一类相遇(比如鼠标在同一个词上晃出晃入,连续弹好几次悬浮卡)只算一次,靠 (词+类型) 的冷却时间去重
-  recordEncounter(file, type) {
-    if (!(file instanceof TFile)) return;
-    const k = file.basename.toLowerCase();
-    const now = Date.now();
-    const dedupKey = k + ":" + type;
-    if (!this._encounterDedup) this._encounterDedup = {};
-    const last = this._encounterDedup[dedupKey];
-    if (last && now - last < 60000) return; // 60 秒内的重复相遇不重复计数
-    this._encounterDedup[dedupKey] = now;
-    const e = this._encounters[k] || (this._encounters[k] = { hoverCount: 0, encounterCount: 0, lastEncounter: "" });
-    e.encounterCount = (e.encounterCount || 0) + 1;
-    if (type === "hover") e.hoverCount = (e.hoverCount || 0) + 1;
-    e.lastEncounter = todayStr();
-    if (this._encSaveTimer) window.clearTimeout(this._encSaveTimer);
-    this._encSaveTimer = window.setTimeout(() => this.saveEncounters(), 1500); // 内存攒批、防抖落盘,不是每次相遇都写一次盘
-  }
-  // 被动相遇(阶段 4):高亮装饰在打开的文件里实际渲染出来,就算词出现在你面前过一次——比悬停更弱的信号,
-  // 只证明"出现过",不证明"注意到了"。按「词+当天」去重,不是每次重渲染(滚动/切标签页/实时预览重算)都记一次。
-  // 这个检查要挂在高亮渲染的热路径上(每个匹配到的 span 都会过一遍),所以只用一次 Set.has,不做更重的事。
-  passiveEncounter(file) {
-    if (!(file instanceof TFile)) return;
-    const dayKey = file.path + "|" + todayStr();
-    if (this._passiveSeenToday.has(dayKey)) return;
-    this._passiveSeenToday.add(dayKey);
-    this.recordEncounter(file, "passive");
-  }
-  async saveEncounters() {
-    this._encSaveTimer = 0;
-    try { await this.app.vault.adapter.write(this.encountersPath(), JSON.stringify(this._encounters)); } catch (_e) {}
-  }
-  // 悬停 = 一次失败的提取(没想起来才要查)。这个词的到期日如果还很远,说明"排期偏晚了",拉近一点提醒尽快复习——
-  // 只挪 lexis-due,绝不碰 stability/difficulty,也不伪造一次复习评分(FSRS 内部状态只能由真实复习事件驱动)。
-  async hoverFeedback(file) {
-    if (!this.settings.hoverFeedback || !(file instanceof TFile)) return;
-    if (this.readLifecycle(file).archived) return; // 已归档:悬停只记账,不回流
-    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter || {};
-    if (fm["lexis-s"] == null || !fm["lexis-due"]) return; // 还没背过/没有到期日可提前
-    const today = todayStr();
-    const due = String(fm["lexis-due"]).slice(0, 10);
-    const threshold = addDaysStr(today, this.settings.hoverFeedbackDays ?? 3);
-    if (due <= threshold) return; // 本来就不算远,不用管
-    await this.app.fileManager.processFrontMatter(file, (fm2) => { fm2["lexis-due"] = today; });
-  }
-
-  // ---------- FSRS 调度 ----------
-  readCard(file) {
-    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter || {};
-    return {
-      s: fm["lexis-s"], d: fm["lexis-d"], due: fm["lexis-due"], last: fm["lexis-last"],
-      reps: fm["lexis-reps"], lapses: fm["lexis-lapses"],
-      history: Array.isArray(this.settings.reviewHistory?.[file.path]) ? this.settings.reviewHistory[file.path] : [],
-    };
-  }
-  cardRetrievability(card, date = todayStr()) {
-    const s = Number(card?.s);
-    if (!s || isNaN(s) || !card?.last) return 0;
-    return FSRS.retrievability(Math.max(0, daysBetween(card.last, date)), s);
-  }
-  scheduleCard(card, grade) {
-    const R = this.settings.requestRetention || 0.9;
-    let reps = (Number(card.reps) || 0) + 1, lapses = Number(card.lapses) || 0, S, D;
-    const today = todayStr();
-    if (card.s == null || isNaN(Number(card.s))) {
-      S = FSRS.initStability(grade); D = FSRS.initDifficulty(grade);
-    } else {
-      const t = card.last ? daysBetween(card.last, today) : 0;
-      const r = FSRS.retrievability(t, Number(card.s));
-      D = FSRS.nextDifficulty(Number(card.d), grade);
-      if (grade === 1) { S = FSRS.nextForgetStability(Number(card.d), Number(card.s), r); lapses++; }
-      else { S = FSRS.nextRecallStability(Number(card.d), Number(card.s), r, grade); }
-    }
-    S = Math.max(0.01, S);
-    const interval = FSRS.nextInterval(S, R);
-    return { s: S, d: D, reps, lapses, interval, due: addDaysStr(today, interval) };
-  }
-  async applySchedule(file, sched) {
-    await this.app.fileManager.processFrontMatter(file, (fm) => {
-      fm["lexis-s"] = round2(sched.s);
-      fm["lexis-d"] = round2(sched.d);
-      fm["lexis-due"] = sched.due;
-      fm["lexis-last"] = todayStr();
-      fm["lexis-reps"] = sched.reps;
-      fm["lexis-lapses"] = sched.lapses;
-    });
-  }
-  async logReview(file, sched, grade, retentionBefore) {
-    const t = todayStr();
-    this.settings.reviewLog[t] = (this.settings.reviewLog[t] || 0) + 1;
-    if (file?.path) {
-      const history = Array.isArray(this.settings.reviewHistory[file.path]) ? this.settings.reviewHistory[file.path] : [];
-      history.push({ date: t, s: round2(sched.s), grade, retention: Math.round(Math.max(0, Math.min(1, retentionBefore)) * 100) });
-      this.settings.reviewHistory[file.path] = history.slice(-64);
-    }
-    await this.saveSettings();
-  }
-  async undoReviewLog(file) {
-    const t = todayStr();
-    if (this.settings.reviewLog[t]) {
-      this.settings.reviewLog[t]--;
-      if (this.settings.reviewLog[t] <= 0) delete this.settings.reviewLog[t];
-    }
-    const history = file?.path && this.settings.reviewHistory[file.path];
-    if (Array.isArray(history) && history.length) history.pop();
-    await this.saveSettings();
-  }
-  async getFirstExample(file) {
-    try {
-      const raw = await this.app.vault.cachedRead(file);
-      if (!this.occurrenceHeadingText()) return this.occurrenceSentenceFromSection(raw);
-      const names = [this.occurrenceHeadingText(), "例句", "出处"].filter(Boolean).map(escapeRe).join("|");
-      const m = new RegExp("#{1,6}\\s*(?:" + names + ")([^\\n]*\\n[\\s\\S]*?)(?=\\n#{1,6}\\s|\\n```|$)").exec(raw);
-      if (!m) return "";
-      return this.occurrenceSentenceFromSection(m[1]);
-    } catch (_e) { return ""; }
-  }
-  buildCloze(sentence, word) { return sentence.replace(new RegExp(boundedSource(word), "ig"), "______"); }
-  humanInterval(days) {
-    if (days < 1) return this.t("interval.ltDay");
-    if (days < 30) return this.t("interval.days", { count: days });
-    if (days < 365) return this.t("interval.months", { count: Math.round(days / 30) });
-    return this.t("interval.years", { count: (days / 365).toFixed(1) });
-  }
-  freqVal(file) { const fm = this.app.metadataCache.getFileCache(file)?.frontmatter; const n = parseInt(String(fm && fm.frequency).replace(/[^0-9]/g, ""), 10); return isNaN(n) ? Infinity : n; }
-  collectVocabTags() { const s = new Set(); for (const f of this.app.vault.getMarkdownFiles()) { if (!this.inVocabFolder(f.path)) continue; for (const t of this.getTags(f)) s.add(t); } return [...s].sort(); }
-  computeStats() {
-    const today = todayStr();
-    let total = 0, due = 0, fresh = 0;
-    for (const f of this.app.vault.getMarkdownFiles()) {
-      if (!this.inVocabFolder(f.path)) continue;
-      total++;
-      const fm = this.app.metadataCache.getFileCache(f)?.frontmatter || {};
-      if (fm["lexis-status"] === "archived" || fm["lexis-status"] === "retired") continue; // 已归档/已淘汰:计入总数,但不计入待复习/新词(复习队列已暂停)
-      if (fm["lexis-s"] == null) { fresh++; due++; }
-      else if (!fm["lexis-due"] || String(fm["lexis-due"]).slice(0, 10) <= today) due++;
-    }
-    return { total, due, fresh };
-  }
-  buildQueue(options) {
-    options = options || {};
-    const today = todayStr();
-    let files = this.app.vault.getMarkdownFiles().filter((f) => { if (!this.inVocabFolder(f.path)) return false; const lc = this.readLifecycle(f); return !lc.archived && !lc.retired; });
-    if (options.folder) {
-      const folder = this.normalizeFolder(options.folder);
-      files = files.filter((f) => this.inScope(f.path, [folder]));
-    }
-    if (options.tag) { const tl = options.tag.toLowerCase(); files = files.filter((f) => this.getTags(f).has(tl)); }
-    const due = [], fresh = [];
-    for (const f of files) { const card = this.readCard(f); if (card.s == null || isNaN(Number(card.s))) fresh.push({ file: f, card }); else if (!card.due || String(card.due).slice(0, 10) <= today) due.push({ file: f, card }); }
-    let queue;
-    if (options.order === "frequency") { queue = due.concat(fresh).sort((a, b) => this.freqVal(a.file) - this.freqVal(b.file)); }
-    else if (options.order === "random") { queue = due.concat(fresh); for (let i = queue.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [queue[i], queue[j]] = [queue[j], queue[i]]; } }
-    else { due.sort((a, b) => String(a.card.due || "").localeCompare(String(b.card.due || ""))); queue = due.concat(fresh.slice(0, this.settings.newPerDay || 20)); }
-    return queue.slice(0, this.settings.maxReviewsPerSession || 200);
-  }
-  // ---------- 淘汰法庭(阶段 3) ----------
-  // 硬条件筛子,不做加权评分:全部满足才入列,判决权在用户(淘汰/留下/已掌握三个按钮,见 LexisHomeView)。
-  async buildRetireCandidates() {
-    const days = this.settings.retireCandidateDays ?? 90;
-    const today = todayStr();
-    const files = this.app.vault.getMarkdownFiles().filter((f) => this.inVocabFolder(f.path));
-    const out = [];
-    for (const f of files) {
-      const lc = this.readLifecycle(f);
-      if (lc.pinned || lc.archived || lc.retired) continue; // 常驻/已归档/已淘汰:永远不进候选
-      const created = fmtDate(new Date(f.stat.ctime));
-      if (daysBetween(created, today) < days) continue; // 入库不够久
-      const enc = this._encounters[f.basename.toLowerCase()];
-      const lastEncounter = (enc && enc.lastEncounter) || created; // 从没相遇过就用入库日期当基准
-      const sinceLast = daysBetween(lastEncounter, today);
-      if (sinceLast < days) continue; // 最近还自然相遇过,不算候选
-      let occCount = 0;
-      try { occCount = (await this.findOccurrences(f.basename)).length; } catch (_e) {}
-      out.push({
-        file: f, display: f.basename, created, lastEncounter, sinceLast,
-        encounterCount: (enc && enc.encounterCount) || 0,
-        hoverCount: (enc && enc.hoverCount) || 0,
-        occCount,
-      });
-    }
-    out.sort((a, b) => b.sinceLast - a.sinceLast);
-    return out;
-  }
-  async openReview(options) {
-    let leaf = this.app.workspace.getLeavesOfType(LEXIS_REVIEW_VIEW)[0];
-    if (!leaf) { leaf = this.app.workspace.getLeaf(true); await leaf.setViewState({ type: LEXIS_REVIEW_VIEW, active: true }); }
-    this.app.workspace.revealLeaf(leaf);
-    if (leaf.view instanceof LexisReviewView) { leaf.view.options = options || {}; leaf.view.refresh(); }
-  }
-  saveReviewSession(leaf, state) { if (leaf && state) this._reviewSessions.set(leaf, state); }
-  takeReviewSession(leaf) {
-    if (!leaf) return null;
-    const state = this._reviewSessions.get(leaf) || null;
-    this._reviewSessions.delete(leaf);
-    return state;
-  }
-  async openHome() {
-    let leaf = this.app.workspace.getLeavesOfType(LEXIS_HOME_VIEW)[0];
-    if (!leaf) { leaf = this.app.workspace.getRightLeaf(false); await leaf.setViewState({ type: LEXIS_HOME_VIEW, active: true }); }
-    this.app.workspace.revealLeaf(leaf);
-    if (leaf.view instanceof LexisHomeView) leaf.view.render();
-  }
-  // ---------- 划词添加 ----------
-  sanitizeName(name) { return (name || "").replace(/[\\/:*?"<>|#^[\]]/g, "").replace(/\s+/g, " ").trim(); }
-  async ensureFolder(folder) {
-    if (!folder) return;
-    if (!this.app.vault.getAbstractFileByPath(folder)) { try { await this.app.vault.createFolder(folder); } catch (_e) {} }
-  }
-  async readTemplatePath(p) {
-    p = (p || "").trim();
-    if (!p) return null;
-    const f = this.app.vault.getAbstractFileByPath(p);
-    if (f instanceof TFile) { try { return await this.app.vault.read(f); } catch (_e) {} }
-    return null;
-  }
-  // 无模板可选纯空白，或只放一个内置的出处面板；用户自己的模板始终优先。
-  minimalSkeleton() { return this.settings.emptyNotePreset === "occ" ? "```lexis\nocc\n```\n" : ""; }
-  getSelectionSentence(editor) {
-    try { const from = editor.getCursor("from"); const line = editor.getLine(from.line) || ""; return this.extractSentence(line, from.ch || 0); } catch (_e) { return ""; }
-  }
-  getReadingSentence() {
-    try { const sel = window.getSelection(); if (!sel || !sel.anchorNode) return ""; const text = sel.anchorNode.textContent || ""; return this.extractSentence(text, sel.anchorOffset || 0); } catch (_e) { return ""; }
-  }
-  // 当前选区所在 PDF 页码(pdf.js 在 .page 上挂 data-page-number);取不到返回 0
-  currentPdfPage() {
-    try {
-      const sel = window.getSelection();
-      const n = sel && sel.anchorNode;
-      const el = n ? (n.nodeType === 1 ? n : n.parentElement) : null;
-      const page = el && el.closest && el.closest("[data-page-number]");
-      const v = page && page.getAttribute("data-page-number");
-      return v ? parseInt(v, 10) || 0 : 0;
-    } catch (_e) { return 0; }
-  }
-  addSelectedWordCommand() {
-    const view = this.app.workspace.getActiveViewOfType(obsidian.MarkdownView);
-    let word = "", editor = null;
-    if (view && view.editor && view.getMode && view.getMode() === "source") { word = (view.editor.getSelection() || "").trim(); editor = view.editor; }
-    if (!word) { const sel = window.getSelection(); word = (sel ? sel.toString() : "").trim(); }
-    if (!word) { new Notice(this.t("notice.selectWord")); return; }
-    this.addWordFromSelection(word, editor, view);
-  }
-  async addWordFromSelection(word, editor, view, targetFolder, { openExisting = false } = {}) {
-    const clean = (word || "").trim();
-    const fileName = this.sanitizeName(clean);
-    if (!fileName) { new Notice(this.t("notice.invalidWord")); return; }
-    const reqFolder = this.normalizeFolder(targetFolder || "");
-    const folder = (reqFolder && this.dictFolders().includes(reqFolder)) ? reqFolder : this.primaryVocabFolder();
-    const targetPath = (folder ? folder + "/" : "") + fileName + ".md";
-    let existing = this.app.vault.getAbstractFileByPath(targetPath);
-    // 路径不同名也可能已经是某词条的标题或别名(比如刚被"设为别名"并入了别的文件)——按索引兜底查,别重复建
-    if (!(existing instanceof TFile)) {
-      const hit = this.index.get(clean.toLowerCase());
-      if (hit && hit.file instanceof TFile) existing = hit.file;
-    }
-    const srcFile = (view && view.file) || this.app.workspace.getActiveFile();
-    const sentence = editor ? this.getSelectionSentence(editor) : this.getReadingSentence();
-    // 从 PDF 划词加词时,新词笔记开到新标签页,免得把正在读的 PDF 顶掉
-    const fromPdf = srcFile && srcFile.extension === "pdf" && !editor;
-    if (existing) {
-      new Notice(this.t(openExisting ? "notice.exists" : "notice.existsNoOpen", { word: existing.basename }));
-      if (openExisting) this.app.workspace.getLeaf(fromPdf ? "tab" : false).openFile(existing);
-      return;
-    }
-    try {
-      await this.ensureFolder(folder);
-      const tpl = await this.templateForFolder(folder);
-      let content = this.renderTemplate(tpl != null ? tpl : this.minimalSkeleton(), { word: clean, date: todayStr() });
-      // 出处写进正文(而不是 frontmatter 属性),好看且笔记里直接可见
-      if (sentence || srcFile) {
-        // PDF 出处带上页码,链接可直接跳到那一页
-        let sub = "", disp = srcFile ? srcFile.basename : "";
-        if (fromPdf) {
-          const pg = this.currentPdfPage();
-          if (pg) { sub = `#page=${pg}`; disp = `${srcFile.basename} p.${pg}`; }
-        }
-        const sourceTarget = this.sourceLinkTarget(srcFile);
-        const source = srcFile ? (sub ? `[[${sourceTarget}${sub}|${disp}]]` : `[[${sourceTarget}]]`) : "";
-        content = this.insertOccurrence(content, { word: clean, sentence: sentence || "", source, date: todayStr() });
-      }
-      const file = await this.app.vault.create(targetPath, content);
-      this.recordEncounter(file, "add");
-      // 划词添加只写入并留在原文；"添加"不再暗含一次页面跳转。
-      new Notice(this.t(fromPdf ? "notice.addedPdf" : "notice.created", { word: fileName }));
-      await this.rebuildIndex(false);
-    } catch (err) { new Notice(this.t("notice.createFailed", { error: err?.message || err })); }
-  }
+// ---------- 生成自 src/reader-ui.js ----------
+function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr, TFile, Notice, boundedSource, escapeRe, Component, renderLexisMarkdown, LexisAliasPicker, LexisRestoreModal }) {
+  class ReaderUi {
   // 遗忘曲线 SVG(FSRS 衰减)
   buildCurveSVG(card) {
     return buildCurveSVG(card, {
@@ -3683,6 +2849,1739 @@ module.exports = class LexisPlugin extends Plugin {
     pop.style.maxHeight = isPreview ? `${height}px` : "";
     pop.style.height = isPreview ? `${height}px` : "";
   }
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(ReaderUi.prototype);
+  delete descriptors.constructor;
+  return descriptors;
+}
+
+// ---------- 生成自 src/settings-controls.js ----------
+function moveItem(items, from, to) {
+  const next = Array.from(items || []);
+  if (from === to || from < 0 || to < 0 || from >= next.length || to >= next.length) return next;
+  const [item] = next.splice(from, 1);
+  next.splice(to, 0, item);
+  return next;
+}
+
+function createReorderController({ container, onMove, setIcon, label = "Reorder", longPressMs = 260 }) {
+  let from = -1;
+  let active = false;
+  let timer = 0;
+  let pointerId = null;
+  let activeHandle = null;
+  let draggedRow = null;
+  let placeholder = null;
+  let savedStyle = null;
+  let offsetX = 0;
+  let offsetY = 0;
+  let pointerX = 0;
+  let pointerY = 0;
+
+  const rows = () => Array.from(container.children).filter((el) => el.classList.contains("lexis-sortable-item"));
+  const candidates = () => rows().filter((row) => row !== draggedRow);
+  const restoreRow = () => {
+    if (!draggedRow) return;
+    draggedRow.classList.remove("is-dragging", "is-floating");
+    if (savedStyle == null) draggedRow.removeAttribute("style");
+    else draggedRow.setAttribute("style", savedStyle);
+  };
+  const floatingPosition = (x, y) => {
+    if (!draggedRow) return;
+    draggedRow.style.left = `${Math.round(x - offsetX)}px`;
+    draggedRow.style.top = `${Math.round(y - offsetY)}px`;
+  };
+  const targetAt = (x, y) => {
+    const doc = container.ownerDocument || document;
+    const direct = doc.elementFromPoint?.(x, y)?.closest?.(".lexis-sortable-item");
+    if (direct?.parentElement === container && direct !== draggedRow) return direct;
+    let nearest = null;
+    let distance = Infinity;
+    for (const row of candidates()) {
+      const rect = row.getBoundingClientRect();
+      const dx = x < rect.left ? rect.left - x : x > rect.right ? x - rect.right : 0;
+      const dy = y < rect.top ? rect.top - y : y > rect.bottom ? y - rect.bottom : 0;
+      const score = dx * dx + dy * dy;
+      if (score < distance) { nearest = row; distance = score; }
+    }
+    return nearest;
+  };
+  const movePlaceholder = (target, x, y) => {
+    if (!placeholder || !target) return;
+    const rect = target.getBoundingClientRect();
+    const view = container.ownerDocument?.defaultView || window;
+    const isGrid = view.getComputedStyle?.(container).display === "grid";
+    const sameBand = y >= rect.top && y <= rect.bottom;
+    const after = isGrid && sameBand ? x > rect.left + rect.width / 2 : y > rect.top + rect.height / 2;
+    const reference = after ? target.nextSibling : target;
+    if (reference !== placeholder) container.insertBefore(placeholder, reference);
+  };
+  const begin = (row, handle, index, event) => {
+    const doc = container.ownerDocument || document;
+    const rect = row.getBoundingClientRect();
+    from = index;
+    active = true;
+    activeHandle = handle;
+    draggedRow = row;
+    savedStyle = row.getAttribute("style");
+    offsetX = pointerX - rect.left;
+    offsetY = pointerY - rect.top;
+    placeholder = doc.createElement("div");
+    placeholder.className = "lexis-sortable-placeholder";
+    placeholder.setAttribute("aria-hidden", "true");
+    placeholder.style.height = `${Math.ceil(rect.height)}px`;
+    container.insertBefore(placeholder, row);
+    row.classList.add("is-dragging", "is-floating");
+    row.style.position = "fixed";
+    row.style.width = `${Math.ceil(rect.width)}px`;
+    row.style.left = `${Math.round(rect.left)}px`;
+    row.style.top = `${Math.round(rect.top)}px`;
+    row.style.margin = "0";
+    row.style.zIndex = "1000";
+    row.style.pointerEvents = "none";
+    floatingPosition(pointerX, pointerY);
+    try { handle.setPointerCapture?.(event.pointerId); } catch (_e) {}
+  };
+  const finish = () => {
+    window.clearTimeout(timer);
+    timer = 0;
+    const start = from;
+    let target = start;
+    if (active && placeholder && draggedRow) {
+      const order = Array.from(container.children).filter((el) => el === placeholder || (el.classList.contains("lexis-sortable-item") && el !== draggedRow));
+      target = order.indexOf(placeholder);
+      container.insertBefore(draggedRow, placeholder);
+      placeholder.remove();
+    }
+    restoreRow();
+    from = -1;
+    active = false;
+    if (activeHandle && pointerId != null) {
+      try { activeHandle.releasePointerCapture?.(pointerId); } catch (_e) {}
+    }
+    activeHandle = null;
+    pointerId = null;
+    draggedRow = null;
+    placeholder = null;
+    savedStyle = null;
+    if (start >= 0 && target >= 0 && start !== target) onMove(start, target);
+  };
+
+  return {
+    attach(item, index, { handleParent = item } = {}) {
+      item.classList.add("lexis-sortable-item");
+      handleParent.classList.add("lexis-sortable-row");
+      item.dataset.lexisOrder = String(index);
+      const handle = handleParent.createEl("button", {
+        cls: "lexis-drag-handle clickable-icon",
+        attr: { type: "button", "aria-label": label, title: label },
+      });
+      if (setIcon) setIcon(handle, "grip-vertical");
+      else handle.setText("⋮⋮");
+      // 拖动柄位于 details/summary 内时，点击只负责排序，不触发展开或折叠。
+      handle.addEventListener("click", (event) => { event.preventDefault(); event.stopPropagation(); });
+
+      handle.addEventListener("pointerdown", (event) => {
+        if (event.button != null && event.button !== 0) return;
+        window.clearTimeout(timer);
+        from = index;
+        pointerId = event.pointerId;
+        pointerX = event.clientX;
+        pointerY = event.clientY;
+        try { handle.setPointerCapture?.(event.pointerId); } catch (_e) {}
+        if (event.pointerType === "touch") timer = window.setTimeout(() => begin(item, handle, index, event), longPressMs);
+        else {
+          event.preventDefault();
+          begin(item, handle, index, event);
+        }
+      });
+      handle.addEventListener("pointermove", (event) => {
+        if (event.pointerId !== pointerId) return;
+        pointerX = event.clientX;
+        pointerY = event.clientY;
+        if (!active) return;
+        event.preventDefault();
+        floatingPosition(pointerX, pointerY);
+        const target = targetAt(event.clientX, event.clientY);
+        movePlaceholder(target, event.clientX, event.clientY);
+      }, { passive: false });
+      handle.addEventListener("pointerup", (event) => { if (event.pointerId === pointerId) finish(); });
+      handle.addEventListener("pointercancel", (event) => { if (event.pointerId === pointerId) finish(); });
+      handle.addEventListener("contextmenu", (event) => { if (active) event.preventDefault(); });
+    },
+  };
+}
+
+function addAppearanceButton({ app, obsidian, parent, title, state, onChange, onReset, labels, allowStyle = false }) {
+  const button = new obsidian.ExtraButtonComponent(parent).setIcon("palette").setTooltip(title);
+  const refreshButton = () => {
+    const color = state().color;
+    button.extraSettingsEl.style.color = color || "var(--text-accent)";
+  };
+  button.onClick(() => {
+    const modal = new obsidian.Modal(app);
+    modal.onOpen = () => {
+      modal.contentEl.empty();
+      modal.contentEl.createEl("h3", { text: title });
+      new obsidian.Setting(modal.contentEl).setName(labels.color)
+        .addColorPicker((picker) => picker.setValue(state().color).onChange(async (color) => { await onChange({ color }); refreshButton(); }));
+      new obsidian.Setting(modal.contentEl).setName(labels.opacity)
+        .addSlider((slider) => slider.setLimits(0.1, 1, 0.05).setValue(state().opacity).setDynamicTooltip().onChange((opacity) => onChange({ opacity })));
+      if (allowStyle) {
+        new obsidian.Setting(modal.contentEl).setName(labels.style)
+          .addDropdown((dropdown) => dropdown
+            .addOption("", labels.defaultStyle)
+            .addOption("wavy", labels.wavy)
+            .addOption("underline", labels.underline)
+            .addOption("background", labels.background)
+            .setValue(state().style || "")
+            .onChange((style) => onChange({ style })));
+      }
+      new obsidian.Setting(modal.contentEl)
+        .addButton((reset) => reset.setButtonText(labels.reset).onClick(async () => { await onReset(); refreshButton(); modal.close(); }))
+        .addButton((done) => done.setButtonText(labels.done).setCta().onClick(() => modal.close()));
+    };
+    modal.open();
+  });
+  refreshButton();
+  return button;
+}
+
+// ---------- 生成自 src/template-provider.js ----------
+function createTemplateProvider({ app, TFile, getSettings, normalizeFolder, readTemplatePath }) {
+  const lexisPathFor = (folder) => {
+    const settings = getSettings();
+    const normalized = normalizeFolder(folder);
+    const row = (settings.dicts || []).find((item) => item && normalizeFolder(item.folder) === normalized);
+    return (row ? (row.template || "") : (settings.newWordTemplate || "")).trim();
+  };
+
+  const templaterPlugin = () => app.plugins?.getPlugin?.("templater-obsidian") || null;
+  const templaterTemplateFor = (folder) => {
+    const plugin = templaterPlugin();
+    if (!plugin?.templater?.write_template_to_file || plugin.settings?.trigger_on_file_creation_mode !== "folder") return null;
+    const rules = Array.isArray(plugin.settings.folder_templates) ? plugin.settings.folder_templates : [];
+    let current = normalizeFolder(folder);
+    while (current) {
+      const rule = rules.find((item) => normalizeFolder(item?.folder) === current && item?.template);
+      if (rule) return { plugin, path: rule.template, folder: current };
+      const slash = current.lastIndexOf("/");
+      current = slash < 0 ? "" : current.slice(0, slash);
+    }
+    return null;
+  };
+
+  const readLexis = (folder) => readTemplatePath(lexisPathFor(folder));
+
+  const create = async ({ path, folder, fallbackContent, transform = (content) => content }) => {
+    const match = templaterTemplateFor(folder);
+    if (!match) return app.vault.create(path, transform(fallbackContent));
+    const templateFile = app.vault.getAbstractFileByPath(match.path);
+    if (!(templateFile instanceof TFile)) return app.vault.create(path, transform(fallbackContent));
+    const file = await app.vault.create(path, "");
+    await match.plugin.templater.write_template_to_file(templateFile, file);
+    if (app.vault.process) await app.vault.process(file, transform);
+    else await app.vault.modify(file, transform(await app.vault.cachedRead(file)));
+    return file;
+  };
+
+  return { create, lexisPathFor, readLexis, templaterTemplateFor };
+}
+
+// ---------- 生成自 src/settings-tab.js ----------
+const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolder, DEFAULT_SETTINGS, cssColorToHex, addAppearanceButton, createReorderController, moveItem, LEXIS_HOME_VIEW, LEXIS_REVIEW_VIEW }) => {
+  // 输入时模糊匹配建议。AbstractInputSuggest 在 Obsidian 1.0+ 运行时可用;
+  // 缺失时 `|| class {}` 避免 extends undefined 报错,且调用处会跳过实例化。
+  // opts.multi=true 时按最后一个分隔符后的"活动 token"匹配,选中后追加(用于逗号/空格分隔的标签/属性多值字段)。
+  class PathSuggest extends (obsidian.AbstractInputSuggest || class {}) {
+    constructor(app, inputEl, getItems, onPick, opts) {
+      super(app, inputEl);
+      this.getItems = getItems;
+      this.onPick = onPick;
+      this.multi = !!(opts && opts.multi);
+      this.sep = (opts && opts.sep) || " ";
+    }
+    _split() {
+      const v = (this.inputEl && this.inputEl.value) || "";
+      const m = v.match(/[^\s,，;；]*$/);
+      const token = m ? m[0] : "";
+      return { before: v.slice(0, v.length - token.length), token };
+    }
+    getSuggestions(query) {
+      let items = this.getItems();
+      let q;
+      if (this.multi) {
+        const { token } = this._split();
+        q = token.toLowerCase();
+        const chosen = new Set(((this.inputEl && this.inputEl.value) || "").toLowerCase().split(/[\s,，;；]+/).filter(Boolean));
+        items = items.filter((p) => p.toLowerCase() === token.toLowerCase() || !chosen.has(p.toLowerCase()));
+      } else {
+        q = (query || "").toLowerCase();
+      }
+      return items.filter((p) => p.toLowerCase().includes(q)).slice(0, 50);
+    }
+    renderSuggestion(value, el) { el.setText(value); }
+    selectSuggestion(value) {
+      if (this.multi) {
+        // 多值:把选中项追加到当前列表后,重新触发建议(列表保持打开),可以接着选下一个
+        const { before } = this._split();
+        const out = before + value + this.sep;
+        if (this.inputEl) this.inputEl.value = out;
+        if (this.onPick) this.onPick(out);
+        if (typeof this.setValue === "function") this.setValue(out); // 触发 input 事件,刷新并保持下拉
+        if (this.inputEl) this.inputEl.focus();
+        return;
+      }
+      if (typeof this.setValue === "function") this.setValue(value);
+      if (this.inputEl) this.inputEl.value = value;
+      if (typeof this.close === "function") this.close();
+      if (this.onPick) this.onPick(value);
+    }
+  }
+
+  return class LexisSettingTab extends PluginSettingTab {
+    constructor(app, plugin) { super(app, plugin); this.plugin = plugin; }
+
+    section(containerEl, title, { open = false, desc = "" } = {}) {
+      const details = containerEl.createEl("details", { cls: "lexis-settings-section" });
+      details.open = open;
+      const summary = details.createEl("summary");
+      summary.createSpan({ text: title });
+      if (desc) summary.createSpan({ cls: "lexis-settings-section-hint", text: desc });
+      return details.createDiv({ cls: "lexis-settings-section-body" });
+    }
+
+    display() {
+      const { containerEl } = this;
+      containerEl.empty();
+      const t = (key, vars) => this.plugin.t(key, vars);
+      const accentHex = cssColorToHex(getComputedStyle(document.body).getPropertyValue("--text-accent"));
+      const save = () => this.plugin.saveSettings();
+      const refresh = () => this.plugin.refreshAllViews();
+      const appearanceLabels = {
+        color: t("settings.highlightColor"),
+        opacity: t("settings.opacity"),
+        style: t("settings.highlightStyle"),
+        defaultStyle: t("common.default"),
+        wavy: t("settings.wavy"),
+        underline: t("settings.underline"),
+        background: t("settings.background"),
+        reset: t("settings.resetAppearance"),
+        done: t("common.done"),
+      };
+      containerEl.createEl("h3", { text: t("settings.title") });
+
+      new Setting(containerEl).setName(t("language.name"))
+        .addDropdown((dd) => dd.addOption("zh", t("language.zh")).addOption("en", t("language.en")).setValue(this.plugin.settings.language || "zh").onChange(async (value) => {
+          this.plugin.settings.language = value === "en" ? "en" : "zh";
+          await save();
+          this.plugin.refreshAllViews();
+          this.app.workspace.iterateAllLeaves((leaf) => {
+            const type = leaf?.view?.getViewType?.();
+            if (type === LEXIS_HOME_VIEW || type === LEXIS_REVIEW_VIEW) leaf.view.render?.();
+          });
+          new Notice(t("language.reload"));
+          this.display();
+        }));
+
+      const folders = this.app.vault.getAllLoadedFiles().filter((f) => f instanceof TFolder).map((f) => f.path).filter((p) => p && p !== "/").sort();
+      const mdFiles = this.app.vault.getMarkdownFiles().map((f) => f.path).sort();
+      const hasSuggest = !!obsidian.AbstractInputSuggest;
+      const allTags = (() => {
+        const s = new Set(this.plugin.collectVocabTags());
+        try { const tg = this.app.metadataCache.getTags() || {}; for (const k in tg) s.add(k.replace(/^#/, "").toLowerCase()); } catch (_e) {}
+        return [...s].filter(Boolean).sort();
+      })();
+      const allProps = (() => {
+        try { const infos = this.app.metadataCache.getAllPropertyInfos ? this.app.metadataCache.getAllPropertyInfos() : null; if (infos) return Object.values(infos).map((x) => x && x.name).filter(Boolean).sort(); } catch (_e) {}
+        return [];
+      })();
+      const tagSuggest = (comp, apply) => { if (hasSuggest) new PathSuggest(this.app, comp.inputEl, () => allTags, (v) => { comp.setValue(v); apply(v); }, { multi: true }); };
+
+      const dictSection = this.section(containerEl, t("settings.dictionary"), { open: true });
+      new Setting(dictSection).setDesc(t("settings.dictionaryDesc")).setHeading();
+      const dictsWrap = dictSection.createDiv();
+      const renderDicts = () => {
+        dictsWrap.empty();
+        const reorder = createReorderController({
+          container: dictsWrap,
+          setIcon: obsidian.setIcon,
+          label: t("settings.reorder"),
+          onMove: async (from, to) => {
+            this.plugin.settings.dicts = moveItem(this.plugin.settings.dicts, from, to);
+            await save();
+            this.plugin.rebuildIndex(false);
+            renderDicts();
+          },
+        });
+        (this.plugin.settings.dicts || []).forEach((d, i) => {
+          const row = dictsWrap.createDiv({ cls: "lexis-setting-row lexis-dictionary-row" });
+          const fIn = new obsidian.TextComponent(row);
+          fIn.setPlaceholder(t("settings.folderPlaceholder")).setValue(d.folder || "");
+          fIn.inputEl.style.flex = "1";
+          const tIn = new obsidian.TextComponent(row);
+          tIn.setPlaceholder(t("settings.templatePlaceholder")).setValue(d.template || "");
+          tIn.inputEl.style.flex = "1.4";
+          const updateTemplateSource = () => {
+            const match = this.plugin.templateProvider.templaterTemplateFor(d.folder);
+            tIn.setDisabled(!!match);
+            tIn.setValue(match ? match.path : (d.template || ""));
+            tIn.inputEl.title = match ? t("settings.templaterTemplate", { path: match.path }) : "";
+          };
+          const onFolder = async (v) => { d.folder = (v || "").trim(); updateTemplateSource(); await save(); this.plugin.rebuildIndex(false); this.renderStats(); };
+          fIn.onChange(onFolder);
+          const onTpl = async (v) => { d.template = (v || "").trim(); await save(); };
+          tIn.onChange(onTpl);
+          updateTemplateSource();
+          if (hasSuggest) {
+            new PathSuggest(this.app, fIn.inputEl, () => folders, (v) => { fIn.setValue(v); onFolder(v); });
+            new PathSuggest(this.app, tIn.inputEl, () => mdFiles, (v) => { tIn.setValue(v); onTpl(v); });
+          }
+          const globalColor = this.plugin.settings.highlightColor || accentHex;
+          addAppearanceButton({
+            app: this.app,
+            obsidian,
+            parent: row,
+            title: t("settings.dictionaryAppearance"),
+            labels: appearanceLabels,
+            state: () => ({ color: d.color || globalColor, opacity: Number(d.opacity ?? this.plugin.settings.highlightOpacity) }),
+            onChange: async (patch) => { Object.assign(d, patch); await save(); refresh(); },
+            onReset: async () => { delete d.color; delete d.opacity; await save(); refresh(); },
+          });
+          new obsidian.ExtraButtonComponent(row).setIcon("trash").setTooltip(t("settings.deleteDictionary")).onClick(async () => { this.plugin.settings.dicts.splice(i, 1); await save(); this.plugin.rebuildIndex(false); renderDicts(); this.renderStats(); });
+          reorder.attach(row, i);
+        });
+        const addDict = dictsWrap.createEl("button", { text: t("settings.addDictionary") });
+        addDict.style.marginTop = "2px";
+        addDict.addEventListener("click", async () => { this.plugin.settings.dicts.push({ folder: "", template: "" }); await save(); renderDicts(); });
+      };
+      renderDicts();
+      new Setting(dictSection).setName(t("settings.tagsAsEntries")).setDesc(t("settings.tagsAsEntriesDesc"))
+        .addText((t) => {
+          t.setPlaceholder("词汇 术语").setValue(this.plugin.settings.vocabTags);
+          const apply = async (v) => { this.plugin.settings.vocabTags = v; await save(); this.plugin.rebuildIndex(true); this.renderStats(); };
+          t.onChange(apply); tagSuggest(t, apply);
+        });
+      new Setting(dictSection).setName(t("settings.includeAliases"))
+        .addToggle((t) => t.setValue(this.plugin.settings.includeAliases).onChange(async (v) => { this.plugin.settings.includeAliases = v; await save(); this.plugin.rebuildIndex(false); this.renderStats(); }));
+      new Setting(dictSection).setName(t("settings.aliasProperties")).setDesc(t("settings.aliasPropertiesDesc"))
+        .addText((t) => {
+          t.setPlaceholder("past,forms,variants").setValue(this.plugin.settings.aliasSources);
+          const apply = async (v) => { this.plugin.settings.aliasSources = (v || "").trim(); await save(); if (this.plugin.settings.includeAliases) { this.plugin.rebuildIndex(false); this.renderStats(); } };
+          t.onChange(apply);
+          if (hasSuggest) new PathSuggest(this.app, t.inputEl, () => allProps, (v) => { t.setValue(v); apply(v); }, { multi: true, sep: "," });
+        });
+
+      const inlineSection = this.section(containerEl, t("settings.inline"), { desc: t("settings.inlineDesc") });
+      new Setting(inlineSection).setName(t("settings.enableInline")).setDesc(t("settings.enableInlineDesc"))
+        .addToggle((t) => t.setValue(this.plugin.settings.inlineEntriesEnabled).onChange(async (v) => { this.plugin.settings.inlineEntriesEnabled = v; await save(); await this.plugin.rebuildIndex(false); this.renderStats(); }));
+      new Setting(inlineSection).setName(t("settings.inlineDelimiter")).setDesc(t("settings.inlineDelimiterDesc"))
+        .addText((t) => t.setPlaceholder("::").setValue(this.plugin.inlineDelimiter()).onChange(async (v) => { this.plugin.settings.inlineEntryDelimiter = (v || "").trim() || "::"; await save(); await this.plugin.rebuildIndex(false); this.renderStats(); }));
+      new Setting(inlineSection).setName(t("settings.inlineClassification")).setDesc(t("settings.inlineClassificationDesc"))
+        .addDropdown((dropdown) => dropdown
+          .addOption("heading", t("settings.classifyByHeading"))
+          .addOption("file", t("settings.classifyByFile"))
+          .setValue(this.plugin.settings.inlineClassificationMode)
+          .onChange(async (mode) => { this.plugin.settings.inlineClassificationMode = mode; await save(); renderCategoryColors(); refresh(); }))
+        .addExtraButton((button) => button.setIcon("refresh-cw").setTooltip(t("settings.refreshCategories")).onClick(async () => { await this.plugin.rebuildIndex(false); renderCategoryColors(); this.renderStats(); }));
+      const categoryColorsWrap = inlineSection.createDiv({ cls: "lexis-inline-tree" });
+      const openInlineHeading = async (node) => {
+        this.app.setting?.close?.();
+        const leaf = this.app.workspace.getLeaf(false);
+        await leaf.openFile(node.file, { active: true });
+        this.app.workspace.revealLeaf?.(leaf);
+        const reveal = () => {
+          const editor = leaf.view?.editor;
+          if (!editor) return;
+          const position = { line: node.line, ch: 0 };
+          editor.setCursor(position);
+          editor.scrollIntoView({ from: position, to: position }, true);
+        };
+        reveal();
+        window.setTimeout(reveal, 60);
+      };
+      const renderCategoryColors = () => {
+        categoryColorsWrap.empty();
+        const occurrences = this.plugin.inlineCategoryOccurrences || [];
+        if (!occurrences.length) {
+          categoryColorsWrap.createEl("p", { cls: "setting-item-description", text: t("settings.noInlineCategories") });
+          return;
+        }
+        const mode = this.plugin.settings.inlineClassificationMode === "file" ? "file" : "heading";
+        const groupMap = new Map();
+        for (const node of occurrences) {
+          const key = mode === "file" ? node.file.path : node.name;
+          let group = groupMap.get(key);
+          if (!group) {
+            group = {
+              id: `${mode}:${key}`,
+              key,
+              name: mode === "file" ? node.file.basename : node.name,
+              count: 0,
+              children: [],
+            };
+            groupMap.set(key, group);
+          }
+          group.count += node.count;
+          group.children.push(node);
+        }
+        const parentOrder = mode === "file" ? this.plugin.settings.inlineFileOrder : this.plugin.settings.inlineCategoryOrder;
+        const parentRank = new Map(parentOrder.map((key, index) => [key, index]));
+        let groups = [...groupMap.values()].sort((a, b) => {
+          const ar = parentRank.has(a.key) ? parentRank.get(a.key) : Number.MAX_SAFE_INTEGER;
+          const br = parentRank.has(b.key) ? parentRank.get(b.key) : Number.MAX_SAFE_INTEGER;
+          return ar - br || a.name.localeCompare(b.name);
+        });
+        for (const group of groups) {
+          const childRank = new Map((this.plugin.settings.inlineCategoryOrderByParent[group.id] || []).map((id, index) => [id, index]));
+          group.children.sort((a, b) => {
+            const ar = childRank.has(a.id) ? childRank.get(a.id) : Number.MAX_SAFE_INTEGER;
+            const br = childRank.has(b.id) ? childRank.get(b.id) : Number.MAX_SAFE_INTEGER;
+            const aLabel = mode === "file" ? a.name : a.file.path;
+            const bLabel = mode === "file" ? b.name : b.file.path;
+            return ar - br || aLabel.localeCompare(bLabel) || a.line - b.line;
+          });
+        }
+        const colors = mode === "file" ? this.plugin.settings.inlineFileColors : this.plugin.settings.inlineCategoryColors;
+        const opacities = mode === "file" ? this.plugin.settings.inlineFileOpacity : this.plugin.settings.inlineCategoryOpacity;
+        const visibility = mode === "file" ? this.plugin.settings.inlineFileHighlight : this.plugin.settings.inlineCategoryHighlight;
+        const sourceVisibility = this.plugin.settings.inlineSourceHighlight;
+        const collapsed = this.plugin.settings.inlineCollapsedGroups;
+        const rootReorder = createReorderController({
+          container: categoryColorsWrap,
+          setIcon: obsidian.setIcon,
+          label: t("settings.reorder"),
+          onMove: async (from, to) => {
+            groups = moveItem(groups, from, to);
+            if (mode === "file") this.plugin.settings.inlineFileOrder = groups.map(({ key }) => key);
+            else this.plugin.settings.inlineCategoryOrder = groups.map(({ key }) => key);
+            await save();
+            renderCategoryColors();
+          },
+        });
+        groups.forEach((group, groupIndex) => {
+          const enabled = visibility[group.key] !== false;
+          const details = categoryColorsWrap.createEl("details", { cls: "lexis-inline-group" });
+          details.open = collapsed[group.id] !== true;
+          details.addEventListener("toggle", async () => { collapsed[group.id] = !details.open; await save(); });
+          const summary = details.createEl("summary", { cls: "lexis-setting-row lexis-inline-group-row" });
+          const chevron = summary.createSpan({ cls: "lexis-inline-chevron" });
+          obsidian.setIcon(chevron, "chevron-right");
+          summary.createSpan({ cls: "lexis-inline-group-name", text: group.name, attr: { title: group.key } });
+          const parentControls = summary.createDiv({ cls: "lexis-inline-category-controls" });
+          parentControls.addEventListener("click", (event) => event.stopPropagation());
+          const countLabel = t("settings.entryCount", { count: group.count });
+          parentControls.createSpan({ cls: "lexis-inline-count", text: countLabel, attr: { title: countLabel } });
+          new obsidian.ToggleComponent(parentControls).setTooltip(t("settings.showGroupHighlight")).setValue(enabled)
+            .onChange(async (value) => { visibility[group.key] = value; await save(); refresh(); renderCategoryColors(); });
+          addAppearanceButton({
+            app: this.app,
+            obsidian,
+            parent: parentControls,
+            title: t("settings.categoryAppearance", { name: group.name }),
+            labels: appearanceLabels,
+            state: () => ({
+              color: colors[group.key] || accentHex,
+              opacity: Number(Object.prototype.hasOwnProperty.call(opacities, group.key) ? opacities[group.key] : this.plugin.settings.highlightOpacity),
+            }),
+            onChange: async (patch) => { if (patch.color != null) colors[group.key] = patch.color; if (patch.opacity != null) opacities[group.key] = patch.opacity; await save(); refresh(); },
+            onReset: async () => { delete colors[group.key]; delete opacities[group.key]; await save(); refresh(); },
+          });
+          rootReorder.attach(details, groupIndex, { handleParent: summary });
+
+          const childrenEl = details.createDiv({ cls: "lexis-inline-siblings lexis-inline-group-children" });
+          const childReorder = createReorderController({
+            container: childrenEl,
+            setIcon: obsidian.setIcon,
+            label: t("settings.reorder"),
+            onMove: async (from, to) => {
+              group.children = moveItem(group.children, from, to);
+              this.plugin.settings.inlineCategoryOrderByParent[group.id] = group.children.map(({ id }) => id);
+              await save();
+              renderCategoryColors();
+            },
+          });
+          group.children.forEach((node, childIndex) => {
+            const row = childrenEl.createDiv({ cls: `lexis-setting-row lexis-inline-category-row${enabled ? "" : " is-disabled"}` });
+            const label = mode === "file" ? node.name : node.file.basename;
+            const link = row.createEl("button", {
+              cls: "lexis-inline-category-link",
+              text: label,
+              attr: { type: "button", title: `${node.file.path}:${node.line + 1}` },
+            });
+            link.addEventListener("click", () => openInlineHeading(node));
+            const childControls = row.createDiv({ cls: "lexis-inline-category-controls" });
+            const childCount = t("settings.entryCount", { count: node.count });
+            childControls.createSpan({ cls: "lexis-inline-count", text: childCount, attr: { title: childCount } });
+            new obsidian.ToggleComponent(childControls).setTooltip(t("settings.showSubsetHighlight"))
+              .setValue(sourceVisibility[node.id] !== false).setDisabled(!enabled)
+              .onChange(async (value) => { sourceVisibility[node.id] = value; await save(); refresh(); });
+            childReorder.attach(row, childIndex);
+          });
+        });
+      };
+      renderCategoryColors();
+
+      const hlSection = this.section(containerEl, t("settings.highlight"));
+      new Setting(hlSection).setName(t("settings.enableHighlight")).addToggle((toggle) => toggle.setValue(this.plugin.settings.enableHighlight).onChange(async (v) => { this.plugin.settings.enableHighlight = v; await save(); refresh(); }));
+      new Setting(hlSection).setName(t("settings.livePreview")).setDesc(this.plugin.liveAvailable ? "" : t("settings.unsupported"))
+        .addToggle((t) => t.setValue(this.plugin.settings.enableLivePreview).setDisabled(!this.plugin.liveAvailable).onChange(async (v) => { this.plugin.settings.enableLivePreview = v; await save(); refresh(); }));
+      new Setting(hlSection).setName(t("settings.selectionPill"))
+        .addToggle((t) => t.setValue(this.plugin.settings.selectionPill).onChange(async (v) => { this.plugin.settings.selectionPill = v; await save(); if (!v) this.plugin.removeSelPill(); }));
+      new Setting(hlSection).setName(t("settings.pdfHighlight")).setDesc(t("settings.pdfHighlightDesc"))
+        .addToggle((t) => t.setValue(this.plugin.settings.enablePdfHighlight).onChange(async (v) => { this.plugin.settings.enablePdfHighlight = v; await save(); if (v) this.plugin.setupPdfHighlight(); else { this.plugin.teardownPdfHighlight(); this.plugin.rescanPdfLayers(); } }));
+      new Setting(hlSection).setName(t("settings.highlightStyle"))
+        .addDropdown((dd) => dd.addOption("wavy", t("settings.wavy")).addOption("underline", t("settings.underline")).addOption("background", t("settings.background")).setValue(this.plugin.settings.highlightStyle).onChange(async (v) => { this.plugin.settings.highlightStyle = v; await save(); refresh(); }));
+      new Setting(hlSection).setName(t("settings.highlightColor"))
+        .addColorPicker((cp) => { this._colorComp = cp; cp.setValue(this.plugin.settings.highlightColor || accentHex).onChange(async (v) => { this.plugin.settings.highlightColor = v; await save(); refresh(); }); })
+        .addExtraButton((b) => b.setIcon("reset").setTooltip(t("settings.resetTheme")).onClick(async () => { this.plugin.settings.highlightColor = ""; if (this._colorComp) this._colorComp.setValue(accentHex); await save(); refresh(); }));
+      new Setting(hlSection).setName(t("settings.opacity"))
+        .addSlider((s) => s.setLimits(0.1, 1, 0.05).setValue(this.plugin.settings.highlightOpacity).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.highlightOpacity = v; await save(); refresh(); }));
+      new Setting(hlSection).setName(t("settings.fade")).setDesc(t("settings.fadeDesc"))
+        .addToggle((t) => t.setValue(this.plugin.settings.fadeByMemory).onChange(async (v) => { this.plugin.settings.fadeByMemory = v; await save(); refresh(); }));
+      new Setting(hlSection).setName(t("settings.fadeFloor"))
+        .addSlider((s) => s.setLimits(0, 0.9, 0.05).setValue(this.plugin.settings.fadeFloor).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.fadeFloor = v; await save(); refresh(); }));
+      const excludeSetting = new Setting(hlSection).setName(t("settings.excludeTags")).setDesc(t("settings.excludeTagsDesc"));
+      excludeSetting.settingEl.addClass("lexis-tags-setting");
+      const excludeEditor = excludeSetting.controlEl.createDiv({ cls: "lexis-tag-editor" });
+      const excludeChips = excludeEditor.createDiv({ cls: "lexis-tag-editor-chips" });
+      const excludeAdd = excludeEditor.createDiv({ cls: "lexis-tag-editor-add" });
+      const excludeInput = new obsidian.TextComponent(excludeAdd).setPlaceholder(t("settings.addExcludedTag"));
+      const excludedTags = () => [...new Set(this.plugin.parseTags(this.plugin.settings.excludeTags))];
+      const saveExcludedTags = async (tags) => {
+        this.plugin.settings.excludeTags = tags.join(" ");
+        await save();
+        await this.plugin.rebuildIndex(false);
+      };
+      const renderExcludedTags = () => {
+        excludeChips.empty();
+        for (const tag of excludedTags()) {
+          const chip = excludeChips.createEl("button", { cls: "lexis-tag-editor-chip", attr: { type: "button", title: t("settings.removeExcludedTag", { tag }) } });
+          chip.createSpan({ text: `#${tag}` });
+          chip.createSpan({ cls: "lexis-tag-editor-remove", text: "×" });
+          chip.addEventListener("click", async () => { await saveExcludedTags(excludedTags().filter((value) => value !== tag)); renderExcludedTags(); });
+        }
+      };
+      const addExcludedTags = async (raw) => {
+        const incoming = this.plugin.parseTags(raw);
+        if (!incoming.length) return;
+        await saveExcludedTags([...new Set([...excludedTags(), ...incoming])]);
+        excludeInput.setValue("");
+        renderExcludedTags();
+        excludeInput.inputEl.focus();
+      };
+      excludeInput.inputEl.addEventListener("keydown", (event) => {
+        if (["Enter", ",", "，", ";", "；"].includes(event.key)) {
+          event.preventDefault();
+          addExcludedTags(excludeInput.inputEl.value);
+        } else if (event.key === "Backspace" && !excludeInput.inputEl.value) {
+          const tags = excludedTags();
+          if (tags.length) { tags.pop(); saveExcludedTags(tags).then(renderExcludedTags); }
+        }
+      });
+      new obsidian.ExtraButtonComponent(excludeAdd).setIcon("plus").setTooltip(t("settings.addExcludedTag")).onClick(() => addExcludedTags(excludeInput.inputEl.value));
+      if (hasSuggest) new PathSuggest(this.app, excludeInput.inputEl, () => allTags.filter((tag) => !excludedTags().includes(tag)), (value) => addExcludedTags(value));
+      renderExcludedTags();
+
+      const tagColorSection = this.section(containerEl, t("settings.tagColors"));
+      const rulesWrap = tagColorSection.createDiv();
+      const renderRules = () => {
+        rulesWrap.empty();
+        const grid = rulesWrap.createDiv({ cls: "lexis-rule-grid" });
+        const reorder = createReorderController({
+          container: grid,
+          setIcon: obsidian.setIcon,
+          label: t("settings.reorder"),
+          onMove: async (from, to) => {
+            this.plugin.settings.tagRules = moveItem(this.plugin.settings.tagRules, from, to);
+            await save();
+            refresh();
+            renderRules();
+          },
+        });
+        this.plugin.settings.tagRules.forEach((rule, i) => {
+          const cell = grid.createDiv({ cls: "lexis-setting-row lexis-rule" });
+          const tagIn = new obsidian.TextComponent(cell).setPlaceholder(t("settings.tagPlaceholder")).setValue(rule.tag);
+          const applyTag = async (v) => { rule.tag = (v || "").trim(); await save(); refresh(); };
+          tagIn.onChange(applyTag);
+          if (hasSuggest) new PathSuggest(this.app, tagIn.inputEl, () => allTags, (v) => { tagIn.setValue(v); applyTag(v); });
+          addAppearanceButton({
+            app: this.app,
+            obsidian,
+            parent: cell,
+            title: t("settings.tagAppearance"),
+            labels: appearanceLabels,
+            allowStyle: true,
+            state: () => ({ color: rule.color || accentHex, opacity: Number(rule.opacity ?? this.plugin.settings.highlightOpacity), style: rule.style || "" }),
+            onChange: async (patch) => { Object.assign(rule, patch); await save(); refresh(); },
+            onReset: async () => { delete rule.color; delete rule.opacity; delete rule.style; await save(); refresh(); },
+          });
+          new obsidian.ExtraButtonComponent(cell).setIcon("trash").setTooltip(t("common.delete")).onClick(async () => { this.plugin.settings.tagRules.splice(i, 1); await save(); refresh(); renderRules(); });
+          reorder.attach(cell, i);
+        });
+        const addRule = rulesWrap.createEl("button", { text: t("settings.addTagRule") });
+        addRule.style.marginTop = "2px";
+        addRule.addEventListener("click", async () => { this.plugin.settings.tagRules.push({ tag: "", color: accentHex, style: "" }); await save(); renderRules(); });
+      };
+      renderRules();
+
+      const cardSection = this.section(containerEl, t("settings.popover"));
+      const preview = cardSection.createDiv({ cls: "lexis-popover lexis-popover-preview" });
+      preview.createDiv({ cls: "lexis-popover-title", text: "Yalda · 人物" });
+      preview.createDiv({ cls: "lexis-popover-body", text: t("settings.popoverPreview") });
+      const updateCards = () => {
+        this.plugin.applyPopoverAppearance(preview);
+        const doc = preview.ownerDocument || document;
+        doc.querySelectorAll(".lexis-popover:not(.lexis-popover-preview)").forEach((el) => this.plugin.applyPopoverAppearance(el));
+      };
+      updateCards();
+      new Setting(cardSection).setName(t("settings.popoverWidth"))
+        .addSlider((s) => s.setLimits(280, 800, 10).setValue(this.plugin.settings.popoverWidth).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.popoverWidth = v; updateCards(); await save(); }));
+      new Setting(cardSection).setName(t("settings.popoverHeight")).setDesc(t("settings.popoverHeightDesc"))
+        .addSlider((s) => s.setLimits(200, 800, 10).setValue(this.plugin.settings.popoverMaxHeight).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.popoverMaxHeight = v; updateCards(); await save(); }));
+      new Setting(cardSection).setName(t("settings.popoverFont"))
+        .addSlider((s) => s.setLimits(11, 24, 1).setValue(this.plugin.settings.popoverFontSize).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.popoverFontSize = v; updateCards(); await save(); }));
+      new Setting(cardSection).setName(t("settings.hoverDelay")).setDesc(t("settings.hoverDelayDesc"))
+        .addSlider((s) => s.setLimits(0, 3, 0.1).setValue((this.plugin.settings.hoverDelayMs || 0) / 1000).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.hoverDelayMs = Math.round(v * 1000); await save(); }));
+      new Setting(cardSection).setName(t("settings.showRelated")).addToggle((toggle) => toggle.setValue(this.plugin.settings.showRelated).onChange(async (v) => { this.plugin.settings.showRelated = v; await save(); }));
+      new Setting(cardSection).setName(t("settings.showOccurrences")).setDesc(t("settings.showOccurrencesDesc"))
+        .addToggle((t) => t.setValue(this.plugin.settings.showOccurrences).onChange(async (v) => { this.plugin.settings.showOccurrences = v; await save(); }));
+      new Setting(cardSection).setName(t("settings.pdfOccurrences")).setDesc(t("settings.pdfOccurrencesDesc"))
+        .addToggle((toggle) => toggle.setValue(this.plugin.settings.includePdfOccurrences !== false).onChange(async (v) => { this.plugin.settings.includePdfOccurrences = v; this.plugin._occCache.clear(); await save(); }));
+      new Setting(cardSection).setName(t("settings.occurrenceLimit")).addSlider((s) => s.setLimits(1, 15, 1).setValue(this.plugin.settings.occurrenceLimit).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.occurrenceLimit = v; await save(); this.plugin._occCache.clear(); }));
+      new Setting(cardSection).setName(t("settings.occurrenceScope")).setDesc(t("settings.occurrenceScopeDesc"))
+        .addText((input) => input.setPlaceholder(t("settings.wholeVault")).setValue(this.plugin.settings.occurrenceFolders).onChange(async (v) => { this.plugin.settings.occurrenceFolders = v.trim(); await save(); this.plugin._occCache.clear(); }));
+
+      const addSection = this.section(containerEl, t("settings.selectionAdd"));
+      new Setting(addSection).setName(t("settings.emptyNotePreset")).setDesc(t("settings.emptyNotePresetDesc"))
+        .addDropdown((dropdown) => dropdown
+          .addOption("blank", t("settings.emptyNoteBlank"))
+          .addOption("occ", t("settings.emptyNoteOccurrences"))
+          .setValue(this.plugin.settings.emptyNotePreset || "blank")
+          .onChange(async (value) => { this.plugin.settings.emptyNotePreset = value === "occ" ? "occ" : "blank"; await save(); }));
+      new Setting(addSection).setName(t("settings.defaultTemplate")).setDesc(t("settings.defaultTemplateDesc"))
+        .addText((input) => {
+          input.setPlaceholder("template/word.md").setValue(this.plugin.settings.newWordTemplate);
+          const onTpl = async (v) => { this.plugin.settings.newWordTemplate = (v || "").trim(); await save(); };
+          input.onChange(onTpl);
+          if (hasSuggest) new PathSuggest(this.app, input.inputEl, () => mdFiles, (v) => { input.setValue(v); onTpl(v); });
+        });
+      const occurrenceSetting = new Setting(addSection).setName(t("settings.occurrenceTemplate")).setDesc(t("settings.occurrenceTemplateDesc"))
+        .addTextArea((input) => input
+          .setPlaceholder(DEFAULT_SETTINGS.occurrenceTemplate)
+          .setValue(this.plugin.settings.occurrenceTemplate ?? DEFAULT_SETTINGS.occurrenceTemplate)
+          .onChange(async (v) => { this.plugin.settings.occurrenceTemplate = v; await save(); }));
+      occurrenceSetting.settingEl.addClass("lexis-template-setting");
+      const occurrenceTextarea = occurrenceSetting.controlEl.querySelector("textarea");
+      if (occurrenceTextarea) occurrenceTextarea.rows = 4;
+
+      const fsrsSection = this.section(containerEl, t("settings.review"));
+      new Setting(fsrsSection).setName(t("settings.retention")).setDesc(t("settings.retentionDesc"))
+        .addSlider((s) => s.setLimits(0.8, 0.97, 0.01).setValue(this.plugin.settings.requestRetention).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.requestRetention = v; await save(); }));
+      new Setting(fsrsSection).setName(t("settings.newLimit")).addSlider((s) => s.setLimits(0, 100, 5).setValue(this.plugin.settings.newPerDay).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.newPerDay = v; await save(); }));
+      new Setting(fsrsSection).setName(t("settings.sessionLimit")).addSlider((s) => s.setLimits(10, 500, 10).setValue(this.plugin.settings.maxReviewsPerSession).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.maxReviewsPerSession = v; await save(); }));
+      new Setting(fsrsSection).setName(t("settings.cardFront")).setDesc(t("settings.cardFrontDesc"))
+        .addDropdown((dd) => dd.addOption("note", t("settings.noteCard")).addOption("cloze", t("settings.clozeCard")).setValue(this.plugin.settings.cardFront).onChange(async (v) => { this.plugin.settings.cardFront = v; await save(); }));
+      new Setting(fsrsSection).setName(t("settings.showReviewMetadata")).setDesc(t("settings.showReviewMetadataDesc"))
+        .addToggle((toggle) => toggle.setValue(!!this.plugin.settings.showReviewMetadata).onChange(async (value) => {
+          this.plugin.settings.showReviewMetadata = value;
+          this.plugin.applyReviewMetadataVisibility();
+          await save();
+        }));
+      new Setting(fsrsSection).setName(t("settings.ratingOffset")).setDesc(t("settings.ratingOffsetDesc"))
+        .addSlider((s) => s.setLimits(0, 200, 5).setValue(this.plugin.settings.reviewBottomSpace).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.reviewBottomSpace = v; await save(); }));
+      new Setting(fsrsSection).setName(t("home.start")).addButton((b) => b.setButtonText(t("settings.openReview")).setCta().onClick(() => this.plugin.openReview()));
+      new Setting(fsrsSection).setName(t("settings.hoverFeedback")).setDesc(t("settings.hoverFeedbackDesc"))
+        .addToggle((t) => t.setValue(this.plugin.settings.hoverFeedback).onChange(async (v) => { this.plugin.settings.hoverFeedback = v; await save(); }));
+      new Setting(fsrsSection).setName(t("settings.feedbackDays")).setDesc(t("settings.feedbackDaysDesc"))
+        .addSlider((s) => s.setLimits(1, 30, 1).setValue(this.plugin.settings.hoverFeedbackDays).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.hoverFeedbackDays = v; await save(); }));
+      new Setting(fsrsSection).setName(t("settings.retireDays")).setDesc(t("settings.retireDaysDesc"))
+        .addSlider((s) => s.setLimits(14, 365, 1).setValue(this.plugin.settings.retireCandidateDays).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.retireCandidateDays = v; await save(); }));
+
+      const bridgeSection = this.section(containerEl, t("settings.bridge"), { desc: t("settings.bridgeDesc") });
+      new Setting(bridgeSection).setName(t("settings.annotationHeading")).setDesc(t("settings.annotationHeadingDesc"))
+        .addText((t) => t.setPlaceholder("#### 批注").setValue(this.plugin.settings.annotationHeading).onChange(async (v) => { this.plugin.settings.annotationHeading = v; await save(); }));
+      new Setting(bridgeSection).setName(t("settings.enableBridge"))
+        .addToggle((t) => t.setValue(this.plugin.settings.bridgeEnabled).onChange(async (v) => {
+          this.plugin.settings.bridgeEnabled = v;
+          if (v && !this.plugin.settings.bridgeToken) this.plugin.settings.bridgeToken = this.plugin.bridge.generateToken();
+          await save();
+          this.plugin.bridge.restart();
+          this.display();
+        }));
+      new Setting(bridgeSection).setName(t("settings.port")).setDesc(t("settings.portDesc"))
+        .addText((t) => t.setValue(String(this.plugin.settings.bridgePort)).onChange(async (v) => { const n = parseInt(v, 10); if (n >= 1024 && n <= 65535) { this.plugin.settings.bridgePort = n; await save(); } }))
+        .addExtraButton((b) => b.setIcon("rotate-ccw").setTooltip(t("settings.restartBridge")).onClick(() => { this.plugin.bridge.restart(); new Notice(t("notice.bridgeRestarted")); }));
+      new Setting(bridgeSection).setName(t("settings.token")).setDesc(t("settings.tokenDesc"))
+        .addText((input) => { input.setValue(this.plugin.settings.bridgeToken || t("settings.tokenPending")).setDisabled(true); input.inputEl.style.width = "260px"; })
+        .addExtraButton((b) => b.setIcon("copy").setTooltip(t("settings.copyToken")).onClick(async () => { if (this.plugin.settings.bridgeToken) { await navigator.clipboard.writeText(this.plugin.settings.bridgeToken); new Notice(t("notice.tokenCopied")); } }))
+        .addExtraButton((b) => b.setIcon("refresh-cw").setTooltip(t("settings.regenerateToken")).onClick(async () => { this.plugin.settings.bridgeToken = this.plugin.bridge.generateToken(); await save(); this.plugin.bridge.restart(); this.display(); }));
+
+      new Setting(containerEl).setName(t("settings.rebuild")).addButton((b) => b.setButtonText(t("settings.rebuildNow")).onClick(() => { this.plugin.rebuildIndex(true); this.renderStats(); }));
+      this.statsEl = containerEl.createEl("p", { cls: "lexis-stats" });
+      this.renderStats();
+    }
+
+    renderStats() {
+      if (!this.statsEl) return;
+      const s = this.plugin.stats;
+      this.statsEl.setText(this.plugin.t("settings.stats", { words: s.words, aliases: s.aliases, inline: s.inlineEntries || 0, due: s.due || 0 }));
+    }
+  }
+};
+
+const LEXIS_REVIEW_VIEW = "lexis-review-view";
+const LEXIS_HOME_VIEW = "lexis-home-view";
+
+const DEFAULT_SETTINGS = {
+  language: "zh",
+  // 收录范围:多个文件夹(逗号/换行分隔) ∪ 携带任一标签的笔记(并集)。
+  // vocabFolders / excludeTags 不放默认值,迁移与兜底在 loadSettings 里做(留默认会盖掉用户老值)。
+  vocabTags: "", // 带任一此标签的笔记也算词库(与文件夹取并集)
+  includeAliases: true,
+  aliasSources: "", // 额外的别名来源属性名,逗号分隔(如 past,forms,variants)。留空只读 aliases/alias。
+  // 内联条目库:带 lexis-inline 属性(或 #lexis-inline 标签)的笔记可用「词条::批注」维护轻量词条。
+  inlineEntriesEnabled: true,
+  inlineEntryDelimiter: "::",
+  inlineClassificationMode: "heading", // heading=同名最近标题共用外观；file=同一来源文件共用外观
+  inlineCategoryColors: {}, // { "人物": "#d9534f" }，由资料笔记的标题分类自动生成设置项
+  inlineCategoryOpacity: {}, // { "人物": 0.65 }，留空时跟随全局高亮透明度
+  inlineCategoryHighlight: {}, // { "人物": false }，关闭后仍识别和显示悬浮批注，只隐藏高亮
+  inlineFileColors: {}, // { "资料/小说.md": "#d9534f" }，按文件分类时使用
+  inlineFileOpacity: {},
+  inlineFileHighlight: {},
+  inlineSourceHighlight: {}, // { "资料/小说.md::人物": false }，父级下单独关闭某个子集
+  inlineCollapsedGroups: {},
+  inlineCategoryOrder: [], // 设置页分类顺序；新发现的分类追加在末尾
+  inlineFileOrder: [],
+  inlineCategoryOrderByParent: {}, // 每个分类父级独立保存子集顺序
+  enableHighlight: true,
+  enableLivePreview: true,
+  highlightStyle: "wavy",
+  highlightColor: "",
+  highlightOpacity: 1,
+  popoverWidth: 460,
+  popoverMaxHeight: 420,
+  popoverFontSize: 14,
+  hoverDelayMs: 250,
+  // 高亮渐隐:强度随 FSRS stability 单调变淡,归档词完全不高亮(见 fadeAlphaFor)
+  fadeByMemory: true,
+  fadeFloor: 0.25, // 淡到最后不低于这个透明度(0~1)
+  // 悬停回流:悬停查释义时,如果到期日比 N 天后还远,拉近到今天,提醒尽快复习(只挪 due,不碰 stability)
+  hoverFeedback: true,
+  hoverFeedbackDays: 3,
+  // 淘汰候选:入库满这么多天、且这么多天没自然相遇过,才会进候选列表(同一个阈值管两个条件)
+  retireCandidateDays: 90,
+  tagRules: [],
+  showRelated: true,
+  showOccurrences: true,
+  includePdfOccurrences: true,
+  occurrenceLimit: 6,
+  occurrenceFolders: "",
+  // Stage 3 (FSRS)
+  requestRetention: 0.9,
+  newPerDay: 20,
+  maxReviewsPerSession: 200,
+  reviewLog: {}, // { "YYYY-MM-DD": count } 供热力图(Stage 5)
+  reviewHistory: {}, // { "词条路径": [{date, s, grade, retention}] } 供单词级记忆曲线
+  showReviewMetadata: false,
+  // Stage 4
+  newWordTemplate: "template/单词模板.md",
+  emptyNotePreset: "blank",
+  // 划词出处模板:首行若为 Markdown 标题,其余内容作为每条出处的格式;留空则不自动写出处。
+  occurrenceTemplate: "#### 出处\n> {{sentence}}{{sourceSuffix}}",
+  // 批注小节标题:可以只填文字(默认按 #### 级别),也可以带级别(比如 "## 引用");留空用默认 "#### 批注"
+  annotationHeading: "",
+  // 卡片正面:note=单词→整篇;cloze=出处填空
+  cardFront: "note",
+  // 桌面端评分按钮底部间距(px)；移动端固定在原生工具栏上方。
+  reviewBottomSpace: 70,
+  // 浏览器扩展排除标签:打上任一此标签的单词不在网页高亮(多标签,逗号/空格分隔)。
+  // excludeTags 不放默认值,迁移在 loadSettings 里做。
+  // 浏览器桥接(本地 HTTP,只听 127.0.0.1,供 Chrome 扩展拉词库/划词添加)
+  bridgeEnabled: false,
+  bridgePort: 45945,
+  bridgeToken: "",
+  // 在 Obsidian 笔记里划词后,选区旁冒出"+ 加入词库"浮动药丸(阅读/编辑两种模式都生效)
+  selectionPill: true,
+  // 划词药丸上次选中的词典
+  lastSelectionFolder: "",
+  // 在 Obsidian 内置 PDF 阅读器里也高亮词库词(钩 pdf.js 文字层;扫描版无文字层则无效)
+  enablePdfHighlight: true,
+};
+
+// ---------- 小工具 ----------
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// 词边界(支持中文):只有当词以英文字母/数字/下划线开头或结尾时才加 ASCII 边界
+// (避免 cat 命中 category);中文/日文等无空格语言不加边界,否则 \b 永不命中。
+const boundedSource = (word) => {
+  const lb = /^[A-Za-z0-9_]/.test(word) ? "(?<![A-Za-z0-9_])" : "";
+  const rb = /[A-Za-z0-9_]$/.test(word) ? "(?![A-Za-z0-9_])" : "";
+  return lb + escapeRe(word) + rb;
+};
+const escHtml = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+// 从网页/富文本粘贴来的不换行空格会被 MarkdownRenderer 转成 &nbsp;，落进 TeX 后触发 MathJax 的 Misplaced &。
+// 只规范传给渲染器的副本，不改用户笔记原文。
+const renderLexisMarkdown = (app, md, el, sourcePath, comp) => {
+  const clean = String(md == null ? "" : md).replace(/\u00a0/g, " ");
+  return MarkdownRenderer.render
+    ? MarkdownRenderer.render(app, clean, el, sourcePath, comp)
+    : MarkdownRenderer.renderMarkdown(clean, el, sourcePath, comp);
+};
+const round2 = (x) => Math.round(x * 100) / 100;
+function cssColorToHex(c) {
+  if (!c) return "#888888";
+  if (/^#[0-9a-fA-F]{6}$/.test(c.trim())) return c.trim();
+  const tmp = document.createElement("div");
+  tmp.style.color = c; document.body.appendChild(tmp);
+  const rgb = getComputedStyle(tmp).color; tmp.remove();
+  const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(rgb);
+  if (!m) return "#888888";
+  return "#" + [m[1], m[2], m[3]].map((x) => (+x).toString(16).padStart(2, "0")).join("");
+}
+function fmtDate(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+function todayStr() { return fmtDate(new Date()); }
+function parseDate(s) { const [y, m, d] = String(s).slice(0, 10).split("-").map(Number); return new Date(y, (m || 1) - 1, d || 1); }
+function addDaysStr(baseStr, days) { const d = baseStr ? parseDate(baseStr) : new Date(); d.setDate(d.getDate() + days); return fmtDate(d); }
+function daysBetween(aStr, bStr) { return Math.max(0, Math.round((parseDate(bStr) - parseDate(aStr)) / 86400000)); }
+
+// ---------- FSRS ----------
+const FSRS_W = [0.40255, 1.18385, 3.173, 15.69105, 7.1949, 0.5345, 1.4604, 0.0046, 1.54575, 0.1192, 1.01925, 1.9395, 0.11, 0.29605, 2.2698, 0.2315, 2.9898, 0.51655, 0.6621];
+const FSRS_DECAY = -0.5;
+const FSRS_FACTOR = Math.pow(0.9, 1 / FSRS_DECAY) - 1;
+const MAX_IVL = 36500;
+const FSRS = {
+  clampD: (d) => Math.min(10, Math.max(1, d)),
+  initStability: (g) => Math.max(0.1, FSRS_W[g - 1]),
+  initDifficulty: (g) => FSRS.clampD(FSRS_W[4] - Math.exp(FSRS_W[5] * (g - 1)) + 1),
+  linearDamping: (delta, d) => (delta * (10 - d)) / 9,
+  meanReversion: (init, cur) => FSRS_W[7] * init + (1 - FSRS_W[7]) * cur,
+  nextDifficulty(d, g) { const delta = -FSRS_W[6] * (g - 3); const dd = d + FSRS.linearDamping(delta, d); return FSRS.clampD(FSRS.meanReversion(FSRS.initDifficulty(4), dd)); },
+  retrievability(t, s) { return Math.pow(1 + FSRS_FACTOR * t / s, FSRS_DECAY); },
+  nextRecallStability(d, s, r, g) { const hard = g === 2 ? FSRS_W[15] : 1; const easy = g === 4 ? FSRS_W[16] : 1; return s * (1 + Math.exp(FSRS_W[8]) * (11 - d) * Math.pow(s, -FSRS_W[9]) * (Math.exp((1 - r) * FSRS_W[10]) - 1) * hard * easy); },
+  nextForgetStability(d, s, r) { return FSRS_W[11] * Math.pow(d, -FSRS_W[12]) * (Math.pow(s + 1, FSRS_W[13]) - 1) * Math.exp((1 - r) * FSRS_W[14]); },
+  nextInterval(s, R) { const ivl = (s / FSRS_FACTOR) * (Math.pow(R, 1 / FSRS_DECAY) - 1); return Math.min(MAX_IVL, Math.max(1, Math.round(ivl))); },
+};
+
+const LexisReviewView = createReviewView({
+  reviewViewType: LEXIS_REVIEW_VIEW,
+  todayStr,
+  renderLexisMarkdown,
+});
+
+const LexisBridge = createBridgeServer({ Notice });
+
+class LexisPlugin extends Plugin {
+  async onload() {
+    try {
+    await this.loadSettings();
+    this.i18n = createI18n(() => this.settings.language);
+    this.templateProvider = createTemplateProvider({
+      app: this.app,
+      TFile,
+      getSettings: () => this.settings,
+      normalizeFolder: (folder) => this.normalizeFolder(folder),
+      readTemplatePath: (path) => this.readTemplatePath(path),
+    });
+    this.applyReviewMetadataVisibility();
+
+    this.index = new Map();
+    this.vocabPaths = new Set();
+    this.stats = { words: 0, aliases: 0, due: 0 };
+    this._pattern = null;
+    this._rebuildTimer = null;
+    this._popover = null;
+    this._popoverComp = null;
+    this._hideTimer = null;
+    this._showTimer = null;
+    this._showTarget = null;
+    this._occCache = new Map();
+    this.occurrenceSearch = createOccurrenceSearch({
+      app: this.app,
+      loadPdfJs: () => obsidian.loadPdfJs(),
+      boundedSource,
+      extractSentence: (content, index) => this.extractSentence(content, index),
+      markdownAllowed: (file) => !this.inVocabFolder(file.path) && !this.inlineSourcePaths?.has(file.path),
+      inScope: (path, scope) => this.inScope(path, scope),
+    });
+    this.liveAvailable = false;
+    this._encounters = {};
+    this._encSaveTimer = 0;
+    this._encounterDedup = {};
+    this._passiveSeenToday = new Set();
+    this._pageHighlightState = new WeakMap();
+    this._reviewSessions = new WeakMap();
+    await this.loadEncounters();
+    this.registerEvent(this.app.workspace.on("file-open", (file) => {
+      if (file instanceof TFile && this.inVocabFolder(file.path)) this.recordEncounter(file, "open");
+      window.requestAnimationFrame(() => this.syncActivePageHighlightState());
+    }));
+    this.registerEvent(this.app.workspace.on("active-leaf-change", (leaf) => this.syncActivePageHighlightState(leaf)));
+
+    this.statusBarEl = this.addStatusBarItem();
+    if (this.statusBarEl) {
+      this.statusBarEl.style.cursor = "pointer";
+      this.statusBarEl.setAttribute("aria-label", this.t("status.rebuildAria"));
+      this.registerDomEvent(this.statusBarEl, "click", () => this.rebuildIndex(true));
+    }
+
+    this.addCommand({ id: "rebuild-index", name: this.t("command.rebuild"), callback: () => this.rebuildIndex(true) });
+    this.addCommand({ id: "open-review", name: this.t("command.review"), callback: () => this.openReview() });
+    this.addCommand({ id: "add-selected-word", name: this.t("command.addSelection"), callback: () => this.addSelectedWordCommand() });
+    this.addCommand({ id: "open-home", name: this.t("command.home"), callback: () => this.openHome() });
+    this.addCommand({
+      id: "toggle-current-page-highlights",
+      name: this.t("command.toggleHighlights"),
+      checkCallback: (checking) => {
+        const page = this.currentHighlightPage();
+        if (!page) return false;
+        if (checking) return true;
+        this.toggleCurrentPageHighlights(page);
+        return true;
+      },
+    });
+    this.addRibbonIcon("graduation-cap", this.t("ribbon.home"), () => this.openHome());
+    this.addRibbonIcon("brain", this.t("ribbon.review"), () => this.openReview());
+
+    // ---------- 生命周期命令(归档/恢复/常驻),只对当前打开的词条笔记生效 ----------
+    this.addCommand({
+      id: "archive-word",
+      name: this.t("command.archive"),
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file || !this.inVocabFolder(file.path) || this.readLifecycle(file).archived) return false;
+        if (checking) return true;
+        this.setArchived(file, true).then(() => new Notice(this.t("notice.archived", { word: file.basename })));
+        return true;
+      },
+    });
+    this.addCommand({
+      id: "restore-word",
+      name: this.t("command.restore"),
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file || !this.inVocabFolder(file.path) || !this.readLifecycle(file).archived) return false;
+        if (checking) return true;
+        new LexisRestoreModal(this.app, this, file).open();
+        return true;
+      },
+    });
+    this.addCommand({
+      id: "toggle-pin-word",
+      name: this.t("command.pin"),
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file || !this.inVocabFolder(file.path)) return false;
+        if (checking) return true;
+        const pinned = this.readLifecycle(file).pinned;
+        this.setPinned(file, !pinned).then(() => new Notice(this.t(!pinned ? "notice.pinned" : "notice.unpinned", { word: file.basename })));
+        return true;
+      },
+    });
+    this.addCommand({
+      id: "migrate-familiar-tag-to-archived",
+      name: this.t("command.migrate"),
+      callback: async () => {
+        const files = this.app.vault.getMarkdownFiles().filter((f) => this.inVocabFolder(f.path) && this.getTags(f).has("熟悉") && !this.readLifecycle(f).archived && !this.readLifecycle(f).retired);
+        if (!files.length) { new Notice(this.t("notice.noFamiliar")); return; }
+        for (const f of files) await this.app.fileManager.processFrontMatter(f, (fm) => { fm["lexis-status"] = "archived"; });
+        this.rebuildIndex(false);
+        new Notice(this.t("notice.migrated", { count: files.length }));
+      },
+    });
+    this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => {
+      if (!(file instanceof TFile) || !this.inVocabFolder(file.path)) return;
+      const { archived, pinned } = this.readLifecycle(file);
+      menu.addItem((it) => it.setTitle(this.t(archived ? "menu.restore" : "menu.archive")).setIcon(archived ? "archive-restore" : "archive").onClick(() => {
+        if (archived) new LexisRestoreModal(this.app, this, file).open();
+        else this.setArchived(file, true).then(() => new Notice(this.t("notice.archived", { word: file.basename })));
+      }));
+      menu.addItem((it) => it.setTitle(this.t(pinned ? "menu.unpin" : "menu.pin")).setIcon(pinned ? "pin-off" : "pin").onClick(() => {
+        this.setPinned(file, !pinned).then(() => new Notice(this.t(!pinned ? "notice.pinned" : "notice.unpinned", { word: file.basename })));
+      }));
+    }));
+
+    this.registerView(LEXIS_REVIEW_VIEW, (leaf) => new LexisReviewView(leaf, this));
+    this.registerView(LEXIS_HOME_VIEW, (leaf) => new LexisHomeView(leaf, this));
+
+    this.addSettingTab(new LexisSettingTab(this.app, this));
+
+    this.registerMarkdownPostProcessor((el, ctx) => this.highlightElement(el, ctx));
+    this.registerMarkdownCodeBlockProcessor("lexis", (src, el, ctx) => this.renderLexisBlock(el, ctx, src));
+    this.registerMarkdownCodeBlockProcessor("lexis-heatmap", (src, el) => this.renderHeatmap(el));
+    this.registerMarkdownCodeBlockProcessor("lexis-home", (src, el) => this.renderHomeBlock(el));
+    this.setupLiveExtension();
+    this.setupPdfHighlight();
+    this.setupEpubIframeHighlight();
+
+    this.registerDomEvent(document, "mouseover", (e) => this.onMouseOver(e));
+    this.registerDomEvent(document, "mouseout", (e) => this.onMouseOut(e));
+    this.registerDomEvent(document, "click", (e) => this.onClick(e));
+    this.registerDomEvent(window, "scroll", (e) => { if (this._popover && e.target instanceof Node && this._popover.contains(e.target)) return; this.removePopover(); this.removeSelPill(); }, { capture: true });
+    // 划词添加:松开鼠标后,若选区在笔记里则冒出"+ 加入词库"药丸
+    this.registerDomEvent(document, "mouseup", (e) => this.maybeShowSelPill(e));
+    this.registerDomEvent(document, "keydown", (e) => { if (e.key === "Escape") this.removeSelPill(); });
+
+    this.app.workspace.onLayoutReady(() => { this.rebuildIndex(false); this.syncActivePageHighlightState(); });
+    this.registerEvent(this.app.vault.on("create", (f) => this.maybeRebuild(f)));
+    this.registerEvent(this.app.vault.on("delete", (f) => this.maybeRebuild(f)));
+    this.registerEvent(this.app.vault.on("rename", (f, old) => this.maybeRebuild(f, old)));
+    this.registerEvent(this.app.vault.on("modify", (file) => {
+      this._occCache.clear();
+      if (file?.extension === "pdf") this.occurrenceSearch.invalidatePdf(file.path);
+      if (this.isInlineSourceFile(file) || this.inlineSourcePaths?.has(file?.path)) this.scheduleRebuild();
+    }));
+    // 词条元数据变化会影响别名、排除标签、配色和生命周期；无论是否启用“按标签收录”都要重建。
+    // 同时保留未收录文件的判断，让它能因新增收录标签进入词库。
+    this.registerEvent(this.app.metadataCache.on("changed", (file) => {
+      if (this.vocabPaths.has(file.path) || this.isVocabFile(file) || this.isInlineSourceFile(file) || this.inlineSourcePaths?.has(file?.path)) this.scheduleRebuild();
+    }));
+
+    // 划词添加(右键菜单)
+    this.registerEvent(this.app.workspace.on("editor-menu", (menu, editor, view) => {
+      const sel = (editor.getSelection() || "").trim();
+      if (!sel || sel.length > 60) return;
+      const label = sel.length > 16 ? sel.slice(0, 16) + "…" : sel;
+      const dicts = this.dictFolders();
+      if (dicts.length > 1) {
+        menu.addItem((item) => {
+          item.setTitle(this.t("menu.add", { word: label })).setIcon("book-plus");
+          const submenu = item.setSubmenu();
+          for (const folder of dicts) {
+            submenu.addItem((choice) => choice
+              .setTitle(folder)
+              .setIcon("folder")
+              .onClick(() => this.addWordFromSelection(sel, editor, view, folder)));
+          }
+        });
+      } else {
+        menu.addItem((item) => item
+          .setTitle(this.t("menu.add", { word: label }))
+          .setIcon("book-plus")
+          .onClick(() => this.addWordFromSelection(sel, editor, view)));
+      }
+    }));
+
+    // 外部阅读端桥接:Chrome 与未来 Zotero 共用同一条本机协议。
+    this.bridge = new LexisBridge(this);
+    if (this.settings.bridgeEnabled) {
+      if (!this.settings.bridgeToken) { this.settings.bridgeToken = this.bridge.generateToken(); await this.saveSettings(); }
+      this.bridge.start();
+    }
+    } catch (err) {
+      console.error("[Lexis] onload 失败:", err?.stack || err);
+      if (typeof Notice !== "undefined") new Notice(this.t("notice.loadFailed", { error: err?.message || err }));
+    }
+  }
+
+  onunload() {
+    window.clearTimeout(this._rebuildTimer);
+    window.clearTimeout(this._hideTimer);
+    window.clearTimeout(this._showTimer);
+    if (this._encSaveTimer) { window.clearTimeout(this._encSaveTimer); this.saveEncounters(); }
+    this.removePopover();
+    this.removeSelPill();
+    this.teardownPdfHighlight();
+    this.teardownEpubIframeHighlight();
+    this.bridge?.stop();
+    document.body?.classList.remove("lexis-show-review-metadata");
+  }
+
+  async loadSettings() {
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    if ((!this.settings.tagRules || !this.settings.tagRules.length) && this.settings.tagRulesText) {
+      this.settings.tagRules = this.parseTagRulesText(this.settings.tagRulesText);
+      delete this.settings.tagRulesText;
+      await this.saveData(this.settings);
+    }
+    if (!Array.isArray(this.settings.tagRules)) this.settings.tagRules = [];
+    if (!this.settings.inlineCategoryColors || typeof this.settings.inlineCategoryColors !== "object" || Array.isArray(this.settings.inlineCategoryColors)) this.settings.inlineCategoryColors = {};
+    if (!this.settings.inlineCategoryOpacity || typeof this.settings.inlineCategoryOpacity !== "object" || Array.isArray(this.settings.inlineCategoryOpacity)) this.settings.inlineCategoryOpacity = {};
+    if (!this.settings.inlineCategoryHighlight || typeof this.settings.inlineCategoryHighlight !== "object" || Array.isArray(this.settings.inlineCategoryHighlight)) this.settings.inlineCategoryHighlight = {};
+    if (!["heading", "file"].includes(this.settings.inlineClassificationMode)) this.settings.inlineClassificationMode = "heading";
+    if (!this.settings.inlineFileColors || typeof this.settings.inlineFileColors !== "object" || Array.isArray(this.settings.inlineFileColors)) this.settings.inlineFileColors = {};
+    if (!this.settings.inlineFileOpacity || typeof this.settings.inlineFileOpacity !== "object" || Array.isArray(this.settings.inlineFileOpacity)) this.settings.inlineFileOpacity = {};
+    if (!this.settings.inlineFileHighlight || typeof this.settings.inlineFileHighlight !== "object" || Array.isArray(this.settings.inlineFileHighlight)) this.settings.inlineFileHighlight = {};
+    if (!this.settings.inlineSourceHighlight || typeof this.settings.inlineSourceHighlight !== "object" || Array.isArray(this.settings.inlineSourceHighlight)) this.settings.inlineSourceHighlight = {};
+    if (!this.settings.inlineCollapsedGroups || typeof this.settings.inlineCollapsedGroups !== "object" || Array.isArray(this.settings.inlineCollapsedGroups)) this.settings.inlineCollapsedGroups = {};
+    if (!Array.isArray(this.settings.inlineCategoryOrder)) this.settings.inlineCategoryOrder = [];
+    if (!Array.isArray(this.settings.inlineFileOrder)) this.settings.inlineFileOrder = [];
+    if (!this.settings.inlineCategoryOrderByParent || typeof this.settings.inlineCategoryOrderByParent !== "object" || Array.isArray(this.settings.inlineCategoryOrderByParent)) this.settings.inlineCategoryOrderByParent = {};
+    if (!this.settings.reviewLog) this.settings.reviewLog = {};
+    if (!this.settings.reviewHistory || typeof this.settings.reviewHistory !== "object" || Array.isArray(this.settings.reviewHistory)) this.settings.reviewHistory = {};
+    // 单值 → 多值迁移(收录文件夹 / 网页排除标签)。旧键不在 DEFAULT_SETTINGS,故能区分"未迁移"。
+    if (this.settings.vocabFolders == null) this.settings.vocabFolders = this.settings.vocabFolder != null ? this.settings.vocabFolder : "01-word";
+    if (this.settings.excludeTags == null) this.settings.excludeTags = this.settings.excludeTag || "";
+    if (this.settings.vocabTags == null) this.settings.vocabTags = "";
+    // 词典表:文件夹来源升级成 [{folder, template}]。从旧 vocabFolders 迁移(模板留空=用全局默认)。
+    if (!Array.isArray(this.settings.dicts)) {
+      this.settings.dicts = this.parseFolders(this.settings.vocabFolders).map((f) => ({ folder: f, template: "" }));
+    }
+  }
+
+  t(key, vars) { return this.i18n ? this.i18n.t(key, vars) : key; }
+  async saveSettings() { await this.saveData(this.settings); }
+  applyReviewMetadataVisibility() {
+    document.body?.classList.toggle("lexis-show-review-metadata", !!this.settings.showReviewMetadata);
+  }
+  parseTagRulesText(text) {
+    const rules = [];
+    for (const line of (text || "").split("\n")) {
+      const m = /^\s*#?([^:：]+)[:：]\s*(\S+)(?:\s+(wavy|underline|background))?\s*$/.exec(line);
+      if (m) rules.push({ tag: m[1].trim(), color: m[2].trim(), style: m[3] || "" });
+    }
+    return rules;
+  }
+
+  // ---------- 出处 & 相关词 ----------
+  parseFolders(text) { return (text || "").split(/[,，\n]/).map((s) => this.normalizeFolder(s)).filter(Boolean); }
+  parseTags(text) { return (text || "").split(/[,，;；\s]+/).map((s) => s.trim().replace(/^#/, "").toLowerCase()).filter(Boolean); }
+  vocabTagSet() { return new Set(this.parseTags(this.settings.vocabTags)); }
+  excludeTagSet() { return new Set(this.parseTags(this.settings.excludeTags)); }
+  // 词典表的文件夹列表 = 文件夹来源的单一真相
+  dictFolders() { return (this.settings.dicts || []).map((d) => this.normalizeFolder(d && d.folder)).filter(Boolean); }
+  // 一条词的最终高亮色(优先级:标签规则 > 词典色 > 全局兜底),返回解析后的真实 hex —— 网页和 ob 同一套优先级
+  colorForEntry(e) {
+    let color = this.effectiveHighlightColor();           // 全局兜底(留空=主题色,已解析)
+    const dc = this.dictColorForFile(e && e.file);         // 词典映射
+    if (dc) color = dc;
+    if (e && e.tags && this.settings.tagRules && this.settings.tagRules.length) { // 标签映射(最高)
+      const rule = this.settings.tagRules.find((r) => r.tag && e.tags.has(r.tag.toLowerCase()));
+      if (rule && rule.color) color = rule.color;
+    }
+    const inlineColor = this.inlineCategoryColor(e);
+    if (inlineColor) color = inlineColor;
+    return color;
+  }
+  // 一条词的最终线型(标签规则可覆盖全局)
+  styleKindForEntry(e) {
+    let s = this.settings.highlightStyle || "wavy";
+    if (e && e.tags && this.settings.tagRules && this.settings.tagRules.length) {
+      const rule = this.settings.tagRules.find((r) => r.tag && e.tags.has(r.tag.toLowerCase()));
+      if (rule && rule.style) s = rule.style;
+    }
+    return s;
+  }
+  // 全局高亮色的"实际值":留空(=主题强调色)时解析成真实 hex 发给网页,否则网页只能看到 var(--text-accent) 这种 ob 专用变量、读不到
+  effectiveHighlightColor() {
+    const c = (this.settings.highlightColor || "").trim();
+    if (c) return c;
+    try { return cssColorToHex(getComputedStyle(document.body).getPropertyValue("--text-accent")); }
+    catch (_e) { return "#7c5cff"; }
+  }
+  // { 规范化文件夹: 颜色 },只含设了专属色的词典;供网页按所属词典着色
+  dictColorMap() {
+    const m = {};
+    for (const d of this.settings.dicts || []) {
+      const f = this.normalizeFolder(d && d.folder);
+      const c = (d && d.color || "").trim();
+      if (f && c) m[f] = c;
+    }
+    return m;
+  }
+  primaryVocabFolder() { return this.dictFolders()[0] || ""; } // 新建单词时落地的文件夹(取第一个)
+  inFolderScope(path) { const fs = this.dictFolders(); return fs.length ? this.inScope(path, fs) : false; }
+  // 某文件夹对应的模板:命中某词典行 → 完全按它的 template(留空=空白笔记,不再回退全局);
+  // 没有对应词典行(极少见)→ 才用全局默认 newWordTemplate。这样"没给这个词典选模板"= 空白,符合直觉。
+  templateForFolder(folder) {
+    return this.templateProvider.readLexis(folder);
+  }
+  isVocabFile(file) {
+    if (!file || !file.path) return false;
+    if (this.inFolderScope(file.path)) return true;
+    const ts = this.vocabTagSet();
+    if (ts.size) { for (const t of this.getTags(file)) if (ts.has(t)) return true; }
+    return false;
+  }
+  inScope(path, scope) { if (!scope.length) return true; return scope.some((f) => path === f || path.startsWith(f + "/")); }
+  extractSentence(content, idx) {
+    const bound = /[.!?。！？\n]/;
+    let s = idx; while (s > 0 && !bound.test(content[s - 1])) s--;
+    let e = idx; while (e < content.length && !bound.test(content[e])) e++;
+    let sent = content.slice(s, e + 1).replace(/\s+/g, " ").trim();
+    if (sent.length > 220) sent = sent.slice(0, 220) + "…";
+    return sent;
+  }
+  async findOccurrences(word) {
+    const key = word.toLowerCase();
+    if (this._occCache.has(key)) return this._occCache.get(key);
+    const limit = this.settings.occurrenceLimit || 6;
+    const scope = this.parseFolders(this.settings.occurrenceFolders);
+    const results = await this.occurrenceSearch.find(word, { limit, scope, includePdf: this.settings.includePdfOccurrences !== false });
+    this._occCache.set(key, results);
+    return results;
+  }
+  findRelated(file) {
+    const resolved = this.app.metadataCache.resolvedLinks || {};
+    const set = new Set();
+    for (const src in resolved) { if (resolved[src][file.path] && this.inVocabFolder(src) && src !== file.path) set.add(src); }
+    const out = resolved[file.path] || {};
+    for (const dest in out) { if (this.inVocabFolder(dest) && dest !== file.path) set.add(dest); }
+    return [...set].map((p) => this.app.vault.getAbstractFileByPath(p)).filter(Boolean);
+  }
+  parseSectionLinks(raw, known) {
+    const clean = raw.replace(/```[\s\S]*?```/g, "").replace(/^---\n[\s\S]*?\n---/, "");
+    const out = [];
+    let cur = "相关";
+    const linkRe = /\[\[([^\]|#\n]+)(?:\|[^\]\n]*)?\]\]/g;
+    for (const line of clean.split("\n")) {
+      const h = /^#{1,6}\s*(.+?)\s*$/.exec(line);
+      if (h) { cur = known.find((t) => h[1].includes(t)) || "相关"; continue; }
+      let m; linkRe.lastIndex = 0;
+      while ((m = linkRe.exec(line))) out.push({ type: cur, target: m[1].trim() });
+    }
+    return out;
+  }
+  async findTypedRelations(file) {
+    const KNOWN = ["近义词", "同根词", "形近词", "辨析"];
+    const out = {}, inc = {};
+    const put = (bag, type, tf) => { if (!tf || tf.path === file.path) return; (bag[type] = bag[type] || new Map()).set(tf.path, tf.basename); };
+    // 出链:本词笔记里每个 [[link]] 在哪个段下
+    try {
+      const raw = await this.app.vault.cachedRead(file);
+      for (const { type, target } of this.parseSectionLinks(raw, KNOWN)) {
+        const tf = this.app.metadataCache.getFirstLinkpathDest(target, file.path);
+        if (tf && this.inVocabFolder(tf.path)) put(out, type, tf);
+      }
+    } catch (_e) {}
+    // 入链:其它词在哪个段下链了本词(实现双向)
+    const resolved = this.app.metadataCache.resolvedLinks || {};
+    for (const src in resolved) {
+      if (!this.inVocabFolder(src) || src === file.path || !resolved[src][file.path]) continue;
+      const srcFile = this.app.vault.getAbstractFileByPath(src);
+      if (!srcFile) continue;
+      try {
+        const raw = await this.app.vault.cachedRead(srcFile);
+        let matched = false;
+        for (const { type, target } of this.parseSectionLinks(raw, KNOWN)) {
+          const tf = this.app.metadataCache.getFirstLinkpathDest(target, src);
+          if (tf && tf.path === file.path) { put(inc, type, srcFile); matched = true; }
+        }
+        if (!matched) put(inc, "相关", srcFile);
+      } catch (_e) {}
+    }
+    const toArr = (bag) => { const o = {}; for (const t in bag) o[t] = [...bag[t].entries()].map(([path, basename]) => ({ path, basename })); return o; };
+    return { out: toArr(out), inc: toArr(inc) };
+  }
+  async renderDerivedWords(container, file) {
+    const resolved = this.app.metadataCache.resolvedLinks || {};
+    const map = new Map();
+    for (const src in resolved) {
+      if (this.inVocabFolder(src) && resolved[src] && resolved[src][file.path]) {
+        const sf = this.app.vault.getAbstractFileByPath(src);
+        if (sf) map.set(src, sf.basename);
+      }
+    }
+    if (!map.size) return;
+    container.createDiv({ cls: "lexis-section-title", text: `🌱 派生词 (${map.size})` });
+    const w = container.createDiv({ cls: "lexis-related" });
+    for (const [path, basename] of map) this.relLink(w, path, basename);
+  }
+  relLink(w, path, basename) {
+    const a = w.createEl("a", { text: basename, href: "#" });
+    a.addEventListener("click", (e) => { e.preventDefault(); const f = this.app.vault.getAbstractFileByPath(path); if (f) { this.app.workspace.getLeaf(false).openFile(f); this.removePopover(); } });
+  }
+  async renderTypedRelations(container, file) {
+    const { out, inc } = await this.findTypedRelations(file);
+    const order = ["近义词", "同根词", "形近词", "辨析", "相关"];
+    let n = 0;
+    for (const t of order) {
+      const map = new Map();
+      for (const r of (out[t] || [])) map.set(r.path, r.basename);
+      for (const r of (inc[t] || [])) map.set(r.path, r.basename);
+      if (!map.size) continue;
+      container.createDiv({ cls: "lexis-section-title", text: "🔗 " + t });
+      const w = container.createDiv({ cls: "lexis-related" });
+      for (const [path, basename] of map) { this.relLink(w, path, basename); n++; }
+    }
+    return n;
+  }
+  async renderReverseRelations(container, file, type) {
+    const { out, inc } = await this.findTypedRelations(file);
+    const types = type === "辨析" ? ["辨析", "相关"] : [type];
+    const outPaths = new Set();
+    for (const t of types) for (const r of (out[t] || [])) outPaths.add(r.path);
+    const map = new Map();
+    for (const t of types) for (const r of (inc[t] || [])) if (!outPaths.has(r.path)) map.set(r.path, r.basename);
+    if (!map.size) return 0;
+    const w = container.createDiv({ cls: "lexis-related lexis-rel-reverse" });
+    for (const [path, basename] of map) this.relLink(w, path, basename);
+    return map.size;
+  }
+  async getCuratedSourcePaths(wordFile) {
+    try {
+      const raw = await this.app.vault.cachedRead(wordFile);
+      const names = [this.occurrenceHeadingText(), "例句", "出处"].filter(Boolean).map(escapeRe).join("|");
+      const m = new RegExp("#{1,6}\\s*(?:" + names + ")([^\\n]*\\n[\\s\\S]*?)(?=\\n#{1,6}\\s|\\n```|$)").exec(raw);
+      if (!m) return new Set();
+      const set = new Set();
+      const re = /\[\[([^\]|#]+)(?:\|[^\]]*)?\]\]/g;
+      let mm;
+      while ((mm = re.exec(m[1]))) {
+        const base = mm[1].trim().split("/").pop().replace(/\.(?:md|pdf)$/i, "");
+        set.add(base.toLowerCase());
+      }
+      return set;
+    } catch (_e) { return new Set(); }
+  }
+  sourceLinkTarget(file) { return file?.extension === "md" ? file.basename : file?.name || ""; }
+  async addExampleToWord(wordFile, sentence, sourceFile, page) {
+    if (sourceFile) {
+      const curated = await this.getCuratedSourcePaths(wordFile);
+      if (curated.has(sourceFile.basename.toLowerCase())) { new Notice(this.t("notice.occurrenceExists")); return true; }
+    }
+    const occurrence = {
+      word: wordFile.basename,
+      sentence: (sentence || "").trim(),
+      source: sourceFile ? (page ? `[[${this.sourceLinkTarget(sourceFile)}#page=${page}|${sourceFile.basename} p.${page}]]` : `[[${this.sourceLinkTarget(sourceFile)}]]`) : "",
+      date: todayStr(),
+    };
+    const apply = (data) => this.insertOccurrence(data, occurrence);
+    try {
+      if (this.app.vault.process) await this.app.vault.process(wordFile, apply);
+      else { const d = await this.app.vault.read(wordFile); await this.app.vault.modify(wordFile, apply(d)); }
+      this.recordEncounter(wordFile, "add");
+      new Notice(this.t("notice.occurrenceSaved"));
+      return true;
+    } catch (err) { new Notice(this.t("notice.occurrenceFailed", { error: err?.message || err })); return false; }
+  }
+
+  // ---------- 生命周期(归档/常驻/淘汰) ----------
+  // 只叠加在算法结果之上:这里不碰 lexis-s/d/due 等 FSRS 内部字段,那些只由真实复习事件驱动(applySchedule)。
+  readLifecycle(file) {
+    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter || {};
+    const status = fm["lexis-status"];
+    return { archived: status === "archived", retired: status === "retired", pinned: !!fm["lexis-pinned"] };
+  }
+  // 归档 = 退出高亮 + 暂停复习队列,悬停仍可查;取消归档("恢复")默认走这条,FSRS 进度原样保留。
+  // 重置为新词是恢复时的另一个选项,见 LexisRestoreModal,不在这个函数里做。
+  async setArchived(file, archived) {
+    await this.app.fileManager.processFrontMatter(file, (fm) => {
+      if (archived) fm["lexis-status"] = "archived";
+      else delete fm["lexis-status"];
+    });
+    this.rebuildIndex(false);
+  }
+  async setPinned(file, pinned) {
+    await this.app.fileManager.processFrontMatter(file, (fm) => {
+      if (pinned) fm["lexis-pinned"] = true;
+      else delete fm["lexis-pinned"];
+    });
+    this.rebuildIndex(false);
+  }
+  // 淘汰 = 归档而非删除:退出高亮与复习,文件保留,但比"归档"更彻底——悬停也不再触发(不像归档还留一个隐形代理 span)。
+  // 只从"淘汰法庭"候选列表的操作按钮触发,没有独立的命令/右键菜单入口(候选判定本身已经是入口了)。
+  async setRetired(file, retired) {
+    await this.app.fileManager.processFrontMatter(file, (fm) => {
+      if (retired) fm["lexis-status"] = "retired";
+      else delete fm["lexis-status"];
+    });
+    this.rebuildIndex(false);
+  }
+
+  // ---------- 相遇记账(阶段 2) ----------
+  // 只做"强相遇"记账:悬停查释义 / 划词加出处 / 打开词条笔记本身,都是现成代码路径上加一行记账,
+  // 不额外采集停留时长/滚动/点击深度。数据存进插件自己 data 目录下的 sidecar JSON,不写 frontmatter——
+  // 悬停很频繁,写 frontmatter 会不停刷新笔记 mtime 和 git 历史。
+  encountersPath() { return `${this.app.vault.configDir}/plugins/${this.manifest.id}/encounters.json`; }
+  async loadEncounters() {
+    try { this._encounters = JSON.parse(await this.app.vault.adapter.read(this.encountersPath())) || {}; }
+    catch (_e) { this._encounters = {}; }
+  }
+  // key 用词条文件的标题(不是命中它的具体别名/拼法)——别名和标题指向同一个文件,相遇次数要合并,不能按 key 分裂计数
+  // 短时间内反复触发同一类相遇(比如鼠标在同一个词上晃出晃入,连续弹好几次悬浮卡)只算一次,靠 (词+类型) 的冷却时间去重
+  recordEncounter(file, type) {
+    if (!(file instanceof TFile)) return;
+    const k = file.basename.toLowerCase();
+    const now = Date.now();
+    const dedupKey = k + ":" + type;
+    if (!this._encounterDedup) this._encounterDedup = {};
+    const last = this._encounterDedup[dedupKey];
+    if (last && now - last < 60000) return; // 60 秒内的重复相遇不重复计数
+    this._encounterDedup[dedupKey] = now;
+    const e = this._encounters[k] || (this._encounters[k] = { hoverCount: 0, encounterCount: 0, lastEncounter: "" });
+    e.encounterCount = (e.encounterCount || 0) + 1;
+    if (type === "hover") e.hoverCount = (e.hoverCount || 0) + 1;
+    e.lastEncounter = todayStr();
+    if (this._encSaveTimer) window.clearTimeout(this._encSaveTimer);
+    this._encSaveTimer = window.setTimeout(() => this.saveEncounters(), 1500); // 内存攒批、防抖落盘,不是每次相遇都写一次盘
+  }
+  // 被动相遇(阶段 4):高亮装饰在打开的文件里实际渲染出来,就算词出现在你面前过一次——比悬停更弱的信号,
+  // 只证明"出现过",不证明"注意到了"。按「词+当天」去重,不是每次重渲染(滚动/切标签页/实时预览重算)都记一次。
+  // 这个检查要挂在高亮渲染的热路径上(每个匹配到的 span 都会过一遍),所以只用一次 Set.has,不做更重的事。
+  passiveEncounter(file) {
+    if (!(file instanceof TFile)) return;
+    const dayKey = file.path + "|" + todayStr();
+    if (this._passiveSeenToday.has(dayKey)) return;
+    this._passiveSeenToday.add(dayKey);
+    this.recordEncounter(file, "passive");
+  }
+  async saveEncounters() {
+    this._encSaveTimer = 0;
+    try { await this.app.vault.adapter.write(this.encountersPath(), JSON.stringify(this._encounters)); } catch (_e) {}
+  }
+  // 悬停 = 一次失败的提取(没想起来才要查)。这个词的到期日如果还很远,说明"排期偏晚了",拉近一点提醒尽快复习——
+  // 只挪 lexis-due,绝不碰 stability/difficulty,也不伪造一次复习评分(FSRS 内部状态只能由真实复习事件驱动)。
+  async hoverFeedback(file) {
+    if (!this.settings.hoverFeedback || !(file instanceof TFile)) return;
+    if (this.readLifecycle(file).archived) return; // 已归档:悬停只记账,不回流
+    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter || {};
+    if (fm["lexis-s"] == null || !fm["lexis-due"]) return; // 还没背过/没有到期日可提前
+    const today = todayStr();
+    const due = String(fm["lexis-due"]).slice(0, 10);
+    const threshold = addDaysStr(today, this.settings.hoverFeedbackDays ?? 3);
+    if (due <= threshold) return; // 本来就不算远,不用管
+    await this.app.fileManager.processFrontMatter(file, (fm2) => { fm2["lexis-due"] = today; });
+  }
+
+  // ---------- FSRS 调度 ----------
+  readCard(file) {
+    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter || {};
+    return {
+      s: fm["lexis-s"], d: fm["lexis-d"], due: fm["lexis-due"], last: fm["lexis-last"],
+      reps: fm["lexis-reps"], lapses: fm["lexis-lapses"],
+      history: Array.isArray(this.settings.reviewHistory?.[file.path]) ? this.settings.reviewHistory[file.path] : [],
+    };
+  }
+  cardRetrievability(card, date = todayStr()) {
+    const s = Number(card?.s);
+    if (!s || isNaN(s) || !card?.last) return 0;
+    return FSRS.retrievability(Math.max(0, daysBetween(card.last, date)), s);
+  }
+  scheduleCard(card, grade) {
+    const R = this.settings.requestRetention || 0.9;
+    let reps = (Number(card.reps) || 0) + 1, lapses = Number(card.lapses) || 0, S, D;
+    const today = todayStr();
+    if (card.s == null || isNaN(Number(card.s))) {
+      S = FSRS.initStability(grade); D = FSRS.initDifficulty(grade);
+    } else {
+      const t = card.last ? daysBetween(card.last, today) : 0;
+      const r = FSRS.retrievability(t, Number(card.s));
+      D = FSRS.nextDifficulty(Number(card.d), grade);
+      if (grade === 1) { S = FSRS.nextForgetStability(Number(card.d), Number(card.s), r); lapses++; }
+      else { S = FSRS.nextRecallStability(Number(card.d), Number(card.s), r, grade); }
+    }
+    S = Math.max(0.01, S);
+    const interval = FSRS.nextInterval(S, R);
+    return { s: S, d: D, reps, lapses, interval, due: addDaysStr(today, interval) };
+  }
+  async applySchedule(file, sched) {
+    await this.app.fileManager.processFrontMatter(file, (fm) => {
+      fm["lexis-s"] = round2(sched.s);
+      fm["lexis-d"] = round2(sched.d);
+      fm["lexis-due"] = sched.due;
+      fm["lexis-last"] = todayStr();
+      fm["lexis-reps"] = sched.reps;
+      fm["lexis-lapses"] = sched.lapses;
+    });
+  }
+  async logReview(file, sched, grade, retentionBefore) {
+    const t = todayStr();
+    this.settings.reviewLog[t] = (this.settings.reviewLog[t] || 0) + 1;
+    if (file?.path) {
+      const history = Array.isArray(this.settings.reviewHistory[file.path]) ? this.settings.reviewHistory[file.path] : [];
+      history.push({ date: t, s: round2(sched.s), grade, retention: Math.round(Math.max(0, Math.min(1, retentionBefore)) * 100) });
+      this.settings.reviewHistory[file.path] = history.slice(-64);
+    }
+    await this.saveSettings();
+  }
+  async undoReviewLog(file) {
+    const t = todayStr();
+    if (this.settings.reviewLog[t]) {
+      this.settings.reviewLog[t]--;
+      if (this.settings.reviewLog[t] <= 0) delete this.settings.reviewLog[t];
+    }
+    const history = file?.path && this.settings.reviewHistory[file.path];
+    if (Array.isArray(history) && history.length) history.pop();
+    await this.saveSettings();
+  }
+  async getFirstExample(file) {
+    try {
+      const raw = await this.app.vault.cachedRead(file);
+      if (!this.occurrenceHeadingText()) return this.occurrenceSentenceFromSection(raw);
+      const names = [this.occurrenceHeadingText(), "例句", "出处"].filter(Boolean).map(escapeRe).join("|");
+      const m = new RegExp("#{1,6}\\s*(?:" + names + ")([^\\n]*\\n[\\s\\S]*?)(?=\\n#{1,6}\\s|\\n```|$)").exec(raw);
+      if (!m) return "";
+      return this.occurrenceSentenceFromSection(m[1]);
+    } catch (_e) { return ""; }
+  }
+  buildCloze(sentence, word) { return sentence.replace(new RegExp(boundedSource(word), "ig"), "______"); }
+  humanInterval(days) {
+    if (days < 1) return this.t("interval.ltDay");
+    if (days < 30) return this.t("interval.days", { count: days });
+    if (days < 365) return this.t("interval.months", { count: Math.round(days / 30) });
+    return this.t("interval.years", { count: (days / 365).toFixed(1) });
+  }
+  freqVal(file) { const fm = this.app.metadataCache.getFileCache(file)?.frontmatter; const n = parseInt(String(fm && fm.frequency).replace(/[^0-9]/g, ""), 10); return isNaN(n) ? Infinity : n; }
+  collectVocabTags() { const s = new Set(); for (const f of this.app.vault.getMarkdownFiles()) { if (!this.inVocabFolder(f.path)) continue; for (const t of this.getTags(f)) s.add(t); } return [...s].sort(); }
+  computeStats() {
+    const today = todayStr();
+    let total = 0, due = 0, fresh = 0;
+    for (const f of this.app.vault.getMarkdownFiles()) {
+      if (!this.inVocabFolder(f.path)) continue;
+      total++;
+      const fm = this.app.metadataCache.getFileCache(f)?.frontmatter || {};
+      if (fm["lexis-status"] === "archived" || fm["lexis-status"] === "retired") continue; // 已归档/已淘汰:计入总数,但不计入待复习/新词(复习队列已暂停)
+      if (fm["lexis-s"] == null) { fresh++; due++; }
+      else if (!fm["lexis-due"] || String(fm["lexis-due"]).slice(0, 10) <= today) due++;
+    }
+    return { total, due, fresh };
+  }
+  buildQueue(options) {
+    options = options || {};
+    const today = todayStr();
+    let files = this.app.vault.getMarkdownFiles().filter((f) => { if (!this.inVocabFolder(f.path)) return false; const lc = this.readLifecycle(f); return !lc.archived && !lc.retired; });
+    if (options.folder) {
+      const folder = this.normalizeFolder(options.folder);
+      files = files.filter((f) => this.inScope(f.path, [folder]));
+    }
+    if (options.tag) { const tl = options.tag.toLowerCase(); files = files.filter((f) => this.getTags(f).has(tl)); }
+    const due = [], fresh = [];
+    for (const f of files) { const card = this.readCard(f); if (card.s == null || isNaN(Number(card.s))) fresh.push({ file: f, card }); else if (!card.due || String(card.due).slice(0, 10) <= today) due.push({ file: f, card }); }
+    let queue;
+    if (options.order === "frequency") { queue = due.concat(fresh).sort((a, b) => this.freqVal(a.file) - this.freqVal(b.file)); }
+    else if (options.order === "random") { queue = due.concat(fresh); for (let i = queue.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [queue[i], queue[j]] = [queue[j], queue[i]]; } }
+    else { due.sort((a, b) => String(a.card.due || "").localeCompare(String(b.card.due || ""))); queue = due.concat(fresh.slice(0, this.settings.newPerDay || 20)); }
+    return queue.slice(0, this.settings.maxReviewsPerSession || 200);
+  }
+  // ---------- 淘汰法庭(阶段 3) ----------
+  // 硬条件筛子,不做加权评分:全部满足才入列,判决权在用户(淘汰/留下/已掌握三个按钮,见 LexisHomeView)。
+  async buildRetireCandidates() {
+    const days = this.settings.retireCandidateDays ?? 90;
+    const today = todayStr();
+    const files = this.app.vault.getMarkdownFiles().filter((f) => this.inVocabFolder(f.path));
+    const out = [];
+    for (const f of files) {
+      const lc = this.readLifecycle(f);
+      if (lc.pinned || lc.archived || lc.retired) continue; // 常驻/已归档/已淘汰:永远不进候选
+      const created = fmtDate(new Date(f.stat.ctime));
+      if (daysBetween(created, today) < days) continue; // 入库不够久
+      const enc = this._encounters[f.basename.toLowerCase()];
+      const lastEncounter = (enc && enc.lastEncounter) || created; // 从没相遇过就用入库日期当基准
+      const sinceLast = daysBetween(lastEncounter, today);
+      if (sinceLast < days) continue; // 最近还自然相遇过,不算候选
+      let occCount = 0;
+      try { occCount = (await this.findOccurrences(f.basename)).length; } catch (_e) {}
+      out.push({
+        file: f, display: f.basename, created, lastEncounter, sinceLast,
+        encounterCount: (enc && enc.encounterCount) || 0,
+        hoverCount: (enc && enc.hoverCount) || 0,
+        occCount,
+      });
+    }
+    out.sort((a, b) => b.sinceLast - a.sinceLast);
+    return out;
+  }
+  async openReview(options) {
+    let leaf = this.app.workspace.getLeavesOfType(LEXIS_REVIEW_VIEW)[0];
+    if (!leaf) { leaf = this.app.workspace.getLeaf(true); await leaf.setViewState({ type: LEXIS_REVIEW_VIEW, active: true }); }
+    this.app.workspace.revealLeaf(leaf);
+    if (leaf.view instanceof LexisReviewView) { leaf.view.options = options || {}; leaf.view.refresh(); }
+  }
+  saveReviewSession(leaf, state) { if (leaf && state) this._reviewSessions.set(leaf, state); }
+  takeReviewSession(leaf) {
+    if (!leaf) return null;
+    const state = this._reviewSessions.get(leaf) || null;
+    this._reviewSessions.delete(leaf);
+    return state;
+  }
+  async openHome() {
+    let leaf = this.app.workspace.getLeavesOfType(LEXIS_HOME_VIEW)[0];
+    if (!leaf) { leaf = this.app.workspace.getRightLeaf(false); await leaf.setViewState({ type: LEXIS_HOME_VIEW, active: true }); }
+    this.app.workspace.revealLeaf(leaf);
+    if (leaf.view instanceof LexisHomeView) leaf.view.render();
+  }
+  // ---------- 划词添加 ----------
+  sanitizeName(name) { return (name || "").replace(/[\\/:*?"<>|#^[\]]/g, "").replace(/\s+/g, " ").trim(); }
+  async ensureFolder(folder) {
+    if (!folder) return;
+    if (!this.app.vault.getAbstractFileByPath(folder)) { try { await this.app.vault.createFolder(folder); } catch (_e) {} }
+  }
+  async readTemplatePath(p) {
+    p = (p || "").trim();
+    if (!p) return null;
+    const f = this.app.vault.getAbstractFileByPath(p);
+    if (f instanceof TFile) { try { return await this.app.vault.read(f); } catch (_e) {} }
+    return null;
+  }
+  createEntryFile(path, folder, fallbackContent, transform) {
+    return this.templateProvider.create({ path, folder, fallbackContent, transform });
+  }
+  // 无模板可选纯空白，或只放一个内置的出处面板；用户自己的模板始终优先。
+  minimalSkeleton() { return this.settings.emptyNotePreset === "occ" ? "```lexis\nocc\n```\n" : ""; }
+  getSelectionSentence(editor) {
+    try { const from = editor.getCursor("from"); const line = editor.getLine(from.line) || ""; return this.extractSentence(line, from.ch || 0); } catch (_e) { return ""; }
+  }
+  getReadingSentence() {
+    try { const sel = window.getSelection(); if (!sel || !sel.anchorNode) return ""; const text = sel.anchorNode.textContent || ""; return this.extractSentence(text, sel.anchorOffset || 0); } catch (_e) { return ""; }
+  }
+  // 当前选区所在 PDF 页码(pdf.js 在 .page 上挂 data-page-number);取不到返回 0
+  currentPdfPage() {
+    try {
+      const sel = window.getSelection();
+      const n = sel && sel.anchorNode;
+      const el = n ? (n.nodeType === 1 ? n : n.parentElement) : null;
+      const page = el && el.closest && el.closest("[data-page-number]");
+      const v = page && page.getAttribute("data-page-number");
+      return v ? parseInt(v, 10) || 0 : 0;
+    } catch (_e) { return 0; }
+  }
+  addSelectedWordCommand() {
+    const view = this.app.workspace.getActiveViewOfType(obsidian.MarkdownView);
+    let word = "", editor = null;
+    if (view && view.editor && view.getMode && view.getMode() === "source") { word = (view.editor.getSelection() || "").trim(); editor = view.editor; }
+    if (!word) { const sel = window.getSelection(); word = (sel ? sel.toString() : "").trim(); }
+    if (!word) { new Notice(this.t("notice.selectWord")); return; }
+    this.addWordFromSelection(word, editor, view);
+  }
+  async addWordFromSelection(word, editor, view, targetFolder, { openExisting = false } = {}) {
+    const clean = (word || "").trim();
+    const fileName = this.sanitizeName(clean);
+    if (!fileName) { new Notice(this.t("notice.invalidWord")); return; }
+    const reqFolder = this.normalizeFolder(targetFolder || "");
+    const folder = (reqFolder && this.dictFolders().includes(reqFolder)) ? reqFolder : this.primaryVocabFolder();
+    const targetPath = (folder ? folder + "/" : "") + fileName + ".md";
+    let existing = this.app.vault.getAbstractFileByPath(targetPath);
+    // 路径不同名也可能已经是某词条的标题或别名(比如刚被"设为别名"并入了别的文件)——按索引兜底查,别重复建
+    if (!(existing instanceof TFile)) {
+      const hit = this.index.get(clean.toLowerCase());
+      if (hit && hit.file instanceof TFile) existing = hit.file;
+    }
+    const srcFile = (view && view.file) || this.app.workspace.getActiveFile();
+    const sentence = editor ? this.getSelectionSentence(editor) : this.getReadingSentence();
+    // 从 PDF 划词加词时,新词笔记开到新标签页,免得把正在读的 PDF 顶掉
+    const fromPdf = srcFile && srcFile.extension === "pdf" && !editor;
+    if (existing) {
+      new Notice(this.t(openExisting ? "notice.exists" : "notice.existsNoOpen", { word: existing.basename }));
+      if (openExisting) this.app.workspace.getLeaf(fromPdf ? "tab" : false).openFile(existing);
+      return;
+    }
+    try {
+      await this.ensureFolder(folder);
+      const tpl = await this.templateForFolder(folder);
+      const content = this.renderTemplate(tpl != null ? tpl : this.minimalSkeleton(), { word: clean, date: todayStr() });
+      const addOccurrence = (templateContent) => {
+        let next = templateContent;
+        // 出处写进正文(而不是 frontmatter 属性),好看且笔记里直接可见
+        if (!(sentence || srcFile)) return next;
+        // PDF 出处带上页码,链接可直接跳到那一页
+        let sub = "", disp = srcFile ? srcFile.basename : "";
+        if (fromPdf) {
+          const pg = this.currentPdfPage();
+          if (pg) { sub = `#page=${pg}`; disp = `${srcFile.basename} p.${pg}`; }
+        }
+        const sourceTarget = this.sourceLinkTarget(srcFile);
+        const source = srcFile ? (sub ? `[[${sourceTarget}${sub}|${disp}]]` : `[[${sourceTarget}]]`) : "";
+        next = this.insertOccurrence(next, { word: clean, sentence: sentence || "", source, date: todayStr() });
+        return next;
+      };
+      const file = await this.createEntryFile(targetPath, folder, content, addOccurrence);
+      this.recordEncounter(file, "add");
+      // 划词添加只写入并留在原文；"添加"不再暗含一次页面跳转。
+      new Notice(this.t(fromPdf ? "notice.addedPdf" : "notice.created", { word: fileName }));
+      await this.rebuildIndex(false);
+    } catch (err) { new Notice(this.t("notice.createFailed", { error: err?.message || err })); }
+  }
 };
 
 // ---------- 别名选择器:给"设为别名"选目标词条(标题或别名都可搜到) ----------
@@ -3821,369 +4720,51 @@ class LexisHomeView extends ItemView {
   onClose() {}
 }
 
-// 输入时模糊匹配建议。AbstractInputSuggest 在 Obsidian 1.0+ 运行时可用;
-// 输入时模糊匹配建议。AbstractInputSuggest 在 Obsidian 1.0+ 运行时可用;
-// 缺失时 `|| class {}` 避免 extends undefined 报错,且调用处会跳过实例化。
-// opts.multi=true 时按最后一个分隔符后的"活动 token"匹配,选中后追加(用于逗号/空格分隔的标签/属性多值字段)。
-class PathSuggest extends (obsidian.AbstractInputSuggest || class {}) {
-  constructor(app, inputEl, getItems, onPick, opts) {
-    super(app, inputEl);
-    this.getItems = getItems;
-    this.onPick = onPick;
-    this.multi = !!(opts && opts.multi);
-    this.sep = (opts && opts.sep) || " ";
-  }
-  _split() {
-    const v = (this.inputEl && this.inputEl.value) || "";
-    const m = v.match(/[^\s,，;；]*$/);
-    const token = m ? m[0] : "";
-    return { before: v.slice(0, v.length - token.length), token };
-  }
-  getSuggestions(query) {
-    let items = this.getItems();
-    let q;
-    if (this.multi) {
-      const { token } = this._split();
-      q = token.toLowerCase();
-      const chosen = new Set(((this.inputEl && this.inputEl.value) || "").toLowerCase().split(/[\s,，;；]+/).filter(Boolean));
-      items = items.filter((p) => p.toLowerCase() === token.toLowerCase() || !chosen.has(p.toLowerCase()));
-    } else {
-      q = (query || "").toLowerCase();
-    }
-    return items.filter((p) => p.toLowerCase().includes(q)).slice(0, 50);
-  }
-  renderSuggestion(value, el) { el.setText(value); }
-  selectSuggestion(value) {
-    if (this.multi) {
-      // 多值:把选中项追加到当前列表后,重新触发建议(列表保持打开),可以接着选下一个
-      const { before } = this._split();
-      const out = before + value + this.sep;
-      if (this.inputEl) this.inputEl.value = out;
-      if (this.onPick) this.onPick(out);
-      if (typeof this.setValue === "function") this.setValue(out); // 触发 input 事件,刷新并保持下拉
-      if (this.inputEl) this.inputEl.focus();
-      return;
-    }
-    if (typeof this.setValue === "function") this.setValue(value);
-    if (this.inputEl) this.inputEl.value = value;
-    if (typeof this.close === "function") this.close();
-    if (this.onPick) this.onPick(value);
-  }
-}
+Object.defineProperties(LexisPlugin.prototype, createBridgeApi({
+  DEFAULT_SETTINGS,
+  TFile,
+  Component,
+  todayStr,
+  escapeRe,
+  renderLexisMarkdown,
+  finishRenderMath,
+  escHtml,
+}));
+Object.defineProperties(LexisPlugin.prototype, createHighlightEngine({
+  FSRS,
+  Notice,
+  boundedSource,
+  todayStr,
+}));
+Object.defineProperties(LexisPlugin.prototype, createReaderUi({
+  buildCurveSVG,
+  FSRS,
+  addDaysStr,
+  daysBetween,
+  todayStr,
+  TFile,
+  Notice,
+  boundedSource,
+  escapeRe,
+  Component,
+  renderLexisMarkdown,
+  LexisAliasPicker,
+  LexisRestoreModal,
+}));
 
-class LexisSettingTab extends PluginSettingTab {
-  constructor(app, plugin) { super(app, plugin); this.plugin = plugin; }
+const LexisSettingTab = createSettingsTab({
+  obsidian,
+  PluginSettingTab,
+  Setting,
+  Notice,
+  TFolder,
+  DEFAULT_SETTINGS,
+  cssColorToHex,
+  createReorderController,
+  addAppearanceButton,
+  moveItem,
+  LEXIS_HOME_VIEW,
+  LEXIS_REVIEW_VIEW,
+});
 
-  section(containerEl, title, { open = false, desc = "" } = {}) {
-    const details = containerEl.createEl("details", { cls: "lexis-settings-section" });
-    details.open = open;
-    const summary = details.createEl("summary");
-    summary.createSpan({ text: title });
-    if (desc) summary.createSpan({ cls: "lexis-settings-section-hint", text: desc });
-    return details.createDiv({ cls: "lexis-settings-section-body" });
-  }
-
-  display() {
-    const { containerEl } = this;
-    containerEl.empty();
-    const t = (key, vars) => this.plugin.t(key, vars);
-    const accentHex = cssColorToHex(getComputedStyle(document.body).getPropertyValue("--text-accent"));
-    const save = () => this.plugin.saveSettings();
-    const refresh = () => this.plugin.refreshAllViews();
-    containerEl.createEl("h3", { text: t("settings.title") });
-
-    new Setting(containerEl).setName(t("language.name"))
-      .addDropdown((dd) => dd.addOption("zh", t("language.zh")).addOption("en", t("language.en")).setValue(this.plugin.settings.language || "zh").onChange(async (value) => {
-        this.plugin.settings.language = value === "en" ? "en" : "zh";
-        await save();
-        this.plugin.refreshAllViews();
-        this.app.workspace.iterateAllLeaves((leaf) => {
-          const type = leaf?.view?.getViewType?.();
-          if (type === LEXIS_HOME_VIEW || type === LEXIS_REVIEW_VIEW) leaf.view.render?.();
-        });
-        new Notice(t("language.reload"));
-        this.display();
-      }));
-
-    const folders = this.app.vault.getAllLoadedFiles().filter((f) => f instanceof TFolder).map((f) => f.path).filter((p) => p && p !== "/").sort();
-    const mdFiles = this.app.vault.getMarkdownFiles().map((f) => f.path).sort();
-    const hasSuggest = !!obsidian.AbstractInputSuggest;
-    const allTags = (() => {
-      const s = new Set(this.plugin.collectVocabTags());
-      try { const tg = this.app.metadataCache.getTags() || {}; for (const k in tg) s.add(k.replace(/^#/, "").toLowerCase()); } catch (_e) {}
-      return [...s].filter(Boolean).sort();
-    })();
-    const allProps = (() => {
-      try { const infos = this.app.metadataCache.getAllPropertyInfos ? this.app.metadataCache.getAllPropertyInfos() : null; if (infos) return Object.values(infos).map((x) => x && x.name).filter(Boolean).sort(); } catch (_e) {}
-      return [];
-    })();
-    const tagSuggest = (comp, apply) => { if (hasSuggest) new PathSuggest(this.app, comp.inputEl, () => allTags, (v) => { comp.setValue(v); apply(v); }, { multi: true }); };
-
-    const dictSection = this.section(containerEl, t("settings.dictionary"), { open: true });
-    new Setting(dictSection).setDesc(t("settings.dictionaryDesc")).setHeading();
-    const dictsWrap = dictSection.createDiv();
-    const renderDicts = () => {
-      dictsWrap.empty();
-      (this.plugin.settings.dicts || []).forEach((d, i) => {
-        const row = dictsWrap.createDiv();
-        row.style.display = "flex"; row.style.gap = "6px"; row.style.marginBottom = "6px"; row.style.alignItems = "center";
-        const fIn = new obsidian.TextComponent(row);
-        fIn.setPlaceholder(t("settings.folderPlaceholder")).setValue(d.folder || "");
-        fIn.inputEl.style.flex = "1";
-        const onFolder = async (v) => { d.folder = (v || "").trim(); await save(); this.plugin.rebuildIndex(false); this.renderStats(); };
-        fIn.onChange(onFolder);
-        const tIn = new obsidian.TextComponent(row);
-        tIn.setPlaceholder(t("settings.templatePlaceholder")).setValue(d.template || "");
-        tIn.inputEl.style.flex = "1.4";
-        const onTpl = async (v) => { d.template = (v || "").trim(); await save(); };
-        tIn.onChange(onTpl);
-        if (hasSuggest) {
-          new PathSuggest(this.app, fIn.inputEl, () => folders, (v) => { fIn.setValue(v); onFolder(v); });
-          new PathSuggest(this.app, tIn.inputEl, () => mdFiles, (v) => { tIn.setValue(v); onTpl(v); });
-        }
-        // 每个词典可选专属高亮色(留空=跟随全局/主题色)。用 obsidian.ColorComponent,和「按标签着色」一致
-        const globalColor = this.plugin.settings.highlightColor || accentHex;
-        const cComp = new obsidian.ColorComponent(row);
-        const swatch = () => cComp.colorPickerEl || cComp.containerEl || null;
-        const markInherit = (inherit) => { const el = swatch(); if (el) { el.style.opacity = inherit ? "0.4" : "1"; el.title = inherit ? t("settings.followGlobal") : t("settings.dictionaryColor"); } };
-        cComp.setValue(d.color || globalColor);
-        markInherit(!d.color);
-        cComp.onChange(async (v) => { d.color = v; markInherit(false); await save(); refresh(); });
-        new obsidian.ExtraButtonComponent(row).setIcon("reset").setTooltip(t("settings.resetGlobal")).onClick(async () => { d.color = ""; cComp.setValue(globalColor); markInherit(true); await save(); refresh(); });
-        new obsidian.ExtraButtonComponent(row).setIcon("trash").setTooltip(t("settings.deleteDictionary")).onClick(async () => { this.plugin.settings.dicts.splice(i, 1); await save(); this.plugin.rebuildIndex(false); renderDicts(); this.renderStats(); });
-      });
-      const addDict = dictsWrap.createEl("button", { text: t("settings.addDictionary") });
-      addDict.style.marginTop = "2px";
-      addDict.addEventListener("click", async () => { this.plugin.settings.dicts.push({ folder: "", template: "" }); await save(); renderDicts(); });
-    };
-    renderDicts();
-    new Setting(dictSection).setName(t("settings.tagsAsEntries")).setDesc(t("settings.tagsAsEntriesDesc"))
-      .addText((t) => {
-        t.setPlaceholder("词汇 术语").setValue(this.plugin.settings.vocabTags);
-        const apply = async (v) => { this.plugin.settings.vocabTags = v; await save(); this.plugin.rebuildIndex(true); this.renderStats(); };
-        t.onChange(apply); tagSuggest(t, apply);
-      });
-    new Setting(dictSection).setName(t("settings.includeAliases"))
-      .addToggle((t) => t.setValue(this.plugin.settings.includeAliases).onChange(async (v) => { this.plugin.settings.includeAliases = v; await save(); this.plugin.rebuildIndex(false); this.renderStats(); }));
-    new Setting(dictSection).setName(t("settings.aliasProperties")).setDesc(t("settings.aliasPropertiesDesc"))
-      .addText((t) => {
-        t.setPlaceholder("past,forms,variants").setValue(this.plugin.settings.aliasSources);
-        const apply = async (v) => { this.plugin.settings.aliasSources = (v || "").trim(); await save(); if (this.plugin.settings.includeAliases) { this.plugin.rebuildIndex(false); this.renderStats(); } };
-        t.onChange(apply);
-        if (hasSuggest) new PathSuggest(this.app, t.inputEl, () => allProps, (v) => { t.setValue(v); apply(v); }, { multi: true, sep: "," });
-      });
-
-    const inlineSection = this.section(containerEl, t("settings.inline"), { desc: t("settings.inlineDesc") });
-    new Setting(inlineSection).setName(t("settings.enableInline")).setDesc(t("settings.enableInlineDesc"))
-      .addToggle((t) => t.setValue(this.plugin.settings.inlineEntriesEnabled).onChange(async (v) => { this.plugin.settings.inlineEntriesEnabled = v; await save(); await this.plugin.rebuildIndex(false); this.renderStats(); }));
-    new Setting(inlineSection).setName(t("settings.inlineDelimiter")).setDesc(t("settings.inlineDelimiterDesc"))
-      .addText((t) => t.setPlaceholder("::").setValue(this.plugin.inlineDelimiter()).onChange(async (v) => { this.plugin.settings.inlineEntryDelimiter = (v || "").trim() || "::"; await save(); await this.plugin.rebuildIndex(false); this.renderStats(); }));
-    const categoryColorsWrap = inlineSection.createDiv();
-    const renderCategoryColors = () => {
-      categoryColorsWrap.empty();
-      const categories = this.plugin.inlineCategories || [];
-      if (!categories.length) {
-        categoryColorsWrap.createEl("p", { cls: "setting-item-description", text: t("settings.noInlineCategories") });
-        return;
-      }
-      for (const { name, count } of categories) {
-        const colors = this.plugin.settings.inlineCategoryColors;
-        const opacities = this.plugin.settings.inlineCategoryOpacity;
-        const visibility = this.plugin.settings.inlineCategoryHighlight;
-        const opacity = Object.prototype.hasOwnProperty.call(opacities, name) ? Number(opacities[name]) : this.plugin.settings.highlightOpacity;
-        new Setting(categoryColorsWrap).setName(name).setDesc(t("settings.entryCount", { count }))
-          .addToggle((toggle) => toggle.setTooltip(t("settings.showHighlight")).setValue(visibility[name] !== false).onChange(async (v) => { visibility[name] = v; await save(); refresh(); }))
-          .addColorPicker((cp) => cp.setValue(colors[name] || accentHex).onChange(async (v) => { colors[name] = v; await save(); refresh(); }))
-          .addSlider((s) => s.setLimits(0.1, 1, 0.05).setValue(isNaN(opacity) ? this.plugin.settings.highlightOpacity : opacity).setDynamicTooltip().onChange(async (v) => { opacities[name] = v; await save(); refresh(); }))
-          .addExtraButton((b) => b.setIcon("reset").setTooltip(t("settings.resetInlineStyle")).onClick(async () => { delete colors[name]; delete opacities[name]; await save(); refresh(); renderCategoryColors(); }));
-      }
-    };
-    new Setting(inlineSection).setName(t("settings.colorByHeading")).setDesc(t("settings.colorByHeadingDesc"))
-      .addButton((b) => b.setButtonText(t("settings.refreshCategories")).onClick(async () => { await this.plugin.rebuildIndex(false); renderCategoryColors(); this.renderStats(); }));
-    renderCategoryColors();
-
-    const hlSection = this.section(containerEl, t("settings.highlight"));
-    new Setting(hlSection).setName(t("settings.enableHighlight")).addToggle((toggle) => toggle.setValue(this.plugin.settings.enableHighlight).onChange(async (v) => { this.plugin.settings.enableHighlight = v; await save(); refresh(); }));
-    new Setting(hlSection).setName(t("settings.livePreview")).setDesc(this.plugin.liveAvailable ? "" : t("settings.unsupported"))
-      .addToggle((t) => t.setValue(this.plugin.settings.enableLivePreview).setDisabled(!this.plugin.liveAvailable).onChange(async (v) => { this.plugin.settings.enableLivePreview = v; await save(); refresh(); }));
-    new Setting(hlSection).setName(t("settings.selectionPill"))
-      .addToggle((t) => t.setValue(this.plugin.settings.selectionPill).onChange(async (v) => { this.plugin.settings.selectionPill = v; await save(); if (!v) this.plugin.removeSelPill(); }));
-    new Setting(hlSection).setName(t("settings.pdfHighlight")).setDesc(t("settings.pdfHighlightDesc"))
-      .addToggle((t) => t.setValue(this.plugin.settings.enablePdfHighlight).onChange(async (v) => { this.plugin.settings.enablePdfHighlight = v; await save(); if (v) this.plugin.setupPdfHighlight(); else { this.plugin.teardownPdfHighlight(); this.plugin.rescanPdfLayers(); } }));
-    new Setting(hlSection).setName(t("settings.highlightStyle"))
-      .addDropdown((dd) => dd.addOption("wavy", t("settings.wavy")).addOption("underline", t("settings.underline")).addOption("background", t("settings.background")).setValue(this.plugin.settings.highlightStyle).onChange(async (v) => { this.plugin.settings.highlightStyle = v; await save(); refresh(); }));
-    new Setting(hlSection).setName(t("settings.highlightColor"))
-      .addColorPicker((cp) => { this._colorComp = cp; cp.setValue(this.plugin.settings.highlightColor || accentHex).onChange(async (v) => { this.plugin.settings.highlightColor = v; await save(); refresh(); }); })
-      .addExtraButton((b) => b.setIcon("reset").setTooltip(t("settings.resetTheme")).onClick(async () => { this.plugin.settings.highlightColor = ""; if (this._colorComp) this._colorComp.setValue(accentHex); await save(); refresh(); }));
-    new Setting(hlSection).setName(t("settings.opacity"))
-      .addSlider((s) => s.setLimits(0.1, 1, 0.05).setValue(this.plugin.settings.highlightOpacity).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.highlightOpacity = v; await save(); refresh(); }));
-    new Setting(hlSection).setName(t("settings.fade")).setDesc(t("settings.fadeDesc"))
-      .addToggle((t) => t.setValue(this.plugin.settings.fadeByMemory).onChange(async (v) => { this.plugin.settings.fadeByMemory = v; await save(); refresh(); }));
-    new Setting(hlSection).setName(t("settings.fadeFloor"))
-      .addSlider((s) => s.setLimits(0, 0.9, 0.05).setValue(this.plugin.settings.fadeFloor).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.fadeFloor = v; await save(); refresh(); }));
-    const excludeSetting = new Setting(hlSection).setName(t("settings.excludeTags")).setDesc(t("settings.excludeTagsDesc"));
-    excludeSetting.settingEl.addClass("lexis-tags-setting");
-    const excludeEditor = excludeSetting.controlEl.createDiv({ cls: "lexis-tag-editor" });
-    const excludeChips = excludeEditor.createDiv({ cls: "lexis-tag-editor-chips" });
-    const excludeAdd = excludeEditor.createDiv({ cls: "lexis-tag-editor-add" });
-    const excludeInput = new obsidian.TextComponent(excludeAdd).setPlaceholder(t("settings.addExcludedTag"));
-    const excludedTags = () => [...new Set(this.plugin.parseTags(this.plugin.settings.excludeTags))];
-    const saveExcludedTags = async (tags) => {
-      this.plugin.settings.excludeTags = tags.join(" ");
-      await save();
-      await this.plugin.rebuildIndex(false);
-    };
-    const renderExcludedTags = () => {
-      excludeChips.empty();
-      for (const tag of excludedTags()) {
-        const chip = excludeChips.createEl("button", { cls: "lexis-tag-editor-chip", attr: { type: "button", title: t("settings.removeExcludedTag", { tag }) } });
-        chip.createSpan({ text: `#${tag}` });
-        chip.createSpan({ cls: "lexis-tag-editor-remove", text: "×" });
-        chip.addEventListener("click", async () => { await saveExcludedTags(excludedTags().filter((value) => value !== tag)); renderExcludedTags(); });
-      }
-    };
-    const addExcludedTags = async (raw) => {
-      const incoming = this.plugin.parseTags(raw);
-      if (!incoming.length) return;
-      await saveExcludedTags([...new Set([...excludedTags(), ...incoming])]);
-      excludeInput.setValue("");
-      renderExcludedTags();
-      excludeInput.inputEl.focus();
-    };
-    excludeInput.inputEl.addEventListener("keydown", (event) => {
-      if (["Enter", ",", "，", ";", "；"].includes(event.key)) {
-        event.preventDefault();
-        addExcludedTags(excludeInput.inputEl.value);
-      } else if (event.key === "Backspace" && !excludeInput.inputEl.value) {
-        const tags = excludedTags();
-        if (tags.length) { tags.pop(); saveExcludedTags(tags).then(renderExcludedTags); }
-      }
-    });
-    new obsidian.ExtraButtonComponent(excludeAdd).setIcon("plus").setTooltip(t("settings.addExcludedTag")).onClick(() => addExcludedTags(excludeInput.inputEl.value));
-    if (hasSuggest) new PathSuggest(this.app, excludeInput.inputEl, () => allTags.filter((tag) => !excludedTags().includes(tag)), (value) => addExcludedTags(value));
-    renderExcludedTags();
-
-    const tagColorSection = this.section(containerEl, t("settings.tagColors"));
-    const rulesWrap = tagColorSection.createDiv();
-    const renderRules = () => {
-      rulesWrap.empty();
-      const grid = rulesWrap.createDiv({ cls: "lexis-rule-grid" });
-      this.plugin.settings.tagRules.forEach((rule, i) => {
-        const cell = grid.createDiv({ cls: "lexis-rule" });
-        const tagIn = new obsidian.TextComponent(cell).setPlaceholder(t("settings.tagPlaceholder")).setValue(rule.tag);
-        const applyTag = async (v) => { rule.tag = (v || "").trim(); await save(); refresh(); };
-        tagIn.onChange(applyTag);
-        if (hasSuggest) new PathSuggest(this.app, tagIn.inputEl, () => allTags, (v) => { tagIn.setValue(v); applyTag(v); });
-        new obsidian.ColorComponent(cell).setValue(rule.color || accentHex).onChange(async (v) => { rule.color = v; await save(); refresh(); });
-        new obsidian.DropdownComponent(cell).addOption("", t("common.default")).addOption("wavy", t("settings.wavy")).addOption("underline", t("settings.underline")).addOption("background", t("settings.background")).setValue(rule.style || "").onChange(async (v) => { rule.style = v; await save(); refresh(); });
-        new obsidian.ExtraButtonComponent(cell).setIcon("trash").setTooltip(t("common.delete")).onClick(async () => { this.plugin.settings.tagRules.splice(i, 1); await save(); refresh(); renderRules(); });
-      });
-      const addRule = rulesWrap.createEl("button", { text: t("settings.addTagRule") });
-      addRule.style.marginTop = "2px";
-      addRule.addEventListener("click", async () => { this.plugin.settings.tagRules.push({ tag: "", color: accentHex, style: "" }); await save(); renderRules(); });
-    };
-    renderRules();
-
-    const cardSection = this.section(containerEl, t("settings.popover"));
-    const preview = cardSection.createDiv({ cls: "lexis-popover lexis-popover-preview" });
-    preview.createDiv({ cls: "lexis-popover-title", text: "Yalda · 人物" });
-    preview.createDiv({ cls: "lexis-popover-body", text: t("settings.popoverPreview") });
-    const updateCards = () => {
-      this.plugin.applyPopoverAppearance(preview);
-      const doc = preview.ownerDocument || document;
-      doc.querySelectorAll(".lexis-popover:not(.lexis-popover-preview)").forEach((el) => this.plugin.applyPopoverAppearance(el));
-    };
-    updateCards();
-    new Setting(cardSection).setName(t("settings.popoverWidth"))
-      .addSlider((s) => s.setLimits(280, 800, 10).setValue(this.plugin.settings.popoverWidth).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.popoverWidth = v; updateCards(); await save(); }));
-    new Setting(cardSection).setName(t("settings.popoverHeight")).setDesc(t("settings.popoverHeightDesc"))
-      .addSlider((s) => s.setLimits(200, 800, 10).setValue(this.plugin.settings.popoverMaxHeight).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.popoverMaxHeight = v; updateCards(); await save(); }));
-    new Setting(cardSection).setName(t("settings.popoverFont"))
-      .addSlider((s) => s.setLimits(11, 24, 1).setValue(this.plugin.settings.popoverFontSize).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.popoverFontSize = v; updateCards(); await save(); }));
-    new Setting(cardSection).setName(t("settings.hoverDelay")).setDesc(t("settings.hoverDelayDesc"))
-      .addSlider((s) => s.setLimits(0, 3, 0.1).setValue((this.plugin.settings.hoverDelayMs || 0) / 1000).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.hoverDelayMs = Math.round(v * 1000); await save(); }));
-    new Setting(cardSection).setName(t("settings.showRelated")).addToggle((toggle) => toggle.setValue(this.plugin.settings.showRelated).onChange(async (v) => { this.plugin.settings.showRelated = v; await save(); }));
-    new Setting(cardSection).setName(t("settings.showOccurrences")).setDesc(t("settings.showOccurrencesDesc"))
-      .addToggle((t) => t.setValue(this.plugin.settings.showOccurrences).onChange(async (v) => { this.plugin.settings.showOccurrences = v; await save(); }));
-    new Setting(cardSection).setName(t("settings.pdfOccurrences")).setDesc(t("settings.pdfOccurrencesDesc"))
-      .addToggle((toggle) => toggle.setValue(this.plugin.settings.includePdfOccurrences !== false).onChange(async (v) => { this.plugin.settings.includePdfOccurrences = v; this.plugin._occCache.clear(); await save(); }));
-    new Setting(cardSection).setName(t("settings.occurrenceLimit")).addSlider((s) => s.setLimits(1, 15, 1).setValue(this.plugin.settings.occurrenceLimit).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.occurrenceLimit = v; await save(); this.plugin._occCache.clear(); }));
-    new Setting(cardSection).setName(t("settings.occurrenceScope")).setDesc(t("settings.occurrenceScopeDesc"))
-      .addText((input) => input.setPlaceholder(t("settings.wholeVault")).setValue(this.plugin.settings.occurrenceFolders).onChange(async (v) => { this.plugin.settings.occurrenceFolders = v.trim(); await save(); this.plugin._occCache.clear(); }));
-
-    const addSection = this.section(containerEl, t("settings.selectionAdd"));
-    new Setting(addSection).setName(t("settings.emptyNotePreset")).setDesc(t("settings.emptyNotePresetDesc"))
-      .addDropdown((dropdown) => dropdown
-        .addOption("blank", t("settings.emptyNoteBlank"))
-        .addOption("occ", t("settings.emptyNoteOccurrences"))
-        .setValue(this.plugin.settings.emptyNotePreset || "blank")
-        .onChange(async (value) => { this.plugin.settings.emptyNotePreset = value === "occ" ? "occ" : "blank"; await save(); }));
-    new Setting(addSection).setName(t("settings.defaultTemplate")).setDesc(t("settings.defaultTemplateDesc"))
-      .addText((input) => {
-        input.setPlaceholder("template/word.md").setValue(this.plugin.settings.newWordTemplate);
-        const onTpl = async (v) => { this.plugin.settings.newWordTemplate = (v || "").trim(); await save(); };
-        input.onChange(onTpl);
-        if (hasSuggest) new PathSuggest(this.app, input.inputEl, () => mdFiles, (v) => { input.setValue(v); onTpl(v); });
-      });
-    const occurrenceSetting = new Setting(addSection).setName(t("settings.occurrenceTemplate")).setDesc(t("settings.occurrenceTemplateDesc"))
-      .addTextArea((input) => input
-        .setPlaceholder(DEFAULT_SETTINGS.occurrenceTemplate)
-        .setValue(this.plugin.settings.occurrenceTemplate ?? DEFAULT_SETTINGS.occurrenceTemplate)
-        .onChange(async (v) => { this.plugin.settings.occurrenceTemplate = v; await save(); }));
-    occurrenceSetting.settingEl.addClass("lexis-template-setting");
-    const occurrenceTextarea = occurrenceSetting.controlEl.querySelector("textarea");
-    if (occurrenceTextarea) occurrenceTextarea.rows = 4;
-
-    const fsrsSection = this.section(containerEl, t("settings.review"));
-    new Setting(fsrsSection).setName(t("settings.retention")).setDesc(t("settings.retentionDesc"))
-      .addSlider((s) => s.setLimits(0.8, 0.97, 0.01).setValue(this.plugin.settings.requestRetention).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.requestRetention = v; await save(); }));
-    new Setting(fsrsSection).setName(t("settings.newLimit")).addSlider((s) => s.setLimits(0, 100, 5).setValue(this.plugin.settings.newPerDay).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.newPerDay = v; await save(); }));
-    new Setting(fsrsSection).setName(t("settings.sessionLimit")).addSlider((s) => s.setLimits(10, 500, 10).setValue(this.plugin.settings.maxReviewsPerSession).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.maxReviewsPerSession = v; await save(); }));
-    new Setting(fsrsSection).setName(t("settings.cardFront")).setDesc(t("settings.cardFrontDesc"))
-      .addDropdown((dd) => dd.addOption("note", t("settings.noteCard")).addOption("cloze", t("settings.clozeCard")).setValue(this.plugin.settings.cardFront).onChange(async (v) => { this.plugin.settings.cardFront = v; await save(); }));
-    new Setting(fsrsSection).setName(t("settings.showReviewMetadata")).setDesc(t("settings.showReviewMetadataDesc"))
-      .addToggle((toggle) => toggle.setValue(!!this.plugin.settings.showReviewMetadata).onChange(async (value) => {
-        this.plugin.settings.showReviewMetadata = value;
-        this.plugin.applyReviewMetadataVisibility();
-        await save();
-      }));
-    new Setting(fsrsSection).setName(t("settings.ratingOffset")).setDesc(t("settings.ratingOffsetDesc"))
-      .addSlider((s) => s.setLimits(0, 200, 5).setValue(this.plugin.settings.reviewBottomSpace).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.reviewBottomSpace = v; await save(); }));
-    new Setting(fsrsSection).setName(t("home.start")).addButton((b) => b.setButtonText(t("settings.openReview")).setCta().onClick(() => this.plugin.openReview()));
-    new Setting(fsrsSection).setName(t("settings.hoverFeedback")).setDesc(t("settings.hoverFeedbackDesc"))
-      .addToggle((t) => t.setValue(this.plugin.settings.hoverFeedback).onChange(async (v) => { this.plugin.settings.hoverFeedback = v; await save(); }));
-    new Setting(fsrsSection).setName(t("settings.feedbackDays")).setDesc(t("settings.feedbackDaysDesc"))
-      .addSlider((s) => s.setLimits(1, 30, 1).setValue(this.plugin.settings.hoverFeedbackDays).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.hoverFeedbackDays = v; await save(); }));
-    new Setting(fsrsSection).setName(t("settings.retireDays")).setDesc(t("settings.retireDaysDesc"))
-      .addSlider((s) => s.setLimits(14, 365, 1).setValue(this.plugin.settings.retireCandidateDays).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.retireCandidateDays = v; await save(); }));
-
-    const bridgeSection = this.section(containerEl, t("settings.bridge"), { desc: t("settings.bridgeDesc") });
-    new Setting(bridgeSection).setName(t("settings.annotationHeading")).setDesc(t("settings.annotationHeadingDesc"))
-      .addText((t) => t.setPlaceholder("#### 批注").setValue(this.plugin.settings.annotationHeading).onChange(async (v) => { this.plugin.settings.annotationHeading = v; await save(); }));
-    new Setting(bridgeSection).setName(t("settings.enableBridge"))
-      .addToggle((t) => t.setValue(this.plugin.settings.bridgeEnabled).onChange(async (v) => {
-        this.plugin.settings.bridgeEnabled = v;
-        if (v && !this.plugin.settings.bridgeToken) this.plugin.settings.bridgeToken = this.plugin.bridge.generateToken();
-        await save();
-        this.plugin.bridge.restart();
-        this.display();
-      }));
-    new Setting(bridgeSection).setName(t("settings.port")).setDesc(t("settings.portDesc"))
-      .addText((t) => t.setValue(String(this.plugin.settings.bridgePort)).onChange(async (v) => { const n = parseInt(v, 10); if (n >= 1024 && n <= 65535) { this.plugin.settings.bridgePort = n; await save(); } }))
-      .addExtraButton((b) => b.setIcon("rotate-ccw").setTooltip(t("settings.restartBridge")).onClick(() => { this.plugin.bridge.restart(); new Notice(t("notice.bridgeRestarted")); }));
-    new Setting(bridgeSection).setName(t("settings.token")).setDesc(t("settings.tokenDesc"))
-      .addText((input) => { input.setValue(this.plugin.settings.bridgeToken || t("settings.tokenPending")).setDisabled(true); input.inputEl.style.width = "260px"; })
-      .addExtraButton((b) => b.setIcon("copy").setTooltip(t("settings.copyToken")).onClick(async () => { if (this.plugin.settings.bridgeToken) { await navigator.clipboard.writeText(this.plugin.settings.bridgeToken); new Notice(t("notice.tokenCopied")); } }))
-      .addExtraButton((b) => b.setIcon("refresh-cw").setTooltip(t("settings.regenerateToken")).onClick(async () => { this.plugin.settings.bridgeToken = this.plugin.bridge.generateToken(); await save(); this.plugin.bridge.restart(); this.display(); }));
-
-    new Setting(containerEl).setName(t("settings.rebuild")).addButton((b) => b.setButtonText(t("settings.rebuildNow")).onClick(() => { this.plugin.rebuildIndex(true); this.renderStats(); }));
-    this.statsEl = containerEl.createEl("p", { cls: "lexis-stats" });
-    this.renderStats();
-  }
-
-  renderStats() {
-    if (!this.statsEl) return;
-    const s = this.plugin.stats;
-    this.statsEl.setText(this.plugin.t("settings.stats", { words: s.words, aliases: s.aliases, inline: s.inlineEntries || 0, due: s.due || 0 }));
-  }
-}
+module.exports = LexisPlugin;

@@ -18,6 +18,13 @@ const imports = [
   'const { buildCurveSVG } = require("./curve");',
   'const { createReviewView } = require("./review-view");',
   'const { createOccurrenceSearch } = require("./occurrence-search");',
+  'const { createBridgeServer } = require("./bridge-server");',
+  'const { createBridgeApi } = require("./bridge-api");',
+  'const { createHighlightEngine } = require("./highlight-engine");',
+  'const { createReaderUi } = require("./reader-ui");',
+  'const { addAppearanceButton, createReorderController, moveItem } = require("./settings-controls");',
+  'const { createTemplateProvider } = require("./template-provider");',
+  'const { createSettingsTab } = require("./settings-tab");',
 ].join("\n");
 
 let main = src("main.js");
@@ -35,6 +42,27 @@ main = main.replace(imports, [
   "",
   "// ---------- 生成自 src/occurrence-search.js ----------",
   moduleBody("occurrence-search.js").trim(),
+  "",
+  "// ---------- 生成自 src/bridge-server.js ----------",
+  moduleBody("bridge-server.js").trim(),
+  "",
+  "// ---------- 生成自 src/bridge-api.js ----------",
+  moduleBody("bridge-api.js").trim(),
+  "",
+  "// ---------- 生成自 src/highlight-engine.js ----------",
+  moduleBody("highlight-engine.js").trim(),
+  "",
+  "// ---------- 生成自 src/reader-ui.js ----------",
+  moduleBody("reader-ui.js").trim(),
+  "",
+  "// ---------- 生成自 src/settings-controls.js ----------",
+  moduleBody("settings-controls.js").trim(),
+  "",
+  "// ---------- 生成自 src/template-provider.js ----------",
+  moduleBody("template-provider.js").trim(),
+  "",
+  "// ---------- 生成自 src/settings-tab.js ----------",
+  moduleBody("settings-tab.js").trim(),
 ].join("\n"));
 
 fs.writeFileSync(path.join(root, "main.js"), main.endsWith("\n") ? main : main + "\n");
