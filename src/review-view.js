@@ -47,7 +47,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }) => 
       for (const t of tagsSet) {
         const pill = tw.createSpan({ cls: "lexis-tag", text: "#" + t });
         pill.setAttribute("title", this.plugin.t("review.onlyTag", { tag: t }));
-        pill.addEventListener("click", () => this.plugin.openReview({ tag: t }));
+        pill.addEventListener("click", () => this.plugin.openReview({ ...this.options, tag: t }));
       }
     }
     this.backEl = card.createDiv({ cls: "lexis-rv-back" });

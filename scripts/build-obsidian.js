@@ -17,6 +17,7 @@ const imports = [
   'const { createI18n } = require("./i18n");',
   'const { buildCurveSVG } = require("./curve");',
   'const { createReviewView } = require("./review-view");',
+  'const { createOccurrenceSearch } = require("./occurrence-search");',
 ].join("\n");
 
 let main = src("main.js");
@@ -31,6 +32,9 @@ main = main.replace(imports, [
   "",
   "// ---------- 生成自 src/review-view.js ----------",
   moduleBody("review-view.js").trim(),
+  "",
+  "// ---------- 生成自 src/occurrence-search.js ----------",
+  moduleBody("occurrence-search.js").trim(),
 ].join("\n"));
 
 fs.writeFileSync(path.join(root, "main.js"), main.endsWith("\n") ? main : main + "\n");

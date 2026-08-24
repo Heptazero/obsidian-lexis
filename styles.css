@@ -1,5 +1,17 @@
 /* Lexis 样式 —— 颜色/线型由插件按设置写成内联样式,这里给基础与布局 */
 
+/* FSRS 内部状态保留在 Markdown 中，但默认不占用 Obsidian 属性面板。 */
+body:not(.lexis-show-review-metadata) .metadata-property:is(
+    [data-property-key="lexis-s"],
+    [data-property-key="lexis-d"],
+    [data-property-key="lexis-due"],
+    [data-property-key="lexis-last"],
+    [data-property-key="lexis-reps"],
+    [data-property-key="lexis-lapses"]
+) {
+    display: none;
+}
+
 .lexis-hl {
     cursor: pointer;
     text-decoration: underline wavy var(--text-accent);
@@ -50,6 +62,66 @@
     border-top: 1px solid var(--background-modifier-border);
 }
 .lexis-settings-section-body .setting-item:first-child { border-top: none; }
+
+.lexis-template-setting {
+    align-items: flex-start;
+    flex-direction: column;
+}
+.lexis-template-setting .setting-item-info,
+.lexis-template-setting .setting-item-control,
+.lexis-template-setting textarea {
+    width: 100%;
+}
+.lexis-template-setting textarea {
+    min-height: 88px;
+    resize: vertical;
+    font-family: var(--font-monospace);
+}
+
+.lexis-tags-setting {
+    align-items: flex-start;
+    flex-direction: column;
+}
+.lexis-tags-setting .setting-item-info,
+.lexis-tags-setting .setting-item-control,
+.lexis-tag-editor {
+    width: 100%;
+}
+.lexis-tag-editor-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 4px;
+    margin-bottom: 8px;
+}
+.lexis-tag-editor-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 26px;
+    padding: 2px 8px;
+    border: 0;
+    border-radius: 999px;
+    color: var(--text-accent);
+    background: color-mix(in srgb, var(--text-accent) 14%, transparent);
+}
+.lexis-tag-editor-chip:hover {
+    background: color-mix(in srgb, var(--text-accent) 24%, transparent);
+}
+.lexis-tag-editor-remove {
+    color: var(--text-muted);
+    font-size: 14px;
+}
+.lexis-tag-editor-add {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+}
+.lexis-tag-editor-add .text-input {
+    flex: 1 1 auto;
+    width: 100%;
+}
 
 /* 标签规则:一行多个紧凑卡片 */
 .lexis-rule-grid {

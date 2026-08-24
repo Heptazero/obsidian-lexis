@@ -696,6 +696,12 @@
   // ---- 划词添加:选中文本 → 浮动 pill([＋] [词典] [🔗]) ----
   let selBtn = null;
   function hideSelBtn() { if (selBtn) { selBtn.remove(); selBtn = null; } document.querySelectorAll(".lexis-web-folderlist").forEach((el) => el.remove()); }
+  function hasWordContent(text) { return /[\p{L}\p{N}]/u.test(text); }
+  function isSelectionCandidate(text) {
+    if (!text || text.length > 60 || !hasWordContent(text)) return false;
+    const hasCjk = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(text);
+    return hasCjk || text.split(/\s+/u).length <= 6;
+  }
   function onSelect() {
     // 正在用我们自己的别名输入框时别打扰(selectionchange 会因 input 聚焦误触发)
     if (selBtn && document.activeElement && selBtn.contains(document.activeElement)) return;
@@ -703,7 +709,7 @@
     const text = sel ? sel.toString().trim() : "";
     // 选区没变、且 pill 已经在了 → 别重建(否则在 pill 上点文件夹下拉会被 mouseup 触发的本函数拆掉,闪一下就没)
     if (selBtn && selBtn.dataset && selBtn.dataset.word === text && text) return;
-    if (!text || text.length > 60 || text.split(/\s+/).length > 6 || !/[A-Za-z]/.test(text)) { hideSelBtn(); return; }
+    if (!isSelectionCandidate(text)) { hideSelBtn(); return; }
     // 选中词已在库中(含别名) → 不弹按钮
     if (keySet && keySet.has(text.toLowerCase())) { hideSelBtn(); return; }
     // 获取选区矩形(排除词分支和正常 pill 分支共用的定位信息)
@@ -812,7 +818,7 @@
       input.addEventListener("mousedown", (e) => e.stopPropagation());
       const submit = async () => {
         const real = input.value.trim();
-        if (!real || !/[A-Za-z]/.test(real)) return;
+        if (!hasWordContent(real)) return;
         input.disabled = true;
         await doAdd(real, sentence, text, selFolder);
         hideSelBtn();

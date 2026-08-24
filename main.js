@@ -120,6 +120,7 @@ const MESSAGES = {
   "home.total": { zh: "总计 {count}", en: "Total {count}" },
   "home.start": { zh: "开始复习", en: "Start review" },
   "home.collection": { zh: "集合", en: "Collection" },
+  "home.reviewFolder": { zh: "复习文件夹", en: "Review folder" },
   "home.order": { zh: "顺序", en: "Order" },
   "home.dueFirst": { zh: "到期优先", en: "Due first" },
   "home.frequency": { zh: "词频（高频先）", en: "Frequency (high first)" },
@@ -229,13 +230,21 @@ const MESSAGES = {
   "settings.showRelated": { zh: "显示相关词", en: "Show related entries" },
   "settings.showOccurrences": { zh: "显示「出现过的地方」", en: "Show occurrences" },
   "settings.showOccurrencesDesc": { zh: "全文搜索，无需双链。", en: "Full-text search; links are not required." },
+  "settings.pdfOccurrences": { zh: "PDF 也作为出处", en: "Include PDFs as occurrences" },
+  "settings.pdfOccurrencesDesc": { zh: "仅支持能复制文字的 PDF。", en: "Only PDFs with selectable text are supported." },
   "settings.occurrenceLimit": { zh: "出处数量上限", en: "Occurrence limit" },
   "settings.occurrenceScope": { zh: "出处搜索范围", en: "Occurrence search scope" },
   "settings.occurrenceScopeDesc": { zh: "逗号分隔；留空为全库。", en: "Comma-separated; blank searches the whole vault." },
   "settings.wholeVault": { zh: "留空=全库", en: "Blank = whole vault" },
   "settings.selectionAdd": { zh: "划词添加", en: "Add from selection" },
+  "settings.emptyNotePreset": { zh: "无模板时", en: "When no template is selected" },
+  "settings.emptyNotePresetDesc": { zh: "仅用于没有选择模板文件的词典。", en: "Used only for dictionaries without a template file." },
+  "settings.emptyNoteBlank": { zh: "纯空白", en: "Blank note" },
+  "settings.emptyNoteOccurrences": { zh: "末尾显示出处面板", en: "Show occurrences panel at the end" },
   "settings.defaultTemplate": { zh: "默认模板", en: "Default template" },
   "settings.defaultTemplateDesc": { zh: "仅用于未匹配词典时；支持 {{word}}、{{date}}。", en: "Used only when no dictionary matches; supports {{word}} and {{date}}." },
+  "settings.occurrenceTemplate": { zh: "自动出处格式", en: "Automatic source format" },
+  "settings.occurrenceTemplateDesc": { zh: "首行可写 Markdown 标题，其余内容按每条出处重复。支持 {{word}}、{{sentence}}、{{source}}、{{sourceSuffix}}、{{date}}；留空不写出处。", en: "The first line may be a Markdown heading; the remaining lines repeat for each source. Supports {{word}}, {{sentence}}, {{source}}, {{sourceSuffix}}, and {{date}}. Leave blank to omit sources." },
   "settings.review": { zh: "复习 (FSRS)", en: "Review (FSRS)" },
   "settings.retention": { zh: "目标记忆保留率", en: "Desired retention" },
   "settings.retentionDesc": { zh: "越高，复习越频繁。", en: "Higher values schedule more reviews." },
@@ -245,6 +254,8 @@ const MESSAGES = {
   "settings.cardFrontDesc": { zh: "填空需有出处，否则显示单词。", en: "Cloze requires an occurrence; otherwise the entry is shown." },
   "settings.noteCard": { zh: "词条 → 整篇", en: "Entry → note" },
   "settings.clozeCard": { zh: "出处填空", en: "Occurrence cloze" },
+  "settings.showReviewMetadata": { zh: "显示复习内部状态", en: "Show internal review state" },
+  "settings.showReviewMetadataDesc": { zh: "默认在属性面板隐藏，数据仍保存在笔记中。", en: "Hidden from Properties by default; the data remains in the note." },
   "settings.ratingOffset": { zh: "评分栏底部间距", en: "Rating bar bottom offset" },
   "settings.ratingOffsetDesc": { zh: "移动端用于避开工具栏。", en: "Keeps the mobile rating bar above the toolbar." },
   "settings.openReview": { zh: "打开复习", en: "Open review" },
@@ -256,8 +267,10 @@ const MESSAGES = {
   "settings.retireDaysDesc": { zh: "入库与未相遇均达到此天数。", en: "Both added and unseen ages must reach this value." },
   "settings.bridge": { zh: "本机桥接", en: "Local bridge" },
   "settings.bridgeDesc": { zh: "供浏览器与 Zotero 连接", en: "Connects the browser and Zotero companions" },
-  "settings.excludeTags": { zh: "排除标签", en: "Excluded tags" },
-  "settings.excludeTagsDesc": { zh: "仅关闭高亮，仍保留词条。", en: "Hides highlights without removing entries." },
+  "settings.excludeTags": { zh: "不高亮的标签", en: "Tags hidden from highlights" },
+  "settings.excludeTagsDesc": { zh: "仍参与复习，只关闭 Obsidian、浏览器和 Zotero 高亮。", en: "Entries remain in review; only Obsidian, browser, and Zotero highlights are hidden." },
+  "settings.addExcludedTag": { zh: "输入标签后回车", en: "Type a tag and press Enter" },
+  "settings.removeExcludedTag": { zh: "移除 #{tag}", en: "Remove #{tag}" },
   "settings.annotationHeading": { zh: "批注小节标题", en: "Annotation heading" },
   "settings.annotationHeadingDesc": { zh: "支持“批注”或“## 引用”；留空为“#### 批注”。", en: "Use plain text or a Markdown heading; blank uses “#### 批注”." },
   "settings.enableBridge": { zh: "启用本机桥接", en: "Enable local bridge" },
@@ -418,7 +431,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }) => 
       for (const t of tagsSet) {
         const pill = tw.createSpan({ cls: "lexis-tag", text: "#" + t });
         pill.setAttribute("title", this.plugin.t("review.onlyTag", { tag: t }));
-        pill.addEventListener("click", () => this.plugin.openReview({ tag: t }));
+        pill.addEventListener("click", () => this.plugin.openReview({ ...this.options, tag: t }));
       }
     }
     this.backEl = card.createDiv({ cls: "lexis-rv-back" });
@@ -578,6 +591,130 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }) => 
   }
 };
 
+// ---------- 生成自 src/occurrence-search.js ----------
+// 出处搜索只负责把不同文件类型统一成 { file, sentence, page? }。
+// UI、收藏格式和跳转行为留在主插件，后续接 EPUB/Zotero 时不用改搜索核心。
+
+function pdfItemsToText(items) {
+  let out = "", prev = null;
+  for (const item of items || []) {
+    const text = String(item && item.str || "");
+    if (!text) { if (item && item.hasEOL) out += "\n"; continue; }
+    let separator = "";
+    if (prev) {
+      if (prev.hasEOL) separator = "\n";
+      else if (!/\s$/.test(out) && !/^\s/.test(text)) {
+        const pt = prev.transform || [], ct = item.transform || [];
+        const sameLine = Number.isFinite(pt[5]) && Number.isFinite(ct[5])
+          ? Math.abs(pt[5] - ct[5]) <= Math.max(1, Math.abs(pt[3] || ct[3] || 0) * 0.45)
+          : true;
+        if (!sameLine) separator = "\n";
+        else if (Number.isFinite(pt[4]) && Number.isFinite(ct[4]) && Number.isFinite(prev.width)) {
+          const chars = Math.max(1, String(prev.str || "").trim().length);
+          const charWidth = Math.abs(Number(prev.width) || 0) / chars;
+          const gap = ct[4] - (pt[4] + Number(prev.width || 0));
+          if (gap > Math.max(0.5, charWidth * 0.18) || gap < -Math.max(2, charWidth * 2)) separator = " ";
+        } else separator = " ";
+      }
+    }
+    out += separator + text;
+    prev = item;
+  }
+  return out;
+}
+
+function normalizePdfText(text) {
+  return String(text || "")
+    .replace(/([\p{L}\p{N}])-\s*\n\s*([\p{L}\p{N}])/gu, "$1$2")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function mergeOccurrences(markdown, pdf, limit) {
+  const out = [], max = Math.max(1, Number(limit) || 1);
+  for (let i = 0; out.length < max && (i < markdown.length || i < pdf.length); i++) {
+    if (i < markdown.length) out.push(markdown[i]);
+    if (out.length < max && i < pdf.length) out.push(pdf[i]);
+  }
+  return out;
+}
+
+function createOccurrenceSearch(options) {
+  const { app, loadPdfJs, boundedSource, extractSentence, markdownAllowed, inScope } = options;
+  const pdfCache = new Map();
+
+  const readPdfPages = async (file) => {
+    const signature = `${file.stat && file.stat.mtime || 0}:${file.stat && file.stat.size || 0}`;
+    const cached = pdfCache.get(file.path);
+    if (cached && cached.signature === signature) return cached.promise;
+    const promise = (async () => {
+      let doc = null;
+      try {
+        const pdfjs = await loadPdfJs();
+        const buffer = await app.vault.readBinary(file);
+        const task = pdfjs.getDocument({ data: new Uint8Array(buffer) });
+        doc = await task.promise;
+        const pages = [];
+        for (let page = 1; page <= doc.numPages; page++) {
+          const pdfPage = await doc.getPage(page);
+          const content = await pdfPage.getTextContent();
+          const text = normalizePdfText(pdfItemsToText(content.items));
+          if (text) pages.push({ page, text });
+          if (pdfPage.cleanup) pdfPage.cleanup();
+        }
+        return pages;
+      } catch (error) {
+        console.warn(`[Lexis] PDF 出处扫描失败: ${file.path}`, error);
+        return [];
+      } finally {
+        if (doc && doc.destroy) { try { await doc.destroy(); } catch (_e) {} }
+      }
+    })();
+    pdfCache.set(file.path, { signature, promise });
+    return promise;
+  };
+
+  const searchMarkdown = async (word, limit, scope) => {
+    const re = new RegExp(boundedSource(word), "i"), results = [];
+    const files = app.vault.getMarkdownFiles().filter((file) => markdownAllowed(file) && inScope(file.path, scope));
+    for (const file of files) {
+      if (results.length >= limit) break;
+      let content;
+      try { content = await app.vault.cachedRead(file); } catch (_e) { continue; }
+      const index = content.search(re);
+      if (index >= 0) results.push({ file, sentence: extractSentence(content, index) });
+    }
+    return results;
+  };
+
+  const searchPdf = async (word, limit, scope) => {
+    const re = new RegExp(boundedSource(word), "i"), results = [];
+    const files = app.vault.getFiles().filter((file) => file.extension === "pdf" && inScope(file.path, scope));
+    for (const file of files) {
+      if (results.length >= limit) break;
+      const pages = await readPdfPages(file);
+      for (const page of pages) {
+        const index = page.text.search(re);
+        if (index < 0) continue;
+        results.push({ file, page: page.page, sentence: extractSentence(page.text, index) });
+        break; // 与 Markdown 一致：每个文件只返回第一处。
+      }
+    }
+    return results;
+  };
+
+  return {
+    clearResults() {},
+    invalidatePdf(path) { if (path) pdfCache.delete(path); else pdfCache.clear(); },
+    async find(word, { limit = 6, scope = [], includePdf = true } = {}) {
+      const markdownPromise = searchMarkdown(word, limit, scope);
+      const pdfPromise = includePdf ? searchPdf(word, limit, scope) : Promise.resolve([]);
+      const [markdown, pdf] = await Promise.all([markdownPromise, pdfPromise]);
+      return mergeOccurrences(markdown, pdf, limit);
+    },
+  };
+}
+
 const LEXIS_REVIEW_VIEW = "lexis-review-view";
 const LEXIS_HOME_VIEW = "lexis-home-view";
 
@@ -614,6 +751,7 @@ const DEFAULT_SETTINGS = {
   tagRules: [],
   showRelated: true,
   showOccurrences: true,
+  includePdfOccurrences: true,
   occurrenceLimit: 6,
   occurrenceFolders: "",
   // Stage 3 (FSRS)
@@ -622,8 +760,12 @@ const DEFAULT_SETTINGS = {
   maxReviewsPerSession: 200,
   reviewLog: {}, // { "YYYY-MM-DD": count } 供热力图(Stage 5)
   reviewHistory: {}, // { "词条路径": [{date, s, grade, retention}] } 供单词级记忆曲线
+  showReviewMetadata: false,
   // Stage 4
   newWordTemplate: "template/单词模板.md",
+  emptyNotePreset: "blank",
+  // 划词出处模板:首行若为 Markdown 标题,其余内容作为每条出处的格式;留空则不自动写出处。
+  occurrenceTemplate: "#### 出处\n> {{sentence}}{{sourceSuffix}}",
   // 批注小节标题:可以只填文字(默认按 #### 级别),也可以带级别(比如 "## 引用");留空用默认 "#### 批注"
   annotationHeading: "",
   // 卡片正面:note=单词→整篇;cloze=出处填空
@@ -798,6 +940,7 @@ module.exports = class LexisPlugin extends Plugin {
     try {
     await this.loadSettings();
     this.i18n = createI18n(() => this.settings.language);
+    this.applyReviewMetadataVisibility();
 
     this.index = new Map();
     this.vocabPaths = new Set();
@@ -810,6 +953,14 @@ module.exports = class LexisPlugin extends Plugin {
     this._showTimer = null;
     this._showTarget = null;
     this._occCache = new Map();
+    this.occurrenceSearch = createOccurrenceSearch({
+      app: this.app,
+      loadPdfJs: () => obsidian.loadPdfJs(),
+      boundedSource,
+      extractSentence: (content, index) => this.extractSentence(content, index),
+      markdownAllowed: (file) => !this.inVocabFolder(file.path) && !this.inlineSourcePaths?.has(file.path),
+      inScope: (path, scope) => this.inScope(path, scope),
+    });
     this.liveAvailable = false;
     this._encounters = {};
     this._encSaveTimer = 0;
@@ -934,11 +1085,13 @@ module.exports = class LexisPlugin extends Plugin {
     this.registerEvent(this.app.vault.on("rename", (f, old) => this.maybeRebuild(f, old)));
     this.registerEvent(this.app.vault.on("modify", (file) => {
       this._occCache.clear();
+      if (file?.extension === "pdf") this.occurrenceSearch.invalidatePdf(file.path);
       if (this.isInlineSourceFile(file) || this.inlineSourcePaths?.has(file?.path)) this.scheduleRebuild();
     }));
-    // 改 frontmatter 增减标签时,让笔记进/出按标签收录的词库或内联条目库(有 800ms 防抖)
+    // 词条元数据变化会影响别名、排除标签、配色和生命周期；无论是否启用“按标签收录”都要重建。
+    // 同时保留未收录文件的判断，让它能因新增收录标签进入词库。
     this.registerEvent(this.app.metadataCache.on("changed", (file) => {
-      if ((this.vocabTagSet().size && (this.isVocabFile(file) || this.vocabPaths.has(file.path))) || this.isInlineSourceFile(file) || this.inlineSourcePaths?.has(file?.path)) this.scheduleRebuild();
+      if (this.vocabPaths.has(file.path) || this.isVocabFile(file) || this.isInlineSourceFile(file) || this.inlineSourcePaths?.has(file?.path)) this.scheduleRebuild();
     }));
 
     // 划词添加(右键菜单)
@@ -985,6 +1138,7 @@ module.exports = class LexisPlugin extends Plugin {
     this.teardownPdfHighlight();
     this.teardownEpubIframeHighlight();
     this.bridge?.stop();
+    document.body?.classList.remove("lexis-show-review-metadata");
   }
 
   async loadSettings() {
@@ -1012,6 +1166,9 @@ module.exports = class LexisPlugin extends Plugin {
 
   t(key, vars) { return this.i18n ? this.i18n.t(key, vars) : key; }
   async saveSettings() { await this.saveData(this.settings); }
+  applyReviewMetadataVisibility() {
+    document.body?.classList.toggle("lexis-show-review-metadata", !!this.settings.showReviewMetadata);
+  }
   parseTagRulesText(text) {
     const rules = [];
     for (const line of (text || "").split("\n")) {
@@ -1032,8 +1189,8 @@ module.exports = class LexisPlugin extends Plugin {
     const sentence = String((payload && payload.sentence) || "").trim();
     const url = String((payload && payload.url) || "").trim();
     const title = String((payload && payload.title) || url || "").trim().replace(/[\[\]]/g, "");
-    const link = url ? ` —— [${title || url}](${url})` : "";
-    const line = (sentence || url) ? `> ${sentence}${link}` : "";
+    const source = url ? `[${title || url}](${url})` : "";
+    const occurrence = (sentence || source) ? { word, sentence, source, date: todayStr() } : null;
     const dupKey = sentence || url;
     // 目标词典文件夹:payload.folder 命中词典表则用它,否则回退第一个
     const reqFolder = this.normalizeFolder((payload && payload.folder) || "");
@@ -1069,10 +1226,10 @@ module.exports = class LexisPlugin extends Plugin {
           this.rebuildIndex(false);
           if (alias) { const ak = alias.toLowerCase(); if (!this.index.has(ak)) this.index.set(ak, { display: alias, file: existing, isAlias: true, tags: this.getTags(existing) }); }
         }
-        if (line) {
+        if (occurrence) {
           const cur = await this.app.vault.cachedRead(existing);
           if (dupKey && cur.includes(dupKey)) return { ok: true, created: false, dup: true, word, file: existing.path };
-          const apply = (data) => this.insertExampleLine(data, line);
+          const apply = (data) => this.insertOccurrence(data, occurrence);
           if (this.app.vault.process) await this.app.vault.process(existing, apply);
           else await this.app.vault.modify(existing, apply(cur));
           this.recordEncounter(existing, "add");
@@ -1082,8 +1239,8 @@ module.exports = class LexisPlugin extends Plugin {
       }
       await this.ensureFolder(folder);
       const tpl = await this.templateForFolder(folder);
-      let content = (tpl != null ? tpl : this.minimalSkeleton()).replace(/\{\{word\}\}/g, word).replace(/\{\{date\}\}/g, todayStr());
-      if (line) content = this.insertExampleLine(content, line);
+      let content = this.renderTemplate(tpl != null ? tpl : this.minimalSkeleton(), { word, date: todayStr() });
+      if (occurrence) content = this.insertOccurrence(content, occurrence);
       // 别名注入到 frontmatter 再建文件,保证 metadataCache 第一时间就包含别名
       if (alias) content = injectAlias(content);
       const file = await this.app.vault.create(targetPath, content);
@@ -1136,7 +1293,6 @@ module.exports = class LexisPlugin extends Plugin {
       return { ok: true, key, tag, action: action === "remove" ? "removed" : "added", tags: resultTags };
     } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
   }
-  // 把一条出处插到「#### 出处」段的末尾(已有出处之后、```lexis occ``` 代码块之前);没有该段就在文末新建
   // 把 line 追加到指定标题小节末尾(在子标题/代码块之前);没这个标题就在文末新建。
   // headingLine:完整标题行(级别 + 文字,比如 "#### 出处",可以是用户在设置里自定义的任意级别/文字);
   // legacyNames:识别时额外认的旧标题文字(不认级别,只认文字,比如"例句"改名"出处"前的老笔记),但新建小节永远用 headingLine。
@@ -1145,12 +1301,7 @@ module.exports = class LexisPlugin extends Plugin {
     const names = [headingText, ...(legacyNames || [])].map(escapeRe).join("|");
     const re = new RegExp("(^|\\n)#{1,6}[ \\t]*(?:" + names + ")[^\\n]*\\n");
     const m = re.exec(data);
-    if (!m) {
-      // 没这个标题就新建:优先插在末尾的 ```lexis 代码块之前(让批注紧跟正文/出处,而非落在出处热力图之后),否则文末
-      const block = data.search(/\n```lexis\b/);
-      if (block >= 0) return data.slice(0, block).replace(/\s*$/, "") + `\n\n${headingLine}\n${line}\n` + data.slice(block);
-      return data.replace(/\s*$/, "") + `\n\n${headingLine}\n${line}\n`;
-    }
+    if (!m) return this.appendBeforeLexisBlock(data, `${headingLine}\n${line}`);
     const headEnd = m.index + m[0].length;
     const after = data.slice(headEnd);
     let stop = after.search(/\n#{1,6}[ \t]|\n```/);
@@ -1162,7 +1313,81 @@ module.exports = class LexisPlugin extends Plugin {
     const tailFixed = /^\n*```/.test(tail) ? "\n" + tail.replace(/^\n+/, "") : tail;
     return data.slice(0, headEnd) + newSection + tailFixed;
   }
-  insertExampleLine(data, line) { return this.insertUnderHeading(data, "#### 出处", line, ["例句"]); }
+  appendBeforeLexisBlock(data, blockText) {
+    const content = String(data || "");
+    const match = /(^|\n)```lexis\b/.exec(content);
+    const at = match ? match.index + match[1].length : -1;
+    if (at >= 0) {
+      const before = content.slice(0, at).replace(/\s*$/, "");
+      const after = content.slice(at).replace(/^\n+/, "");
+      return before + (before ? "\n\n" : "") + blockText.trim() + "\n\n" + after;
+    }
+    const before = content.replace(/\s*$/, "");
+    return before + (before ? "\n\n" : "") + blockText.trim() + "\n";
+  }
+  renderTemplate(template, vars) {
+    let out = String(template || "");
+    for (const [key, value] of Object.entries(vars || {})) {
+      out = out.replace(new RegExp(`\\{\\{${escapeRe(key)}\\}\\}`, "g"), String(value ?? ""));
+    }
+    return out;
+  }
+  occurrenceTemplateDefinition() {
+    const raw = String(this.settings.occurrenceTemplate ?? DEFAULT_SETTINGS.occurrenceTemplate).trim();
+    if (!raw) return null;
+    const lines = raw.replace(/\r\n/g, "\n").split("\n");
+    const first = (lines[0] || "").trim();
+    if (/^#{1,6}[ \t]+/.test(first)) return { heading: first, item: lines.slice(1).join("\n").trim() };
+    return { heading: "", item: raw };
+  }
+  occurrenceHeadingText() {
+    const heading = this.occurrenceTemplateDefinition()?.heading || "";
+    return heading.replace(/^#{1,6}[ \t]*/, "").trim();
+  }
+  occurrenceSentenceFromSection(section) {
+    const item = this.occurrenceTemplateDefinition()?.item || "";
+    const templateLine = item.split("\n").find((line) => line.includes("{{sentence}}"));
+    if (templateLine) {
+      const tokenRe = /\{\{(word|sentence|source|sourceSuffix|date)\}\}/g;
+      const source = "(?:\\[\\[[^\\]]+\\]\\]|\\[[^\\]]+\\]\\([^\\n]+\\)|[^\\n]*?)";
+      const sourceSuffix = `(?:\\s*——\\s*${source})?`;
+      let pattern = "^\\s*", last = 0, match;
+      const literal = (text) => escapeRe(text).replace(/\s+/g, "\\s+");
+      while ((match = tokenRe.exec(templateLine))) {
+        pattern += literal(templateLine.slice(last, match.index));
+        if (match[1] === "sentence") pattern += "(.+?)";
+        else if (match[1] === "source") pattern += source;
+        else if (match[1] === "sourceSuffix") pattern += sourceSuffix;
+        else pattern += "[^\\n]*?";
+        last = match.index + match[0].length;
+      }
+      pattern += literal(templateLine.slice(last)) + "\\s*$";
+      const re = new RegExp(pattern);
+      for (const line of String(section || "").split("\n")) {
+        const found = re.exec(line);
+        if (found?.[1]) return found[1].trim();
+      }
+    }
+    // 旧笔记兼容：固定引用行 + 行尾来源链接。
+    const line = String(section || "").split("\n").map((s) => s.trim()).find((s) => s.startsWith(">"));
+    if (!line) return "";
+    return line.replace(/^>\s*/, "")
+      .replace(/\s*——\s*(?:\[\[[^\]]*\]\]|\[[^\]]*\]\([^\n]+\))\s*$/, "")
+      .trim();
+  }
+  insertOccurrence(data, vars) {
+    const definition = this.occurrenceTemplateDefinition();
+    if (!definition) return data;
+    const source = String(vars?.source || "");
+    const values = { ...vars, source, sourceSuffix: source ? ` —— ${source}` : "" };
+    const item = this.renderTemplate(definition.item, values).trim();
+    if (!item) return data;
+    if (definition.heading) {
+      const heading = this.renderTemplate(definition.heading, values).trim();
+      return this.insertUnderHeading(data, heading, item, ["例句", "出处"]);
+    }
+    return this.appendBeforeLexisBlock(data, item);
+  }
   // 批注小节标题行:设置里可以填完整一行(级别+文字,比如 "## 引用"),也可以只填文字(默认按 #### 级别);留空用默认 "#### 批注"
   annotationHeadingLine() {
     const v = (this.settings.annotationHeading || "").trim();
@@ -1329,6 +1554,14 @@ module.exports = class LexisPlugin extends Plugin {
     const vault = encodeURIComponent(this.app.vault.getName());
     return `<a class="lexis-web-ilink" href="obsidian://open?vault=${vault}&file=${encodeURIComponent(path)}">${escHtml(base)}</a>`;
   }
+  occurrenceLabel(occurrence) {
+    if (!occurrence?.file) return "";
+    return occurrence.page ? `${occurrence.file.basename} p.${occurrence.page}` : occurrence.file.basename;
+  }
+  occurrenceLinkPath(occurrence) {
+    if (!occurrence?.file) return "";
+    return occurrence.file.path + (occurrence.page ? `#page=${occurrence.page}` : "");
+  }
   async renderInlineEntryHtml(entry) {
     const div = document.createElement("div");
     const comp = new Component(); comp.load();
@@ -1467,7 +1700,7 @@ module.exports = class LexisPlugin extends Plugin {
           if (finishRenderMath) { try { await finishRenderMath(); } catch (_e) {} }
           for (const { d, o } of rendered) {
             this.boldMatchesInPlace(d, display);
-            html += `<div class="lexis-web-occ">${d.innerHTML} <span class="lexis-web-occ-src">— ${olink(o.file.path, o.file.basename)}</span></div>`;
+            html += `<div class="lexis-web-occ">${d.innerHTML} <span class="lexis-web-occ-src">— ${olink(this.occurrenceLinkPath(o), this.occurrenceLabel(o))}</span></div>`;
           }
           comp.unload();
         }
@@ -1485,6 +1718,8 @@ module.exports = class LexisPlugin extends Plugin {
   maybeRebuild(file, oldPath) {
     const p = (file && file.path) || "";
     this._occCache.clear();
+    if (file?.extension === "pdf") this.occurrenceSearch?.invalidatePdf(file.path);
+    if (oldPath && /\.pdf$/i.test(oldPath)) this.occurrenceSearch?.invalidatePdf(oldPath);
     if (oldPath && p && this.settings.reviewHistory?.[oldPath]) {
       this.settings.reviewHistory[p] = this.settings.reviewHistory[oldPath];
       delete this.settings.reviewHistory[oldPath];
@@ -1800,6 +2035,10 @@ module.exports = class LexisPlugin extends Plugin {
     this.app.workspace.iterateAllLeaves((leaf) => {
       const pm = leaf?.view?.previewMode;
       if (pm && typeof pm.rerender === "function") pm.rerender(true);
+      const cm = leaf?.view?.editor?.cm;
+      if (this._liveRefreshEffect && cm?.dispatch) {
+        try { cm.dispatch({ effects: this._liveRefreshEffect.of(null) }); } catch (_e) {}
+      }
     });
     if (this.liveAvailable) this.app.workspace.updateOptions();
     this.rescanPdfLayers();
@@ -2289,13 +2528,18 @@ module.exports = class LexisPlugin extends Plugin {
   setupLiveExtension() {
     try {
       const { ViewPlugin, Decoration } = require("@codemirror/view");
-      const { RangeSetBuilder } = require("@codemirror/state");
+      const { RangeSetBuilder, StateEffect } = require("@codemirror/state");
       const editorInfoField = obsidian.editorInfoField;
       const plugin = this;
+      const refreshEffect = StateEffect.define();
+      this._liveRefreshEffect = refreshEffect;
       const ext = ViewPlugin.fromClass(
         class {
           constructor(view) { this.decorations = this.build(view); }
-          update(u) { if (u.docChanged || u.viewportChanged) this.decorations = this.build(u.view); }
+          update(u) {
+            const indexChanged = u.transactions.some((tr) => tr.effects.some((effect) => effect.is(refreshEffect)));
+            if (u.docChanged || u.viewportChanged || indexChanged) this.decorations = this.build(u.view);
+          }
           build(view) {
             const builder = new RangeSetBuilder();
             if (!plugin.settings.enableHighlight || !plugin.settings.enableLivePreview || !plugin._pattern) return builder.finish();
@@ -2407,18 +2651,8 @@ module.exports = class LexisPlugin extends Plugin {
     const key = word.toLowerCase();
     if (this._occCache.has(key)) return this._occCache.get(key);
     const limit = this.settings.occurrenceLimit || 6;
-    const re = new RegExp(boundedSource(word), "i");
     const scope = this.parseFolders(this.settings.occurrenceFolders);
-    const files = this.app.vault.getMarkdownFiles().filter((f) => !this.inVocabFolder(f.path) && !this.inlineSourcePaths?.has(f.path) && this.inScope(f.path, scope));
-    const results = [];
-    for (const f of files) {
-      if (results.length >= limit) break;
-      let content;
-      try { content = await this.app.vault.cachedRead(f); } catch (_e) { continue; }
-      const idx = content.search(re);
-      if (idx < 0) continue;
-      results.push({ file: f, sentence: this.extractSentence(content, idx) });
-    }
+    const results = await this.occurrenceSearch.find(word, { limit, scope, includePdf: this.settings.includePdfOccurrences !== false });
     this._occCache.set(key, results);
     return results;
   }
@@ -2522,24 +2756,32 @@ module.exports = class LexisPlugin extends Plugin {
   async getCuratedSourcePaths(wordFile) {
     try {
       const raw = await this.app.vault.cachedRead(wordFile);
-      const m = /####\s*(?:例句|出处)([\s\S]*?)(?=\n#{1,6}\s|\n```|$)/.exec(raw);
+      const names = [this.occurrenceHeadingText(), "例句", "出处"].filter(Boolean).map(escapeRe).join("|");
+      const m = new RegExp("#{1,6}\\s*(?:" + names + ")([^\\n]*\\n[\\s\\S]*?)(?=\\n#{1,6}\\s|\\n```|$)").exec(raw);
       if (!m) return new Set();
       const set = new Set();
       const re = /\[\[([^\]|#]+)(?:\|[^\]]*)?\]\]/g;
       let mm;
-      while ((mm = re.exec(m[1]))) { const base = mm[1].trim().split("/").pop().replace(/\.md$/, ""); set.add(base.toLowerCase()); }
+      while ((mm = re.exec(m[1]))) {
+        const base = mm[1].trim().split("/").pop().replace(/\.(?:md|pdf)$/i, "");
+        set.add(base.toLowerCase());
+      }
       return set;
     } catch (_e) { return new Set(); }
   }
-  async addExampleToWord(wordFile, sentence, sourceFile) {
+  sourceLinkTarget(file) { return file?.extension === "md" ? file.basename : file?.name || ""; }
+  async addExampleToWord(wordFile, sentence, sourceFile, page) {
     if (sourceFile) {
       const curated = await this.getCuratedSourcePaths(wordFile);
       if (curated.has(sourceFile.basename.toLowerCase())) { new Notice(this.t("notice.occurrenceExists")); return true; }
     }
-    const link = sourceFile ? ` —— [[${sourceFile.basename}]]` : "";
-    const line = `> ${(sentence || "").trim()}${link}`;
-    // 检测同时认「例句」(旧笔记留下的标题)和「出处」(新命名),但新建小节永远用「出处」
-    const apply = (data) => /####\s*(?:例句|出处)/.test(data) ? data.replace(/(####\s*(?:例句|出处)[^\n]*\n)/, `$1${line}\n`) : data.replace(/\s*$/, "") + `\n\n#### 出处\n${line}\n`;
+    const occurrence = {
+      word: wordFile.basename,
+      sentence: (sentence || "").trim(),
+      source: sourceFile ? (page ? `[[${this.sourceLinkTarget(sourceFile)}#page=${page}|${sourceFile.basename} p.${page}]]` : `[[${this.sourceLinkTarget(sourceFile)}]]`) : "",
+      date: todayStr(),
+    };
+    const apply = (data) => this.insertOccurrence(data, occurrence);
     try {
       if (this.app.vault.process) await this.app.vault.process(wordFile, apply);
       else { const d = await this.app.vault.read(wordFile); await this.app.vault.modify(wordFile, apply(d)); }
@@ -2701,11 +2943,11 @@ module.exports = class LexisPlugin extends Plugin {
   async getFirstExample(file) {
     try {
       const raw = await this.app.vault.cachedRead(file);
-      const m = /####\s*(?:例句|出处)([\s\S]*?)(?=\n#{1,6}\s|\n```|$)/.exec(raw);
+      if (!this.occurrenceHeadingText()) return this.occurrenceSentenceFromSection(raw);
+      const names = [this.occurrenceHeadingText(), "例句", "出处"].filter(Boolean).map(escapeRe).join("|");
+      const m = new RegExp("#{1,6}\\s*(?:" + names + ")([^\\n]*\\n[\\s\\S]*?)(?=\\n#{1,6}\\s|\\n```|$)").exec(raw);
       if (!m) return "";
-      const line = m[1].split("\n").map((s) => s.trim()).find((s) => s.startsWith(">"));
-      if (!line) return "";
-      return line.replace(/^>\s*/, "").replace(/\s*——\s*\[\[[^\]]*\]\].*$/, "").trim();
+      return this.occurrenceSentenceFromSection(m[1]);
     } catch (_e) { return ""; }
   }
   buildCloze(sentence, word) { return sentence.replace(new RegExp(boundedSource(word), "ig"), "______"); }
@@ -2734,6 +2976,10 @@ module.exports = class LexisPlugin extends Plugin {
     options = options || {};
     const today = todayStr();
     let files = this.app.vault.getMarkdownFiles().filter((f) => { if (!this.inVocabFolder(f.path)) return false; const lc = this.readLifecycle(f); return !lc.archived && !lc.retired; });
+    if (options.folder) {
+      const folder = this.normalizeFolder(options.folder);
+      files = files.filter((f) => this.inScope(f.path, [folder]));
+    }
     if (options.tag) { const tl = options.tag.toLowerCase(); files = files.filter((f) => this.getTags(f).has(tl)); }
     const due = [], fresh = [];
     for (const f of files) { const card = this.readCard(f); if (card.s == null || isNaN(Number(card.s))) fresh.push({ file: f, card }); else if (!card.due || String(card.due).slice(0, 10) <= today) due.push({ file: f, card }); }
@@ -2803,8 +3049,8 @@ module.exports = class LexisPlugin extends Plugin {
     if (f instanceof TFile) { try { return await this.app.vault.read(f); } catch (_e) {} }
     return null;
   }
-  // 无模板时的空白骨架:只留最简 frontmatter(供标签/别名/复习数据),正文空白,不硬塞小节标题
-  minimalSkeleton() { return "---\ntags:\n---\n\n"; }
+  // 无模板可选纯空白，或只放一个内置的出处面板；用户自己的模板始终优先。
+  minimalSkeleton() { return this.settings.emptyNotePreset === "occ" ? "```lexis\nocc\n```\n" : ""; }
   getSelectionSentence(editor) {
     try { const from = editor.getCursor("from"); const line = editor.getLine(from.line) || ""; return this.extractSentence(line, from.ch || 0); } catch (_e) { return ""; }
   }
@@ -2855,7 +3101,7 @@ module.exports = class LexisPlugin extends Plugin {
     try {
       await this.ensureFolder(folder);
       const tpl = await this.templateForFolder(folder);
-      let content = (tpl != null ? tpl : this.minimalSkeleton()).replace(/\{\{word\}\}/g, clean).replace(/\{\{date\}\}/g, todayStr());
+      let content = this.renderTemplate(tpl != null ? tpl : this.minimalSkeleton(), { word: clean, date: todayStr() });
       // 出处写进正文(而不是 frontmatter 属性),好看且笔记里直接可见
       if (sentence || srcFile) {
         // PDF 出处带上页码,链接可直接跳到那一页
@@ -2864,14 +3110,15 @@ module.exports = class LexisPlugin extends Plugin {
           const pg = this.currentPdfPage();
           if (pg) { sub = `#page=${pg}`; disp = `${srcFile.basename} p.${pg}`; }
         }
-        const link = srcFile ? (sub ? ` —— [[${srcFile.basename}${sub}|${disp}]]` : ` —— [[${srcFile.basename}]]`) : "";
-        content = content.replace(/\s*$/, "") + `\n\n#### 出处\n> ${sentence || ""}${link}\n`;
+        const sourceTarget = this.sourceLinkTarget(srcFile);
+        const source = srcFile ? (sub ? `[[${sourceTarget}${sub}|${disp}]]` : `[[${sourceTarget}]]`) : "";
+        content = this.insertOccurrence(content, { word: clean, sentence: sentence || "", source, date: todayStr() });
       }
       const file = await this.app.vault.create(targetPath, content);
       this.recordEncounter(file, "add");
       // 划词添加只写入并留在原文；"添加"不再暗含一次页面跳转。
       new Notice(this.t(fromPdf ? "notice.addedPdf" : "notice.created", { word: fileName }));
-      this.rebuildIndex(false);
+      await this.rebuildIndex(false);
     } catch (err) { new Notice(this.t("notice.createFailed", { error: err?.message || err })); }
   }
   // 遗忘曲线 SVG(FSRS 衰减)
@@ -2931,10 +3178,10 @@ module.exports = class LexisPlugin extends Plugin {
         add.addEventListener("click", async () => {
           if (add.dataset.done) return;
           add.dataset.done = "1";
-          if (await this.addExampleToWord(file, o.sentence, o.file)) { add.setText(" ✓"); add.style.cursor = "default"; add.removeAttribute("title"); } else delete add.dataset.done;
+          if (await this.addExampleToWord(file, o.sentence, o.file, o.page)) { add.setText(" ✓"); add.style.cursor = "default"; add.removeAttribute("title"); } else delete add.dataset.done;
         });
-        const s2 = dd.createSpan({ cls: "lexis-occ-src", text: " ↗ " + o.file.basename });
-        s2.addEventListener("click", () => this.openOccurrence(o.file, word));
+        const s2 = dd.createSpan({ cls: "lexis-occ-src", text: " ↗ " + this.occurrenceLabel(o) });
+        s2.addEventListener("click", () => this.openOccurrence(o.file, word, o.page));
       }
     }
     if (el.children.length === countBefore) el.remove();
@@ -3121,10 +3368,10 @@ module.exports = class LexisPlugin extends Plugin {
     } catch (_e) {}
     this.removePopover();
   }
-  async openOccurrence(file, word) {
+  async openOccurrence(file, word, page) {
     let leaf = this._occLeaf;
     if (!leaf || !leaf.parent) { leaf = this.app.workspace.getLeaf("tab"); this._occLeaf = leaf; }
-    await leaf.openFile(file);
+    await leaf.openFile(file, page ? { eState: { subpath: `#page=${page}` } } : undefined);
     this.app.workspace.revealLeaf(leaf);
     try {
       const ed = leaf.view && leaf.view.editor;
@@ -3398,10 +3645,10 @@ module.exports = class LexisPlugin extends Plugin {
             add.addEventListener("click", async () => {
               if (add.dataset.done) return;
               add.dataset.done = "1";
-              if (await this.addExampleToWord(entry.file, o.sentence, o.file)) { add.setText(" ✓"); add.style.cursor = "default"; add.removeAttribute("title"); } else delete add.dataset.done;
+              if (await this.addExampleToWord(entry.file, o.sentence, o.file, o.page)) { add.setText(" ✓"); add.style.cursor = "default"; add.removeAttribute("title"); } else delete add.dataset.done;
             });
-            const src = d.createSpan({ cls: "lexis-occ-src", text: " ↗ " + o.file.basename });
-            src.addEventListener("click", () => this.openOccurrence(o.file, entry.display));
+            const src = d.createSpan({ cls: "lexis-occ-src", text: " ↗ " + this.occurrenceLabel(o) });
+            src.addEventListener("click", () => this.openOccurrence(o.file, entry.display, o.page));
           }
           this.positionPopover(pop, spanEl);
         });
@@ -3516,11 +3763,11 @@ class LexisHomeView extends ItemView {
     this.plugin.renderHeatmap(c.createDiv({ cls: "lexis-hm-wrap" }));
 
     c.createEl("h4", { text: this.plugin.t("home.start") });
-    const tags = this.plugin.collectVocabTags();
-    let selTag = "", selOrder = "due";
-    new Setting(c).setName(this.plugin.t("home.collection")).addDropdown((dd) => { dd.addOption("", this.plugin.t("common.all")); for (const t of tags) dd.addOption(t, "#" + t); dd.setValue(selTag); dd.onChange((v) => { selTag = v; }); });
+    const folders = this.plugin.dictFolders();
+    let selFolder = "", selOrder = "due";
+    new Setting(c).setName(this.plugin.t("home.reviewFolder")).addDropdown((dd) => { dd.addOption("", this.plugin.t("common.all")); for (const folder of folders) dd.addOption(folder, folder); dd.setValue(selFolder); dd.onChange((v) => { selFolder = v; }); });
     new Setting(c).setName(this.plugin.t("home.order")).addDropdown((dd) => { dd.addOption("due", this.plugin.t("home.dueFirst")).addOption("frequency", this.plugin.t("home.frequency")).addOption("random", this.plugin.t("home.random")).setValue(selOrder); dd.onChange((v) => { selOrder = v; }); });
-    new Setting(c).addButton((b) => b.setButtonText(`▶ ${this.plugin.t("home.start")}`).setCta().onClick(() => this.plugin.openReview({ tag: selTag, order: selOrder })))
+    new Setting(c).addButton((b) => b.setButtonText(`▶ ${this.plugin.t("home.start")}`).setCta().onClick(() => this.plugin.openReview({ folder: selFolder, order: selOrder })))
       .addExtraButton((b) => b.setIcon("refresh-cw").setTooltip(this.plugin.t("common.refresh")).onClick(() => this.render()));
 
     this.renderRetireCandidates(c);
@@ -3774,6 +4021,47 @@ class LexisSettingTab extends PluginSettingTab {
       .addToggle((t) => t.setValue(this.plugin.settings.fadeByMemory).onChange(async (v) => { this.plugin.settings.fadeByMemory = v; await save(); refresh(); }));
     new Setting(hlSection).setName(t("settings.fadeFloor"))
       .addSlider((s) => s.setLimits(0, 0.9, 0.05).setValue(this.plugin.settings.fadeFloor).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.fadeFloor = v; await save(); refresh(); }));
+    const excludeSetting = new Setting(hlSection).setName(t("settings.excludeTags")).setDesc(t("settings.excludeTagsDesc"));
+    excludeSetting.settingEl.addClass("lexis-tags-setting");
+    const excludeEditor = excludeSetting.controlEl.createDiv({ cls: "lexis-tag-editor" });
+    const excludeChips = excludeEditor.createDiv({ cls: "lexis-tag-editor-chips" });
+    const excludeAdd = excludeEditor.createDiv({ cls: "lexis-tag-editor-add" });
+    const excludeInput = new obsidian.TextComponent(excludeAdd).setPlaceholder(t("settings.addExcludedTag"));
+    const excludedTags = () => [...new Set(this.plugin.parseTags(this.plugin.settings.excludeTags))];
+    const saveExcludedTags = async (tags) => {
+      this.plugin.settings.excludeTags = tags.join(" ");
+      await save();
+      await this.plugin.rebuildIndex(false);
+    };
+    const renderExcludedTags = () => {
+      excludeChips.empty();
+      for (const tag of excludedTags()) {
+        const chip = excludeChips.createEl("button", { cls: "lexis-tag-editor-chip", attr: { type: "button", title: t("settings.removeExcludedTag", { tag }) } });
+        chip.createSpan({ text: `#${tag}` });
+        chip.createSpan({ cls: "lexis-tag-editor-remove", text: "×" });
+        chip.addEventListener("click", async () => { await saveExcludedTags(excludedTags().filter((value) => value !== tag)); renderExcludedTags(); });
+      }
+    };
+    const addExcludedTags = async (raw) => {
+      const incoming = this.plugin.parseTags(raw);
+      if (!incoming.length) return;
+      await saveExcludedTags([...new Set([...excludedTags(), ...incoming])]);
+      excludeInput.setValue("");
+      renderExcludedTags();
+      excludeInput.inputEl.focus();
+    };
+    excludeInput.inputEl.addEventListener("keydown", (event) => {
+      if (["Enter", ",", "，", ";", "；"].includes(event.key)) {
+        event.preventDefault();
+        addExcludedTags(excludeInput.inputEl.value);
+      } else if (event.key === "Backspace" && !excludeInput.inputEl.value) {
+        const tags = excludedTags();
+        if (tags.length) { tags.pop(); saveExcludedTags(tags).then(renderExcludedTags); }
+      }
+    });
+    new obsidian.ExtraButtonComponent(excludeAdd).setIcon("plus").setTooltip(t("settings.addExcludedTag")).onClick(() => addExcludedTags(excludeInput.inputEl.value));
+    if (hasSuggest) new PathSuggest(this.app, excludeInput.inputEl, () => allTags.filter((tag) => !excludedTags().includes(tag)), (value) => addExcludedTags(value));
+    renderExcludedTags();
 
     const tagColorSection = this.section(containerEl, t("settings.tagColors"));
     const rulesWrap = tagColorSection.createDiv();
@@ -3817,11 +4105,19 @@ class LexisSettingTab extends PluginSettingTab {
     new Setting(cardSection).setName(t("settings.showRelated")).addToggle((toggle) => toggle.setValue(this.plugin.settings.showRelated).onChange(async (v) => { this.plugin.settings.showRelated = v; await save(); }));
     new Setting(cardSection).setName(t("settings.showOccurrences")).setDesc(t("settings.showOccurrencesDesc"))
       .addToggle((t) => t.setValue(this.plugin.settings.showOccurrences).onChange(async (v) => { this.plugin.settings.showOccurrences = v; await save(); }));
+    new Setting(cardSection).setName(t("settings.pdfOccurrences")).setDesc(t("settings.pdfOccurrencesDesc"))
+      .addToggle((toggle) => toggle.setValue(this.plugin.settings.includePdfOccurrences !== false).onChange(async (v) => { this.plugin.settings.includePdfOccurrences = v; this.plugin._occCache.clear(); await save(); }));
     new Setting(cardSection).setName(t("settings.occurrenceLimit")).addSlider((s) => s.setLimits(1, 15, 1).setValue(this.plugin.settings.occurrenceLimit).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.occurrenceLimit = v; await save(); this.plugin._occCache.clear(); }));
     new Setting(cardSection).setName(t("settings.occurrenceScope")).setDesc(t("settings.occurrenceScopeDesc"))
       .addText((input) => input.setPlaceholder(t("settings.wholeVault")).setValue(this.plugin.settings.occurrenceFolders).onChange(async (v) => { this.plugin.settings.occurrenceFolders = v.trim(); await save(); this.plugin._occCache.clear(); }));
 
     const addSection = this.section(containerEl, t("settings.selectionAdd"));
+    new Setting(addSection).setName(t("settings.emptyNotePreset")).setDesc(t("settings.emptyNotePresetDesc"))
+      .addDropdown((dropdown) => dropdown
+        .addOption("blank", t("settings.emptyNoteBlank"))
+        .addOption("occ", t("settings.emptyNoteOccurrences"))
+        .setValue(this.plugin.settings.emptyNotePreset || "blank")
+        .onChange(async (value) => { this.plugin.settings.emptyNotePreset = value === "occ" ? "occ" : "blank"; await save(); }));
     new Setting(addSection).setName(t("settings.defaultTemplate")).setDesc(t("settings.defaultTemplateDesc"))
       .addText((input) => {
         input.setPlaceholder("template/word.md").setValue(this.plugin.settings.newWordTemplate);
@@ -3829,6 +4125,14 @@ class LexisSettingTab extends PluginSettingTab {
         input.onChange(onTpl);
         if (hasSuggest) new PathSuggest(this.app, input.inputEl, () => mdFiles, (v) => { input.setValue(v); onTpl(v); });
       });
+    const occurrenceSetting = new Setting(addSection).setName(t("settings.occurrenceTemplate")).setDesc(t("settings.occurrenceTemplateDesc"))
+      .addTextArea((input) => input
+        .setPlaceholder(DEFAULT_SETTINGS.occurrenceTemplate)
+        .setValue(this.plugin.settings.occurrenceTemplate ?? DEFAULT_SETTINGS.occurrenceTemplate)
+        .onChange(async (v) => { this.plugin.settings.occurrenceTemplate = v; await save(); }));
+    occurrenceSetting.settingEl.addClass("lexis-template-setting");
+    const occurrenceTextarea = occurrenceSetting.controlEl.querySelector("textarea");
+    if (occurrenceTextarea) occurrenceTextarea.rows = 4;
 
     const fsrsSection = this.section(containerEl, t("settings.review"));
     new Setting(fsrsSection).setName(t("settings.retention")).setDesc(t("settings.retentionDesc"))
@@ -3837,6 +4141,12 @@ class LexisSettingTab extends PluginSettingTab {
     new Setting(fsrsSection).setName(t("settings.sessionLimit")).addSlider((s) => s.setLimits(10, 500, 10).setValue(this.plugin.settings.maxReviewsPerSession).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.maxReviewsPerSession = v; await save(); }));
     new Setting(fsrsSection).setName(t("settings.cardFront")).setDesc(t("settings.cardFrontDesc"))
       .addDropdown((dd) => dd.addOption("note", t("settings.noteCard")).addOption("cloze", t("settings.clozeCard")).setValue(this.plugin.settings.cardFront).onChange(async (v) => { this.plugin.settings.cardFront = v; await save(); }));
+    new Setting(fsrsSection).setName(t("settings.showReviewMetadata")).setDesc(t("settings.showReviewMetadataDesc"))
+      .addToggle((toggle) => toggle.setValue(!!this.plugin.settings.showReviewMetadata).onChange(async (value) => {
+        this.plugin.settings.showReviewMetadata = value;
+        this.plugin.applyReviewMetadataVisibility();
+        await save();
+      }));
     new Setting(fsrsSection).setName(t("settings.ratingOffset")).setDesc(t("settings.ratingOffsetDesc"))
       .addSlider((s) => s.setLimits(0, 200, 5).setValue(this.plugin.settings.reviewBottomSpace).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.reviewBottomSpace = v; await save(); }));
     new Setting(fsrsSection).setName(t("home.start")).addButton((b) => b.setButtonText(t("settings.openReview")).setCta().onClick(() => this.plugin.openReview()));
@@ -3848,12 +4158,6 @@ class LexisSettingTab extends PluginSettingTab {
       .addSlider((s) => s.setLimits(14, 365, 1).setValue(this.plugin.settings.retireCandidateDays).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.retireCandidateDays = v; await save(); }));
 
     const bridgeSection = this.section(containerEl, t("settings.bridge"), { desc: t("settings.bridgeDesc") });
-    new Setting(bridgeSection).setName(t("settings.excludeTags")).setDesc(t("settings.excludeTagsDesc"))
-      .addText((t) => {
-        t.setPlaceholder("已掌握 暂缓").setValue(this.plugin.settings.excludeTags);
-        const apply = async (v) => { this.plugin.settings.excludeTags = v; await save(); this.plugin.rebuildIndex(false); };
-        t.onChange(apply); tagSuggest(t, apply);
-      });
     new Setting(bridgeSection).setName(t("settings.annotationHeading")).setDesc(t("settings.annotationHeadingDesc"))
       .addText((t) => t.setPlaceholder("#### 批注").setValue(this.plugin.settings.annotationHeading).onChange(async (v) => { this.plugin.settings.annotationHeading = v; await save(); }));
     new Setting(bridgeSection).setName(t("settings.enableBridge"))

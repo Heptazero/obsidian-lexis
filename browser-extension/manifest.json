@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Lexis Web",
-  "version": "1.0.25",
+  "version": "1.0.26",
   "description": "Highlight your Obsidian Lexis entries on the web, open notes on hover, and send selections back over a local-only bridge.",
   "permissions": ["storage"],
   "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
