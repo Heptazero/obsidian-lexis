@@ -69,7 +69,7 @@ Lexis 会高亮已收录的词，悬停显示笔记。支持：
 3. 划词加入词典；Lexis 可以把所在句子一起保存为出处。
 4. 打开 Lexis 主页，复习到期词条或处理淘汰候选。
 
-设置页可切换中文和 English。翻译按消息键集中在 `src/i18n.js`，每句中英文挨在一起；新增语言不需要在界面代码中到处找文字，也不依赖 AI 记住旧翻译的位置。
+设置页可切换中文和 English。翻译按消息键集中在 `src/i18n.ts`，每句中英文挨在一起；新增语言不需要在界面代码中到处找文字，也不依赖 AI 记住旧翻译的位置。
 
 ## 笔记代码块
 
@@ -116,5 +116,7 @@ Lexis 不承诺读得更快，也不承诺不费力地学习。
 - Obsidian：`src/`，构建为 `main.js`
 - 浏览器：`browser-extension/`
 - Zotero：`zotero-extension/`
+
+Obsidian 源码使用 TypeScript。首次运行 `npm install`，之后可用 `npm run typecheck`、`npm run build` 和 `npm run dev`。发布包仍只有移动端可用的 `main.js`、`manifest.json`、`styles.css`。
 
 问题与贡献请提交到 [GitHub 仓库](https://github.com/Heptazero/obsidian-lexis)。

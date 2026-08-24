@@ -1,11 +1,13 @@
 "use strict";
 
+import type { LexisRuntime } from "./types";
+
 const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolder, DEFAULT_SETTINGS, cssColorToHex, addAppearanceButton, createReorderController, moveItem, LEXIS_HOME_VIEW, LEXIS_REVIEW_VIEW }) => {
   // 输入时模糊匹配建议。AbstractInputSuggest 在 Obsidian 1.0+ 运行时可用;
   // 缺失时 `|| class {}` 避免 extends undefined 报错,且调用处会跳过实例化。
   // opts.multi=true 时按最后一个分隔符后的"活动 token"匹配,选中后追加(用于逗号/空格分隔的标签/属性多值字段)。
   class PathSuggest extends (obsidian.AbstractInputSuggest || class {}) {
-    constructor(app, inputEl, getItems, onPick, opts) {
+    constructor(app, inputEl, getItems, onPick, opts: { multi?: boolean; sep?: string } = {}) {
       super(app, inputEl);
       this.getItems = getItems;
       this.onPick = onPick;
@@ -51,7 +53,9 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
   }
 
   return class LexisSettingTab extends PluginSettingTab {
-    constructor(app, plugin) { super(app, plugin); this.plugin = plugin; }
+    [key: string]: any;
+    declare plugin: LexisRuntime;
+    constructor(app, plugin: LexisRuntime) { super(app, plugin as any); this.plugin = plugin; }
 
     section(containerEl, title, { open = false, desc = "" } = {}) {
       const details = containerEl.createEl("details", { cls: "lexis-settings-section" });
@@ -65,7 +69,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
     display() {
       const { containerEl } = this;
       containerEl.empty();
-      const t = (key, vars) => this.plugin.t(key, vars);
+      const t = (key: string, vars?: Record<string, unknown>) => this.plugin.t(key, vars);
       const accentHex = cssColorToHex(getComputedStyle(document.body).getPropertyValue("--text-accent"));
       const save = () => this.plugin.saveSettings();
       const refresh = () => this.plugin.refreshAllViews();
@@ -104,7 +108,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
         return [...s].filter(Boolean).sort();
       })();
       const allProps = (() => {
-        try { const infos = this.app.metadataCache.getAllPropertyInfos ? this.app.metadataCache.getAllPropertyInfos() : null; if (infos) return Object.values(infos).map((x) => x && x.name).filter(Boolean).sort(); } catch (_e) {}
+        try { const infos = this.app.metadataCache.getAllPropertyInfos ? this.app.metadataCache.getAllPropertyInfos() : null; if (infos) return Object.values(infos).map((x: any) => x?.name).filter(Boolean).sort(); } catch (_e) {}
         return [];
       })();
       const tagSuggest = (comp, apply) => { if (hasSuggest) new PathSuggest(this.app, comp.inputEl, () => allTags, (v) => { comp.setValue(v); apply(v); }, { multi: true }); };
@@ -541,4 +545,4 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
   }
 };
 
-module.exports = { createSettingsTab };
+export { createSettingsTab };

@@ -1,6 +1,6 @@
 "use strict";
 
-function moveItem(items, from, to) {
+function moveItem<T>(items: Iterable<T> | ArrayLike<T>, from: number, to: number): T[] {
   const next = Array.from(items || []);
   if (from === to || from < 0 || to < 0 || from >= next.length || to >= next.length) return next;
   const [item] = next.splice(from, 1);
@@ -8,21 +8,29 @@ function moveItem(items, from, to) {
   return next;
 }
 
-function createReorderController({ container, onMove, setIcon, label = "Reorder", longPressMs = 260 }) {
+interface ReorderOptions {
+  container: HTMLElement;
+  onMove: (from: number, to: number) => void | Promise<void>;
+  setIcon?: (element: HTMLElement, icon: string) => void;
+  label?: string;
+  longPressMs?: number;
+}
+
+function createReorderController({ container, onMove, setIcon, label = "Reorder", longPressMs = 260 }: ReorderOptions) {
   let from = -1;
   let active = false;
   let timer = 0;
   let pointerId = null;
-  let activeHandle = null;
-  let draggedRow = null;
-  let placeholder = null;
+  let activeHandle: HTMLElement | null = null;
+  let draggedRow: HTMLElement | null = null;
+  let placeholder: HTMLElement | null = null;
   let savedStyle = null;
   let offsetX = 0;
   let offsetY = 0;
   let pointerX = 0;
   let pointerY = 0;
 
-  const rows = () => Array.from(container.children).filter((el) => el.classList.contains("lexis-sortable-item"));
+  const rows = () => Array.from(container.children).filter((el): el is HTMLElement => el instanceof HTMLElement && el.classList.contains("lexis-sortable-item"));
   const candidates = () => rows().filter((row) => row !== draggedRow);
   const restoreRow = () => {
     if (!draggedRow) return;
@@ -92,7 +100,7 @@ function createReorderController({ container, onMove, setIcon, label = "Reorder"
     const start = from;
     let target = start;
     if (active && placeholder && draggedRow) {
-      const order = Array.from(container.children).filter((el) => el === placeholder || (el.classList.contains("lexis-sortable-item") && el !== draggedRow));
+      const order = Array.from(container.children).filter((el) => el === placeholder || (el instanceof HTMLElement && el.classList.contains("lexis-sortable-item") && el !== draggedRow));
       target = order.indexOf(placeholder);
       container.insertBefore(draggedRow, placeholder);
       placeholder.remove();
@@ -112,7 +120,7 @@ function createReorderController({ container, onMove, setIcon, label = "Reorder"
   };
 
   return {
-    attach(item, index, { handleParent = item } = {}) {
+    attach(item: HTMLElement, index: number, { handleParent = item }: { handleParent?: HTMLElement } = {}) {
       item.classList.add("lexis-sortable-item");
       handleParent.classList.add("lexis-sortable-row");
       item.dataset.lexisOrder = String(index);
@@ -191,4 +199,4 @@ function addAppearanceButton({ app, obsidian, parent, title, state, onChange, on
   return button;
 }
 
-module.exports = { addAppearanceButton, createReorderController, moveItem };
+export { addAppearanceButton, createReorderController, moveItem };

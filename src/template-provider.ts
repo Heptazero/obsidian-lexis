@@ -40,4 +40,4 @@ function createTemplateProvider({ app, TFile, getSettings, normalizeFolder, read
   return { create, lexisPathFor, readLexis, templaterTemplateFor };
 }
 
-module.exports = { createTemplateProvider };
+export { createTemplateProvider };

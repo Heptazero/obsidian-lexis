@@ -1,7 +1,15 @@
 "use strict";
 
-function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr, TFile, Notice, boundedSource, escapeRe, Component, renderLexisMarkdown, LexisAliasPicker, LexisRestoreModal }) {
+import * as obsidian from "obsidian";
+import type { InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats } from "./types";
+
+function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr, fmtDate, TFile, Notice, boundedSource, escapeRe, Component, renderLexisMarkdown, LexisAliasPicker, LexisRestoreModal }) {
   class ReaderUi {
+  [key: string]: any;
+  declare settings: LexisSettings;
+  declare index: Map<string, LexisEntry>;
+  declare stats: LexisStats;
+  declare inlineCategoryOccurrences: InlineCategoryOccurrence[];
   // 遗忘曲线 SVG(FSRS 衰减)
   buildCurveSVG(card) {
     return buildCurveSVG(card, {
@@ -116,7 +124,7 @@ function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr
   }
   // ---------- 划词添加药丸(普通笔记,阅读/编辑两种模式) ----------
   removeSelPill() { if (this._selPill) { this._selPill.remove(); this._selPill = null; } }
-  maybeShowSelPill(e, fromEpubIframe) {
+  maybeShowSelPill(e, fromEpubIframe = false) {
     if (!this.settings.selectionPill) return;
     const tgt = e && e.target;
     // 点到自己的 UI(药丸/悬浮卡/菜单)不处理,避免抢选区
@@ -197,7 +205,7 @@ function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr
     this.settings.lastSelectionFolder = value;
     await this.saveSettings();
   }
-  async addFromPill(text, folder, options) {
+  async addFromPill(text, folder, options = {}) {
     const view = this.app.workspace.getActiveViewOfType(obsidian.MarkdownView);
     const editor = (view && view.getMode && view.getMode() === "source" && view.editor) ? view.editor : null;
     this.removeSelPill();
@@ -341,7 +349,7 @@ function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr
   stripForPreview(content) {
     return content.replace(/^---\n[\s\S]*?\n---\n?/, "").replace(/```dataviewjs[\s\S]*?```/g, "").replace(/```dataview[\s\S]*?```/g, "").replace(/```lexis[\s\S]*?```/g, "").trim();
   }
-  async renderNoteInto(el, file, comp, keepLexis) {
+  async renderNoteInto(el, file, comp, keepLexis = false) {
     const raw = await this.app.vault.cachedRead(file);
     let stripped = raw.replace(/^---\n[\s\S]*?\n---\n?/, "").replace(/```dataviewjs[\s\S]*?```/g, "").replace(/```dataview[\s\S]*?```/g, "");
     if (!keepLexis) stripped = stripped.replace(/```lexis[\s\S]*?```/g, "");
@@ -565,9 +573,8 @@ function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr
     pop.style.height = isPreview ? `${height}px` : "";
   }
   }
-  const descriptors = Object.getOwnPropertyDescriptors(ReaderUi.prototype);
-  delete descriptors.constructor;
+  const { constructor: _constructor, ...descriptors } = Object.getOwnPropertyDescriptors(ReaderUi.prototype);
   return descriptors;
 }
 
-module.exports = { createReaderUi };
+export { createReaderUi };

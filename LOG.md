@@ -1,6 +1,15 @@
 # Lexis 开发日志
 
-自建的 Obsidian 单词学习插件。**纯 JS、无构建步骤**(像你库里的 transcript-helper),你随时能改、商店更新也不会覆盖,数据全部存在你自己的 `.md` 文件里。
+自建的 Obsidian 单词学习插件。源码使用 TypeScript，发布时由 esbuild 合并为单个 `main.js`；数据仍全部存在自己的 `.md` 文件里。
+
+## refactor: Obsidian 源码迁移到 TypeScript v1.15.1
+
+- `src/` 全部迁移为 `.ts`，新增 `LexisSettings`、`LexisEntry`、内联分类、桥接词条等核心类型。
+- 采用 Obsidian 官方常用的 `tsc + esbuild`：`npm run typecheck` 只检查，`npm run build` 生成根目录 `main.js`，`npm run dev` 持续监听。
+- 浏览器和 Zotero 源码暂不迁移；三端协议与发布目录不变。
+- TypeScript 发现并移除了两个旧拼接构建留下的隐式依赖：阅读器显式接收 `fmtDate`，PDF/EPUB 模块显式导入 Obsidian API。
+- 兼容旧构建命令 `node scripts/build-obsidian.js`，默认单次构建并退出。
+- 当前为渐进式严格检查：稳定业务数据严格建模；旧 UI、PDF.js、CodeMirror 与 Obsidian 未公开运行时边界暂时允许隐式类型，避免为了“全绿”堆防御代码。
 
 ---
 
@@ -19,7 +28,7 @@
 
 ## 技术选型 & 关键决策
 
-- **纯 JS 单文件 `main.js`**,`require("obsidian")`,不引入 TS/esbuild。理由:零工具链、你能直接读改、不被更新覆盖。代价:第三方库(如 `ts-fsrs`)不能直接 `import`,需要时再内联实现或单独 vendor 一个 js。
+- **最初技术选型（已废止）**：纯 JS 单文件 `main.js`，不引入 TS/esbuild。当时用于快速起步；源码拆成多个职责模块后，已改为 TypeScript + esbuild，发布产物仍是单个 `main.js`。
 - **数据存哪**:复习调度写进每个单词笔记的 **frontmatter**(`lexis-due / lexis-interval / ...`),不用 IndexedDB。这样数据可见、可备份、可被 dataview 查询,且跟 SR 思路一致。(对比:EME 把数据锁在 IndexedDB,这正是它没法用你笔记的原因。)
 - **高亮的已知风险**:阅读模式可用 `registerMarkdownPostProcessor`(纯 obsidian API,稳)。实时预览/源码模式需要 CodeMirror6 扩展(`@codemirror/view`),在无构建插件里能否 `require` 待验证。Stage 1 先做稳的阅读模式,再攻 live preview。
 - **命名**:id `lexis`(取自希腊语"词"),可随时改。

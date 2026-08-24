@@ -7,24 +7,27 @@
  * 详细路线图见 LOG.md。
  */
 
-const obsidian = require("obsidian");
-const { Plugin, PluginSettingTab, Setting, Notice, TFolder, TFile, Component, MarkdownRenderer, ItemView, Modal, finishRenderMath } = obsidian;
-const { createI18n } = require("./i18n");
-const { buildCurveSVG } = require("./curve");
-const { createReviewView } = require("./review-view");
-const { createOccurrenceSearch } = require("./occurrence-search");
-const { createBridgeServer } = require("./bridge-server");
-const { createBridgeApi } = require("./bridge-api");
-const { createHighlightEngine } = require("./highlight-engine");
-const { createReaderUi } = require("./reader-ui");
-const { addAppearanceButton, createReorderController, moveItem } = require("./settings-controls");
-const { createTemplateProvider } = require("./template-provider");
-const { createSettingsTab } = require("./settings-tab");
+import * as obsidian from "obsidian";
+import { Plugin, PluginSettingTab, Setting, Notice, TFolder, TFile, Component, MarkdownRenderer, ItemView, Modal, finishRenderMath } from "obsidian";
+import { createI18n } from "./i18n";
+import { buildCurveSVG } from "./curve";
+import { createReviewView } from "./review-view";
+import { createOccurrenceSearch } from "./occurrence-search";
+import { createBridgeServer } from "./bridge-server";
+import { createBridgeApi } from "./bridge-api";
+import { createHighlightEngine } from "./highlight-engine";
+import { createReaderUi } from "./reader-ui";
+import { addAppearanceButton, createReorderController, moveItem } from "./settings-controls";
+import { createTemplateProvider } from "./template-provider";
+import { createSettingsTab } from "./settings-tab";
+import type { InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats } from "./types";
 
 const LEXIS_REVIEW_VIEW = "lexis-review-view";
 const LEXIS_HOME_VIEW = "lexis-home-view";
 
-const DEFAULT_SETTINGS = {
+type DefaultLexisSettings = Omit<LexisSettings, "dicts" | "vocabFolders" | "excludeTags">;
+
+const DEFAULT_SETTINGS: DefaultLexisSettings = {
   language: "zh",
   // 收录范围:多个文件夹(逗号/换行分隔) ∪ 携带任一标签的笔记(并集)。
   // vocabFolders / excludeTags 不放默认值,迁移与兜底在 loadSettings 里做(留默认会盖掉用户老值)。
@@ -110,7 +113,7 @@ const boundedSource = (word) => {
   const rb = /[A-Za-z0-9_]$/.test(word) ? "(?![A-Za-z0-9_])" : "";
   return lb + escapeRe(word) + rb;
 };
-const escHtml = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const escHtml = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] || c));
 // 从网页/富文本粘贴来的不换行空格会被 MarkdownRenderer 转成 &nbsp;，落进 TeX 后触发 MathJax 的 Misplaced &。
 // 只规范传给渲染器的副本，不改用户笔记原文。
 const renderLexisMarkdown = (app, md, el, sourcePath, comp) => {
@@ -134,7 +137,7 @@ function fmtDate(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).pa
 function todayStr() { return fmtDate(new Date()); }
 function parseDate(s) { const [y, m, d] = String(s).slice(0, 10).split("-").map(Number); return new Date(y, (m || 1) - 1, d || 1); }
 function addDaysStr(baseStr, days) { const d = baseStr ? parseDate(baseStr) : new Date(); d.setDate(d.getDate() + days); return fmtDate(d); }
-function daysBetween(aStr, bStr) { return Math.max(0, Math.round((parseDate(bStr) - parseDate(aStr)) / 86400000)); }
+function daysBetween(aStr, bStr) { return Math.max(0, Math.round((parseDate(bStr).getTime() - parseDate(aStr).getTime()) / 86400000)); }
 
 // ---------- FSRS ----------
 const FSRS_W = [0.40255, 1.18385, 3.173, 15.69105, 7.1949, 0.5345, 1.4604, 0.0046, 1.54575, 0.1192, 1.01925, 1.9395, 0.11, 0.29605, 2.2698, 0.2315, 2.9898, 0.51655, 0.6621];
@@ -163,6 +166,12 @@ const LexisReviewView = createReviewView({
 const LexisBridge = createBridgeServer({ Notice });
 
 class LexisPlugin extends Plugin {
+  [key: string]: any;
+  declare settings: LexisSettings;
+  declare index: Map<string, LexisEntry>;
+  declare stats: LexisStats;
+  declare inlineCategoryOccurrences: InlineCategoryOccurrence[];
+
   async onload() {
     try {
     await this.loadSettings();
@@ -178,7 +187,7 @@ class LexisPlugin extends Plugin {
 
     this.index = new Map();
     this.vocabPaths = new Set();
-    this.stats = { words: 0, aliases: 0, due: 0 };
+    this.stats = { words: 0, aliases: 0, inlineEntries: 0, due: 0 };
     this._pattern = null;
     this._rebuildTimer = null;
     this._popover = null;
@@ -189,7 +198,7 @@ class LexisPlugin extends Plugin {
     this._occCache = new Map();
     this.occurrenceSearch = createOccurrenceSearch({
       app: this.app,
-      loadPdfJs: () => obsidian.loadPdfJs(),
+      loadPdfJs: () => (obsidian as any).loadPdfJs(),
       boundedSource,
       extractSentence: (content, index) => this.extractSentence(content, index),
       markdownAllowed: (file) => !this.inVocabFolder(file.path) && !this.inlineSourcePaths?.has(file.path),
@@ -295,7 +304,7 @@ class LexisPlugin extends Plugin {
     this.registerView(LEXIS_REVIEW_VIEW, (leaf) => new LexisReviewView(leaf, this));
     this.registerView(LEXIS_HOME_VIEW, (leaf) => new LexisHomeView(leaf, this));
 
-    this.addSettingTab(new LexisSettingTab(this.app, this));
+    this.addSettingTab(new LexisSettingTab(this.app, this) as unknown as PluginSettingTab);
 
     this.registerMarkdownPostProcessor((el, ctx) => this.highlightElement(el, ctx));
     this.registerMarkdownCodeBlockProcessor("lexis", (src, el, ctx) => this.renderLexisBlock(el, ctx, src));
@@ -319,7 +328,7 @@ class LexisPlugin extends Plugin {
     this.registerEvent(this.app.vault.on("rename", (f, old) => this.maybeRebuild(f, old)));
     this.registerEvent(this.app.vault.on("modify", (file) => {
       this._occCache.clear();
-      if (file?.extension === "pdf") this.occurrenceSearch.invalidatePdf(file.path);
+      if (file instanceof TFile && file.extension === "pdf") this.occurrenceSearch.invalidatePdf(file.path);
       if (this.isInlineSourceFile(file) || this.inlineSourcePaths?.has(file?.path)) this.scheduleRebuild();
     }));
     // 词条元数据变化会影响别名、排除标签、配色和生命周期；无论是否启用“按标签收录”都要重建。
@@ -337,7 +346,7 @@ class LexisPlugin extends Plugin {
       if (dicts.length > 1) {
         menu.addItem((item) => {
           item.setTitle(this.t("menu.add", { word: label })).setIcon("book-plus");
-          const submenu = item.setSubmenu();
+          const submenu = (item as any).setSubmenu();
           for (const folder of dicts) {
             submenu.addItem((choice) => choice
               .setTitle(folder)
@@ -379,7 +388,7 @@ class LexisPlugin extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData()) as LexisSettings;
     if ((!this.settings.tagRules || !this.settings.tagRules.length) && this.settings.tagRulesText) {
       this.settings.tagRules = this.parseTagRulesText(this.settings.tagRulesText);
       delete this.settings.tagRulesText;
@@ -410,7 +419,7 @@ class LexisPlugin extends Plugin {
     }
   }
 
-  t(key, vars) { return this.i18n ? this.i18n.t(key, vars) : key; }
+  t(key: string, vars?: Record<string, unknown>) { return this.i18n ? this.i18n.t(key, vars) : key; }
   async saveSettings() { await this.saveData(this.settings); }
   applyReviewMetadataVisibility() {
     document.body?.classList.toggle("lexis-show-review-metadata", !!this.settings.showReviewMetadata);
@@ -504,11 +513,11 @@ class LexisPlugin extends Plugin {
   }
   findRelated(file) {
     const resolved = this.app.metadataCache.resolvedLinks || {};
-    const set = new Set();
+    const set = new Set<string>();
     for (const src in resolved) { if (resolved[src][file.path] && this.inVocabFolder(src) && src !== file.path) set.add(src); }
     const out = resolved[file.path] || {};
     for (const dest in out) { if (this.inVocabFolder(dest) && dest !== file.path) set.add(dest); }
-    return [...set].map((p) => this.app.vault.getAbstractFileByPath(p)).filter(Boolean);
+    return [...set].map((p) => this.app.vault.getAbstractFileByPath(p)).filter((file): file is TFile => file instanceof TFile);
   }
   parseSectionLinks(raw, known) {
     const clean = raw.replace(/```[\s\S]*?```/g, "").replace(/^---\n[\s\S]*?\n---/, "");
@@ -540,7 +549,7 @@ class LexisPlugin extends Plugin {
     for (const src in resolved) {
       if (!this.inVocabFolder(src) || src === file.path || !resolved[src][file.path]) continue;
       const srcFile = this.app.vault.getAbstractFileByPath(src);
-      if (!srcFile) continue;
+      if (!(srcFile instanceof TFile)) continue;
       try {
         const raw = await this.app.vault.cachedRead(srcFile);
         let matched = false;
@@ -560,7 +569,7 @@ class LexisPlugin extends Plugin {
     for (const src in resolved) {
       if (this.inVocabFolder(src) && resolved[src] && resolved[src][file.path]) {
         const sf = this.app.vault.getAbstractFileByPath(src);
-        if (sf) map.set(src, sf.basename);
+        if (sf instanceof TFile) map.set(src, sf.basename);
       }
     }
     if (!map.size) return;
@@ -570,7 +579,7 @@ class LexisPlugin extends Plugin {
   }
   relLink(w, path, basename) {
     const a = w.createEl("a", { text: basename, href: "#" });
-    a.addEventListener("click", (e) => { e.preventDefault(); const f = this.app.vault.getAbstractFileByPath(path); if (f) { this.app.workspace.getLeaf(false).openFile(f); this.removePopover(); } });
+    a.addEventListener("click", (e) => { e.preventDefault(); const f = this.app.vault.getAbstractFileByPath(path); if (f instanceof TFile) { this.app.workspace.getLeaf(false).openFile(f); this.removePopover(); } });
   }
   async renderTypedRelations(container, file) {
     const { out, inc } = await this.findTypedRelations(file);
@@ -863,7 +872,7 @@ class LexisPlugin extends Plugin {
     out.sort((a, b) => b.sinceLast - a.sinceLast);
     return out;
   }
-  async openReview(options) {
+  async openReview(options = {}) {
     let leaf = this.app.workspace.getLeavesOfType(LEXIS_REVIEW_VIEW)[0];
     if (!leaf) { leaf = this.app.workspace.getLeaf(true); await leaf.setViewState({ type: LEXIS_REVIEW_VIEW, active: true }); }
     this.app.workspace.revealLeaf(leaf);
@@ -911,8 +920,8 @@ class LexisPlugin extends Plugin {
     try {
       const sel = window.getSelection();
       const n = sel && sel.anchorNode;
-      const el = n ? (n.nodeType === 1 ? n : n.parentElement) : null;
-      const page = el && el.closest && el.closest("[data-page-number]");
+      const el = n instanceof Element ? n : n?.parentElement;
+      const page = el?.closest("[data-page-number]");
       const v = page && page.getAttribute("data-page-number");
       return v ? parseInt(v, 10) || 0 : 0;
     } catch (_e) { return 0; }
@@ -925,16 +934,17 @@ class LexisPlugin extends Plugin {
     if (!word) { new Notice(this.t("notice.selectWord")); return; }
     this.addWordFromSelection(word, editor, view);
   }
-  async addWordFromSelection(word, editor, view, targetFolder, { openExisting = false } = {}) {
+  async addWordFromSelection(word, editor = null, view = null, targetFolder = "", { openExisting = false } = {}) {
     const clean = (word || "").trim();
     const fileName = this.sanitizeName(clean);
     if (!fileName) { new Notice(this.t("notice.invalidWord")); return; }
     const reqFolder = this.normalizeFolder(targetFolder || "");
     const folder = (reqFolder && this.dictFolders().includes(reqFolder)) ? reqFolder : this.primaryVocabFolder();
     const targetPath = (folder ? folder + "/" : "") + fileName + ".md";
-    let existing = this.app.vault.getAbstractFileByPath(targetPath);
+    const target = this.app.vault.getAbstractFileByPath(targetPath);
+    let existing: TFile | null = target instanceof TFile ? target : null;
     // 路径不同名也可能已经是某词条的标题或别名(比如刚被"设为别名"并入了别的文件)——按索引兜底查,别重复建
-    if (!(existing instanceof TFile)) {
+    if (!existing) {
       const hit = this.index.get(clean.toLowerCase());
       if (hit && hit.file instanceof TFile) existing = hit.file;
     }
@@ -976,8 +986,11 @@ class LexisPlugin extends Plugin {
 };
 
 // ---------- 别名选择器:给"设为别名"选目标词条(标题或别名都可搜到) ----------
-class LexisAliasPicker extends (obsidian.FuzzySuggestModal || class {}) {
-  constructor(app, plugin, aliasText, onPick) {
+class LexisAliasPicker extends obsidian.FuzzySuggestModal<LexisEntry> {
+  declare plugin: LexisPlugin;
+  declare aliasText: string;
+  declare onPick: (entry: LexisEntry) => void;
+  constructor(app, plugin: LexisPlugin, aliasText: string, onPick: (entry: LexisEntry) => void) {
     super(app);
     this.plugin = plugin;
     this.aliasText = aliasText;
@@ -1001,7 +1014,9 @@ class LexisAliasPicker extends (obsidian.FuzzySuggestModal || class {}) {
 
 // ---------- 恢复:归档词要不要保留 FSRS 进度,二选一 ----------
 class LexisRestoreModal extends Modal {
-  constructor(app, plugin, file) {
+  declare plugin: LexisPlugin;
+  declare file: TFile;
+  constructor(app, plugin: LexisPlugin, file: TFile) {
     super(app);
     this.plugin = plugin;
     this.file = file;
@@ -1037,7 +1052,10 @@ class LexisRestoreModal extends Modal {
 
 // ---------- Lexis 主页 ----------
 class LexisHomeView extends ItemView {
-  constructor(leaf, plugin) { super(leaf); this.plugin = plugin; }
+  [key: string]: any;
+  declare plugin: LexisPlugin;
+  declare _retireRenderTimer: number | undefined;
+  constructor(leaf, plugin: LexisPlugin) { super(leaf); this.plugin = plugin; }
   getViewType() { return LEXIS_HOME_VIEW; }
   getDisplayText() { return "Lexis"; }
   getIcon() { return "graduation-cap"; }
@@ -1082,7 +1100,7 @@ class LexisHomeView extends ItemView {
     if (!listWrap.isConnected) return; // 算的过程中视图已经关掉/刷新了,別再画
     listWrap.empty();
     if (!candidates.length) { listWrap.createDiv({ cls: "lexis-dim", text: this.plugin.t("home.noCandidates") }); return; }
-    const selected = new Set();
+    const selected = new Set<string>();
     const rowByPath = new Map();
     const removeRows = (paths) => { for (const p of paths) { const row = rowByPath.get(p); if (row) row.remove(); rowByPath.delete(p); selected.delete(p); } };
     for (const cand of candidates) {
@@ -1103,12 +1121,12 @@ class LexisHomeView extends ItemView {
       archiveBtn.addEventListener("click", async () => { await this.plugin.setArchived(cand.file, true); removeRows([cand.file.path]); });
     }
     const bulk = wrap.createDiv({ cls: "lexis-retire-bulk" });
-    const bulkRun = async (fn) => { const paths = [...selected]; for (const p of paths) { const f = this.plugin.app.vault.getAbstractFileByPath(p); if (f) await fn(f); } removeRows(paths); };
+    const bulkRun = async (fn) => { const paths = [...selected]; for (const p of paths) { const f = this.plugin.app.vault.getAbstractFileByPath(p); if (f instanceof TFile) await fn(f); } removeRows(paths); };
     bulk.createEl("button", { text: this.plugin.t("home.bulkEvict") }).addEventListener("click", () => bulkRun((f) => this.plugin.setRetired(f, true)));
     bulk.createEl("button", { text: this.plugin.t("home.bulkKeep") }).addEventListener("click", () => bulkRun((f) => this.plugin.setPinned(f, true)));
     bulk.createEl("button", { text: this.plugin.t("home.bulkMastered") }).addEventListener("click", () => bulkRun((f) => this.plugin.setArchived(f, true)));
   }
-  onClose() {}
+  async onClose() {}
 }
 
 Object.defineProperties(LexisPlugin.prototype, createBridgeApi({
@@ -1132,6 +1150,7 @@ Object.defineProperties(LexisPlugin.prototype, createReaderUi({
   FSRS,
   addDaysStr,
   daysBetween,
+  fmtDate,
   todayStr,
   TFile,
   Notice,
@@ -1158,4 +1177,4 @@ const LexisSettingTab = createSettingsTab({
   LEXIS_REVIEW_VIEW,
 });
 
-module.exports = LexisPlugin;
+export default LexisPlugin;

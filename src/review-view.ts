@@ -1,10 +1,13 @@
 "use strict";
 
-const { ItemView, Component, Notice } = require("obsidian");
+import { ItemView, Component, Notice } from "obsidian";
+import type { LexisRuntime } from "./types";
 
 // 复习会话只负责界面与用户操作；排期、词库读写仍由 LexisPlugin 提供。
 const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }) => class LexisReviewView extends ItemView {
-  constructor(leaf, plugin) { super(leaf); this.plugin = plugin; this.queue = []; this.pos = 0; this.reviewed = 0; this.revealed = false; this.undoStack = []; this.options = {}; }
+  [key: string]: any;
+  declare plugin: LexisRuntime;
+  constructor(leaf, plugin: LexisRuntime) { super(leaf); this.plugin = plugin; this.queue = []; this.pos = 0; this.reviewed = 0; this.revealed = false; this.undoStack = []; this.options = {}; }
   getViewType() { return reviewViewType; }
   getDisplayText() { return this.plugin.t("review.title"); }
   getIcon() { return "brain"; }
@@ -18,7 +21,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }) => 
     this.render();
     if (saved.revealed) await this.reveal();
   }
-  onClose() { if (this._comp) this._comp.unload(); if (this._frontComp) this._frontComp.unload(); this.closeImagePreview(); }
+  async onClose() { if (this._comp) this._comp.unload(); if (this._frontComp) this._frontComp.unload(); this.closeImagePreview(); }
   refresh() { this.queue = this.plugin.buildQueue(this.options); this.pos = 0; this.reviewed = 0; this.revealed = false; this.undoStack = []; this.render(); }
 
   render() {
@@ -207,4 +210,4 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }) => 
   }
 };
 
-module.exports = { createReviewView };
+export { createReviewView };

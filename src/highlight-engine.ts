@@ -1,7 +1,15 @@
 "use strict";
 
+import * as obsidian from "obsidian";
+import type { InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats } from "./types";
+
 function createHighlightEngine({ FSRS, Notice, boundedSource, todayStr }) {
   class HighlightEngine {
+  [key: string]: any;
+  declare settings: LexisSettings;
+  declare index: Map<string, LexisEntry>;
+  declare stats: LexisStats;
+  declare inlineCategoryOccurrences: InlineCategoryOccurrence[];
   // ---------- 索引 ----------
   normalizeFolder(p) { return (p || "").trim().replace(/^\/+|\/+$/g, ""); }
   // 单一真相:rebuildIndex 算出的命中路径集合。支持"文件夹∪标签"两种收录,且 14 处调用点签名不变。
@@ -306,7 +314,7 @@ function createHighlightEngine({ FSRS, Notice, boundedSource, todayStr }) {
     }
     return best;
   }
-  inlineStyleForEntry(entry, opts) {
+  inlineStyleForEntry(entry, opts: { external?: boolean; pdf?: boolean } = {}) {
     // EPUB 内容在独立 iframe 中，读不到 Obsidian 主文档的 --text-accent；跨文档时必须注入解析后的实际颜色。
     let color = opts?.external ? this.effectiveHighlightColor() : (this.settings.highlightColor || "var(--text-accent)");
     let styleKind = this.settings.highlightStyle || "wavy";
@@ -391,7 +399,7 @@ function createHighlightEngine({ FSRS, Notice, boundedSource, todayStr }) {
   // 把 el 内文本节点里命中词库的片段包成 <span class="lexis-hl">(供阅读模式 + PDF 复用)。
   // rejectSelector:父元素命中则跳过该文本节点(避免重复包/包进代码块等)。
   // excludeKeys:命中这些 key 时只留纯文本不高亮(词条笔记里不高亮自己的标题/别名,但别的词照常高亮)。
-  wrapMatchesInElement(el, rejectSelector, styleOpts, excludeKeys) {
+  wrapMatchesInElement(el, rejectSelector, styleOpts = null, excludeKeys = null) {
     if (!this._pattern || !this.index.size) return;
     const doc = el.ownerDocument || document;
     const regex = new RegExp(this._pattern, "gi");
@@ -682,19 +690,19 @@ function createHighlightEngine({ FSRS, Notice, boundedSource, todayStr }) {
         for (const mu of muts) {
           if (mu.type === "attributes") {
             const target = mu.target;
-            if (!target?.matches?.(".page, .textLayer, .canvasWrapper, canvas")) continue;
-            if (!target.closest?.(".page")) continue;
-            const page = target.classList?.contains("page") ? target : target.closest(".page");
-            const layer = target.classList?.contains("textLayer") ? target : page?.querySelector(":scope > .textLayer");
+            if (!(target instanceof Element) || !target.matches(".page, .textLayer, .canvasWrapper, canvas")) continue;
+            if (!target.closest(".page")) continue;
+            const page = target.classList.contains("page") ? target : target.closest(".page");
+            const layer = target.classList.contains("textLayer") ? target : page?.querySelector(":scope > .textLayer");
             if (layer) { this.markPdfGeometryChanging(layer); geometryChanged = true; }
             continue;
           }
           for (const node of mu.addedNodes) {
-            if (!node || node.nodeType !== 1) continue;
-            if (node.classList?.contains("lexis-hl") || node.closest?.(".lexis-hl")) continue;
-            if (node.classList && node.classList.contains("textLayer")) { this.markPdfGeometryChanging(node); geometryChanged = true; }
-            else if (node.querySelectorAll) node.querySelectorAll(".textLayer").forEach((l) => { this.markPdfGeometryChanging(l); geometryChanged = true; });
-            const layer = node.closest && node.closest(".textLayer");
+            if (!(node instanceof Element)) continue;
+            if (node.classList.contains("lexis-hl") || node.closest(".lexis-hl")) continue;
+            if (node.classList.contains("textLayer")) { this.markPdfGeometryChanging(node); geometryChanged = true; }
+            else node.querySelectorAll(".textLayer").forEach((l) => { this.markPdfGeometryChanging(l); geometryChanged = true; });
+            const layer = node.closest(".textLayer");
             if (layer) { this.markPdfGeometryChanging(layer); geometryChanged = true; }
           }
         }
@@ -744,7 +752,7 @@ function createHighlightEngine({ FSRS, Notice, boundedSource, todayStr }) {
     hl.style.cssText = `position:absolute;left:${layer.offsetLeft}px;top:${layer.offsetTop}px;width:${layerW}px;height:${layerH}px;z-index:1;pointer-events:none;`;
     hl.innerHTML = "";
     // 4. 遍历内联 .lexis-hl,在 overlay 层画出对应荧光笔矩形
-    const spans = layer.querySelectorAll(".lexis-hl");
+    const spans = layer.querySelectorAll(".lexis-hl") as NodeListOf<HTMLElement>;
     for (const s of spans) {
       const key = s.dataset.lexisKey;
       if (!key) continue;
@@ -754,7 +762,7 @@ function createHighlightEngine({ FSRS, Notice, boundedSource, todayStr }) {
       try {
         const color = this.colorForEntry(entry);
         const alpha = Math.max(0.04, Math.min(0.75, this.highlightAlphaForEntry(entry) * 0.65));
-        const rects = Array.from(s.getClientRects()).filter((r) => r.width && r.height);
+        const rects = (Array.from(s.getClientRects()) as DOMRect[]).filter((r) => r.width && r.height);
         for (const rect of rects.length ? rects : [s.getBoundingClientRect()]) {
           const d = document.createElement("div");
           d.className = "lexis-pdf-hl";
@@ -807,7 +815,7 @@ function createHighlightEngine({ FSRS, Notice, boundedSource, todayStr }) {
     this._epubIframeDocs = new Map();
     this._epubIframeObserver = new MutationObserver((muts) => {
       for (const mu of muts) for (const node of mu.addedNodes) {
-        if (!node || node.nodeType !== 1) continue;
+        if (!(node instanceof Element)) continue;
         if (this.isEpubIframe(node)) this.observeEpubIframe(node);
         node.querySelectorAll?.("iframe[enable-annotation], .epub-reader-area iframe, .epub-container iframe, .epub-view iframe").forEach((frame) => this.observeEpubIframe(frame));
       }
@@ -871,6 +879,7 @@ function createHighlightEngine({ FSRS, Notice, boundedSource, todayStr }) {
       this._liveRefreshEffect = refreshEffect;
       const ext = ViewPlugin.fromClass(
         class {
+          decorations: any;
           constructor(view) { this.decorations = this.build(view); }
           update(u) {
             const indexChanged = u.transactions.some((tr) => tr.effects.some((effect) => effect.is(refreshEffect)));
@@ -912,9 +921,8 @@ function createHighlightEngine({ FSRS, Notice, boundedSource, todayStr }) {
   }
 
   }
-  const descriptors = Object.getOwnPropertyDescriptors(HighlightEngine.prototype);
-  delete descriptors.constructor;
+  const { constructor: _constructor, ...descriptors } = Object.getOwnPropertyDescriptors(HighlightEngine.prototype);
   return descriptors;
 }
 
-module.exports = { createHighlightEngine };
+export { createHighlightEngine };

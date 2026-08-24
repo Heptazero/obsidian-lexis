@@ -301,4 +301,4 @@ function createI18n(getLanguage) {
   return { t, language };
 }
 
-module.exports = { createI18n };
+export { createI18n };

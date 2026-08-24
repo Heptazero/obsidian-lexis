@@ -123,4 +123,4 @@ function createOccurrenceSearch(options) {
   };
 }
 
-module.exports = { createOccurrenceSearch, pdfItemsToText, normalizePdfText, mergeOccurrences };
+export { createOccurrenceSearch, pdfItemsToText, normalizePdfText, mergeOccurrences };

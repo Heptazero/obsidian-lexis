@@ -69,7 +69,7 @@ After the first manual installation, Zotero can update the add-on from its updat
 3. Select unfamiliar text and add it to a dictionary. Lexis can save the surrounding sentence as an occurrence.
 4. Open **Lexis Home** to review due entries or inspect retirement candidates.
 
-The interface language can be switched between Chinese and English in Lexis settings. Translations are kept together by message key in `src/i18n.js`, so adding another language does not require searching through the UI code.
+The interface language can be switched between Chinese and English in Lexis settings. Translations are kept together by message key in `src/i18n.ts`, so adding another language does not require searching through the UI code.
 
 ## Note blocks
 
@@ -116,5 +116,7 @@ The repository contains all three clients:
 - Obsidian: `src/`, bundled to `main.js`
 - Browser: `browser-extension/`
 - Zotero: `zotero-extension/`
+
+The Obsidian source is TypeScript. Run `npm install` once, then use `npm run typecheck`, `npm run build`, or `npm run dev`. Releases still contain the mobile-compatible `main.js`, `manifest.json`, and `styles.css` only.
 
 Issues and contributions are welcome in the [GitHub repository](https://github.com/Heptazero/obsidian-lexis).

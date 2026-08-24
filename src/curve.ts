@@ -86,4 +86,4 @@ function buildCurveSVG(card, { requestRetention, nextInterval, retrievability, a
     `</svg>`;
 }
 
-module.exports = { buildCurveSVG };
+export { buildCurveSVG };

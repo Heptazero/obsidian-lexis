@@ -1,10 +1,15 @@
 "use strict";
 
+import type { LexisRuntime } from "./types";
+
 function createBridgeServer({ Notice }) {
   // 外部阅读端（浏览器、未来的 Zotero）只通过这条本机桥接访问 Lexis。
   // 这里负责 HTTP 生命周期与路由；词典规则和写入动作仍由 LexisPlugin 作为唯一真相处理。
   class LexisBridge {
-    constructor(plugin) {
+    plugin: LexisRuntime;
+    server: any;
+
+    constructor(plugin: LexisRuntime) {
       this.plugin = plugin;
       this.server = null;
     }
@@ -94,4 +99,4 @@ function createBridgeServer({ Notice }) {
   return LexisBridge;
 }
 
-module.exports = { createBridgeServer };
+export { createBridgeServer };

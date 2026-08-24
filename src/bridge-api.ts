@@ -1,7 +1,14 @@
 "use strict";
 
+import type { InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats } from "./types";
+
 function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, escapeRe, renderLexisMarkdown, finishRenderMath, escHtml }) {
   class BridgeApi {
+  [key: string]: any;
+  declare settings: LexisSettings;
+  declare index: Map<string, LexisEntry>;
+  declare stats: LexisStats;
+  declare inlineCategoryOccurrences: InlineCategoryOccurrence[];
   // ---------- 词典桥接动作（由 Obsidian 卡片与外部阅读端共同调用） ----------
   // 网页划词/加出处:词不在库→新建,在库→加出处。来源是网址链接 [标题](url),不是 [[内链]]
   async bridgeAddWord(payload) {
@@ -342,8 +349,8 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, escapeR
     return { title, subtitle };
   }
   bridgeMathCss() {
-    const style = document.getElementById("MJX-CHTML-styles");
-    return style?.sheet ? Array.from(style.sheet.cssRules, (rule) => rule.cssText).join("\n") : "";
+    const style = document.getElementById("MJX-CHTML-styles") as HTMLStyleElement | null;
+    return style?.sheet ? Array.from(style.sheet.cssRules, (rule: CSSRule) => rule.cssText).join("\n") : "";
   }
   async bridgeWordDetail(key) {
     const k = String(key || "").toLowerCase();
@@ -537,9 +544,8 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, escapeR
   }
 
   }
-  const descriptors = Object.getOwnPropertyDescriptors(BridgeApi.prototype);
-  delete descriptors.constructor;
+  const { constructor: _constructor, ...descriptors } = Object.getOwnPropertyDescriptors(BridgeApi.prototype);
   return descriptors;
 }
 
-module.exports = { createBridgeApi };
+export { createBridgeApi };
