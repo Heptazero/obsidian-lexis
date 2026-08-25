@@ -481,14 +481,14 @@ var createReviewView = ({ reviewViewType, todayStr: todayStr2, renderLexisMarkdo
       }
     }
     this.backEl = card.createDiv({ cls: "lexis-rv-back" });
-    this.backEl.style.display = "none";
+    this.backEl.setCssStyles({ display: "none" });
     this.showBtn = c.createEl("button", { cls: "mod-cta lexis-rv-show", text: this.plugin.t("review.show") });
     this.showBtn.addEventListener("click", () => this.reveal());
     this.rateBar = c.createDiv({ cls: "lexis-rv-rate" });
-    this.rateBar.style.display = "none";
+    this.rateBar.setCssStyles({ display: "none" });
     const bs = this.plugin.settings.reviewBottomSpace || 70;
     const isPhone = document.body.classList.contains("is-phone");
-    this.rateBar.style.marginBottom = isPhone ? "" : bs + "px";
+    this.rateBar.setCssStyles({ marginBottom: isPhone ? "" : bs + "px" });
     if (isPhone) this.updateMobileRateBarOffset();
     const grades = [[1, "review.again"], [2, "review.hard"], [3, "review.good"], [4, "review.easy"]];
     for (const [g, key] of grades) {
@@ -502,9 +502,9 @@ var createReviewView = ({ reviewViewType, todayStr: todayStr2, renderLexisMarkdo
   async reveal() {
     if (this.revealed) return;
     this.revealed = true;
-    this.showBtn.style.display = "none";
-    this.backEl.style.display = "";
-    this.rateBar.style.display = "";
+    this.showBtn.setCssStyles({ display: "none" });
+    this.backEl.setCssStyles({ display: "" });
+    this.rateBar.setCssStyles({ display: "" });
     try {
       if (this._comp) this._comp.unload();
       this._comp = new import_obsidian.Component();
@@ -524,7 +524,7 @@ var createReviewView = ({ reviewViewType, todayStr: todayStr2, renderLexisMarkdo
   updateMobileRateBarOffset() {
     if (!this.rateBar || !document.body.classList.contains("is-phone")) return;
     const navbarHeight = Math.ceil(document.querySelector(".mobile-navbar")?.getBoundingClientRect().height || 58);
-    this.rateBar.style.setProperty("--lexis-mobile-navbar-height", `${navbarHeight}px`);
+    this.rateBar.setCssProps({ "--lexis-mobile-navbar-height": `${navbarHeight}px` });
   }
   async grade(g) {
     if (!this.revealed) {
@@ -689,7 +689,7 @@ var createReviewView = ({ reviewViewType, todayStr: todayStr2, renderLexisMarkdo
       this.refresh();
     };
     this.plugin.renderHeatmap(d.createDiv({ cls: "lexis-hm-wrap" }));
-    c.style.paddingBottom = (this.plugin.settings.reviewBottomSpace || 70) + "px";
+    c.setCssStyles({ paddingBottom: (this.plugin.settings.reviewBottomSpace || 70) + "px" });
   }
 };
 
@@ -819,7 +819,7 @@ function createOccurrenceSearch(options) {
 }
 
 // src/bridge-server.ts
-function createBridgeServer({ Notice: Notice3 }) {
+function createBridgeServer({ Notice: Notice3, Platform: Platform2 }) {
   class LexisBridge2 {
     constructor(plugin) {
       this.plugin = plugin;
@@ -835,10 +835,14 @@ function createBridgeServer({ Notice: Notice3 }) {
     }
     start() {
       if (this.server) return;
-      let http;
+      if (!Platform2.isDesktopApp) {
+        new Notice3(this.plugin.t("notice.desktopBridge"));
+        return;
+      }
+      let http = null;
       try {
-        http = require("http");
-      } catch (_e) {
+        http = globalThis.require?.("http") ?? null;
+      } catch (_error) {
       }
       if (!http) {
         new Notice3(this.plugin.t("notice.desktopBridge"));
@@ -849,8 +853,8 @@ function createBridgeServer({ Notice: Notice3 }) {
         this.handle(req, res).catch((err) => {
           try {
             res.writeHead(500);
-            res.end(String(err && err.message || err));
-          } catch (_e) {
+            res.end(String(err instanceof Error ? err.message : err));
+          } catch (_error) {
           }
         });
       });
@@ -894,7 +898,7 @@ function createBridgeServer({ Notice: Notice3 }) {
         res.end();
         return;
       }
-      const url = new URL(req.url, "http://127.0.0.1");
+      const url = new URL(req.url ?? "/", "http://127.0.0.1");
       const path = url.pathname.replace(/\/+$/, "") || "/";
       if (path === "/ping" || path === "/") return send(200, { ok: true, app: "lexis", version: plugin.manifest.version, vault: plugin.app.vault.getName() });
       const token = req.headers["x-lexis-token"] || url.searchParams.get("token") || "";
@@ -913,13 +917,13 @@ function createBridgeServer({ Notice: Notice3 }) {
       return new Promise((resolve) => {
         let data = "";
         req.on("data", (chunk) => {
-          data += chunk;
+          data += typeof chunk === "string" ? chunk : chunk instanceof Uint8Array ? new TextDecoder().decode(chunk) : String(chunk);
           if (data.length > 1e6) req.destroy();
         });
         req.on("end", () => {
           try {
             resolve(JSON.parse(data || "{}"));
-          } catch (_e) {
+          } catch (_error) {
             resolve({});
           }
         });
@@ -1428,9 +1432,9 @@ ${line}`);
             if (!nx || /^H[1-6]$/.test(nx.tagName)) prev.remove();
           }
         } else {
-          const wrap = document.createElement("div");
-          wrap.innerHTML = html;
-          host.replaceWith(...Array.from(wrap.childNodes));
+          const parsed = new DOMParser().parseFromString(html, "text/html");
+          const nodes = Array.from(parsed.body.childNodes, (node) => document.importNode(node, true));
+          host.replaceWith(...nodes);
         }
       }
       (function compact(container) {
@@ -1560,6 +1564,8 @@ ${line}`);
 }
 
 // src/highlight-engine.ts
+var import_view = require("@codemirror/view");
+var import_state = require("@codemirror/state");
 var obsidian = __toESM(require("obsidian"));
 function createHighlightEngine({ FSRS: FSRS2, Notice: Notice3, boundedSource: boundedSource2, todayStr: todayStr2 }) {
   class HighlightEngine {
@@ -2367,7 +2373,7 @@ function createHighlightEngine({ FSRS: FSRS2, Notice: Notice3, boundedSource: bo
       this.wrapPdfFragmentMatches(layer);
       this.wrapMatchesInElement(layer, ".lexis-hl,.lexis-popover", { pdf: true });
       const page = layer.parentElement;
-      if (getComputedStyle(page).position === "static") page.style.position = "relative";
+      if (getComputedStyle(page).position === "static") page.setCssStyles({ position: "relative" });
       let hl = page.querySelector(":scope > .lexis-pdf-hl-layer");
       if (!hl) {
         hl = document.createElement("div");
@@ -2379,8 +2385,16 @@ function createHighlightEngine({ FSRS: FSRS2, Notice: Notice3, boundedSource: bo
       const layerH = layer.offsetHeight || layer.clientHeight || hlBB.height || 1;
       const scaleX = hlBB.width ? hlBB.width / layerW : 1;
       const scaleY = hlBB.height ? hlBB.height / layerH : 1;
-      hl.style.cssText = `position:absolute;left:${layer.offsetLeft}px;top:${layer.offsetTop}px;width:${layerW}px;height:${layerH}px;z-index:1;pointer-events:none;`;
-      hl.innerHTML = "";
+      hl.setCssStyles({
+        position: "absolute",
+        left: `${layer.offsetLeft}px`,
+        top: `${layer.offsetTop}px`,
+        width: `${layerW}px`,
+        height: `${layerH}px`,
+        zIndex: "1",
+        pointerEvents: "none"
+      });
+      hl.empty();
       const spans = layer.querySelectorAll(".lexis-hl");
       for (const s of spans) {
         const key = s.dataset.lexisKey;
@@ -2396,7 +2410,16 @@ function createHighlightEngine({ FSRS: FSRS2, Notice: Notice3, boundedSource: bo
             const d = document.createElement("div");
             d.className = "lexis-pdf-hl";
             d.dataset.lexisKey = key;
-            d.style.cssText = `position:absolute;left:${(rect.left - hlBB.left) / scaleX}px;top:${(rect.top - hlBB.top) / scaleY}px;width:${rect.width / scaleX}px;height:${rect.height / scaleY}px;background:${this.applyAlpha(color, alpha)};border-radius:2px;pointer-events:auto;`;
+            d.setCssStyles({
+              position: "absolute",
+              left: `${(rect.left - hlBB.left) / scaleX}px`,
+              top: `${(rect.top - hlBB.top) / scaleY}px`,
+              width: `${rect.width / scaleX}px`,
+              height: `${rect.height / scaleY}px`,
+              background: this.applyAlpha(color, alpha),
+              borderRadius: "2px",
+              pointerEvents: "auto"
+            });
             hl.appendChild(d);
           }
         } catch (_e) {
@@ -2533,51 +2556,49 @@ function createHighlightEngine({ FSRS: FSRS2, Notice: Notice3, boundedSource: bo
     // ---------- 实时预览高亮 ----------
     setupLiveExtension() {
       try {
-        const { ViewPlugin, Decoration } = require("@codemirror/view");
-        const { RangeSetBuilder, StateEffect } = require("@codemirror/state");
         const editorInfoField2 = obsidian.editorInfoField;
-        const plugin = this;
-        const refreshEffect = StateEffect.define();
+        const refreshEffect = import_state.StateEffect.define();
         this._liveRefreshEffect = refreshEffect;
-        const ext = ViewPlugin.fromClass(
+        const buildDecorations = (view) => {
+          const builder = new import_state.RangeSetBuilder();
+          if (!this.settings.enableHighlight || !this.settings.enableLivePreview || !this._pattern) return builder.finish();
+          let selfKeys = null;
+          if (editorInfoField2) {
+            try {
+              const info = view.state.field(editorInfoField2, false);
+              if (info?.file?.path) selfKeys = this.selfKeysFor(info.file.path);
+            } catch (_error) {
+            }
+          }
+          const regex = new RegExp(this._pattern, "gi");
+          for (const { from, to } of view.visibleRanges) {
+            const text = view.state.doc.sliceString(from, to);
+            regex.lastIndex = 0;
+            let match;
+            while (match = regex.exec(text)) {
+              const key = match[0].toLowerCase();
+              if (selfKeys?.has(key)) {
+                if (match[0].length === 0) regex.lastIndex++;
+                continue;
+              }
+              const start = from + match.index;
+              const end = start + match[0].length;
+              const entry = this.index.get(key);
+              if (entry && !entry.inline) this.passiveEncounter(entry.file);
+              builder.add(start, end, import_view.Decoration.mark({ class: "lexis-hl", attributes: { "data-lexis-key": key, style: this.inlineStyleForEntry(entry) } }));
+              if (match[0].length === 0) regex.lastIndex++;
+            }
+          }
+          return builder.finish();
+        };
+        const ext = import_view.ViewPlugin.fromClass(
           class {
             constructor(view) {
-              this.decorations = this.build(view);
+              this.decorations = buildDecorations(view);
             }
-            update(u) {
-              const indexChanged = u.transactions.some((tr) => tr.effects.some((effect) => effect.is(refreshEffect)));
-              if (u.docChanged || u.viewportChanged || indexChanged) this.decorations = this.build(u.view);
-            }
-            build(view) {
-              const builder = new RangeSetBuilder();
-              if (!plugin.settings.enableHighlight || !plugin.settings.enableLivePreview || !plugin._pattern) return builder.finish();
-              let selfKeys = null;
-              if (editorInfoField2) {
-                try {
-                  const info = view.state.field(editorInfoField2, false);
-                  if (info?.file?.path) selfKeys = plugin.selfKeysFor(info.file.path);
-                } catch (_e) {
-                }
-              }
-              const regex = new RegExp(plugin._pattern, "gi");
-              for (const { from, to } of view.visibleRanges) {
-                const text = view.state.doc.sliceString(from, to);
-                regex.lastIndex = 0;
-                let m;
-                while (m = regex.exec(text)) {
-                  const key = m[0].toLowerCase();
-                  if (selfKeys && selfKeys.has(key)) {
-                    if (m[0].length === 0) regex.lastIndex++;
-                    continue;
-                  }
-                  const start = from + m.index, end = start + m[0].length;
-                  const entry = plugin.index.get(key);
-                  if (entry && !entry.inline) plugin.passiveEncounter(entry.file);
-                  builder.add(start, end, Decoration.mark({ class: "lexis-hl", attributes: { "data-lexis-key": key, style: plugin.inlineStyleForEntry(entry) } }));
-                  if (m[0].length === 0) regex.lastIndex++;
-                }
-              }
-              return builder.finish();
+            update(update) {
+              const indexChanged = update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(refreshEffect)));
+              if (update.docChanged || update.viewportChanged || indexChanged) this.decorations = buildDecorations(update.view);
             }
           },
           { decorations: (v) => v.decorations }
@@ -2636,7 +2657,9 @@ function createReaderUi({ buildCurveSVG: buildCurveSVG2, FSRS: FSRS2, addDaysStr
         if (svg) {
           const due = card.due ? ` \xB7 \u4E0B\u6B21\u590D\u4E60 ${String(card.due).slice(0, 10)}` : "";
           el.createDiv({ cls: "lexis-section-title", text: `\u{1F9E0} \u8BB0\u5FC6\u66F2\u7EBF\uFF08\u590D\u4E60\u65E5\u671F \xD7 \u4FDD\u7559\u7387${due}\uFF09` });
-          el.createDiv({ cls: "lexis-curve" }).innerHTML = svg;
+          const parsed = new DOMParser().parseFromString(svg, "image/svg+xml");
+          const curve = el.createDiv({ cls: "lexis-curve" });
+          curve.appendChild(document.importNode(parsed.documentElement, true));
         }
       }
       if (showRelated) {
@@ -2662,7 +2685,7 @@ function createReaderUi({ buildCurveSVG: buildCurveSVG2, FSRS: FSRS2, addDaysStr
             add.dataset.done = "1";
             if (await this.addExampleToWord(file, o.sentence, o.file, o.page)) {
               add.setText(" \u2713");
-              add.style.cursor = "default";
+              add.setCssStyles({ cursor: "default" });
               add.removeAttribute("title");
             } else delete add.dataset.done;
           });
@@ -2827,8 +2850,7 @@ function createReaderUi({ buildCurveSVG: buildCurveSVG2, FSRS: FSRS2, addDaysStr
       }
       const top = Math.min(rect.bottom + 6, window.innerHeight - 36);
       const left = Math.max(6, Math.min(rect.left, window.innerWidth - pill.offsetWidth - 6));
-      pill.style.top = top + "px";
-      pill.style.left = left + "px";
+      pill.setCssStyles({ top: top + "px", left: left + "px" });
       this._selPill = pill;
     }
     preferredSelectionFolder() {
@@ -3246,7 +3268,7 @@ ${line}---` + data.slice(fm.index + fm[0].length);
                 add.dataset.done = "1";
                 if (await this.addExampleToWord(entry.file, o.sentence, o.file, o.page)) {
                   add.setText(" \u2713");
-                  add.style.cursor = "default";
+                  add.setCssStyles({ cursor: "default" });
                   add.removeAttribute("title");
                 } else delete add.dataset.done;
               });
@@ -3271,22 +3293,21 @@ ${line}---` + data.slice(fm.index + fm[0].length);
       if (left < 10) left = 10;
       if (top + pr.height > window.innerHeight - 10) top = r.top + (frameRect ? frameRect.top : 0) - pr.height - 6;
       if (top < 10) top = 10;
-      pop.style.left = left + "px";
-      pop.style.top = top + "px";
+      pop.setCssStyles({ left: left + "px", top: top + "px" });
     }
     applyPopoverAppearance(pop) {
       if (!pop) return;
       const width = Math.max(260, Number(this.settings.popoverWidth) || 460);
       const height = Math.max(160, Number(this.settings.popoverMaxHeight) || 420);
       const fontSize = Math.max(11, Number(this.settings.popoverFontSize) || 14);
-      pop.style.setProperty("--lexis-popover-width", `${width}px`);
-      pop.style.setProperty("--lexis-popover-height", `${height}px`);
-      pop.style.setProperty("--lexis-popover-font-size", `${fontSize}px`);
-      pop.style.width = `${width}px`;
-      pop.style.fontSize = `${fontSize}px`;
+      pop.setCssProps({
+        "--lexis-popover-width": `${width}px`,
+        "--lexis-popover-height": `${height}px`,
+        "--lexis-popover-font-size": `${fontSize}px`
+      });
+      pop.setCssStyles({ width: `${width}px`, fontSize: `${fontSize}px` });
       const isPreview = pop.classList?.contains("lexis-popover-preview");
-      pop.style.maxHeight = isPreview ? `${height}px` : "";
-      pop.style.height = isPreview ? `${height}px` : "";
+      pop.setCssStyles({ maxHeight: isPreview ? `${height}px` : "", height: isPreview ? `${height}px` : "" });
     }
   }
   const { constructor: _constructor, ...descriptors } = Object.getOwnPropertyDescriptors(ReaderUi.prototype);
@@ -3324,8 +3345,7 @@ function createReorderController({ container, onMove, setIcon, label = "Reorder"
   };
   const floatingPosition = (x, y) => {
     if (!draggedRow) return;
-    draggedRow.style.left = `${Math.round(x - offsetX)}px`;
-    draggedRow.style.top = `${Math.round(y - offsetY)}px`;
+    draggedRow.setCssStyles({ left: `${Math.round(x - offsetX)}px`, top: `${Math.round(y - offsetY)}px` });
   };
   const targetAt = (x, y) => {
     const doc = container.ownerDocument || document;
@@ -3368,16 +3388,18 @@ function createReorderController({ container, onMove, setIcon, label = "Reorder"
     placeholder = doc.createElement("div");
     placeholder.className = "lexis-sortable-placeholder";
     placeholder.setAttribute("aria-hidden", "true");
-    placeholder.style.height = `${Math.ceil(rect.height)}px`;
+    placeholder.setCssStyles({ height: `${Math.ceil(rect.height)}px` });
     container.insertBefore(placeholder, row);
     row.classList.add("is-dragging", "is-floating");
-    row.style.position = "fixed";
-    row.style.width = `${Math.ceil(rect.width)}px`;
-    row.style.left = `${Math.round(rect.left)}px`;
-    row.style.top = `${Math.round(rect.top)}px`;
-    row.style.margin = "0";
-    row.style.zIndex = "1000";
-    row.style.pointerEvents = "none";
+    row.setCssStyles({
+      position: "fixed",
+      width: `${Math.ceil(rect.width)}px`,
+      left: `${Math.round(rect.left)}px`,
+      top: `${Math.round(rect.top)}px`,
+      margin: "0",
+      zIndex: "1000",
+      pointerEvents: "none"
+    });
     floatingPosition(pointerX, pointerY);
     try {
       handle.setPointerCapture?.(event.pointerId);
@@ -3469,7 +3491,7 @@ function addAppearanceButton({ app, obsidian: obsidian4, parent, title, state, o
   const button = new obsidian4.ExtraButtonComponent(parent).setIcon("palette").setTooltip(title);
   const refreshButton = () => {
     const color = state().color;
-    button.extraSettingsEl.style.color = color || "var(--text-accent)";
+    button.extraSettingsEl.setCssStyles({ color: color || "var(--text-accent)" });
   };
   button.onClick(() => {
     const modal = new obsidian4.Modal(app);
@@ -3671,10 +3693,10 @@ var createSettingsTab = ({ obsidian: obsidian4, PluginSettingTab: PluginSettingT
           const row = dictsWrap.createDiv({ cls: "lexis-setting-row lexis-dictionary-row" });
           const fIn = new obsidian4.TextComponent(row);
           fIn.setPlaceholder(t("settings.folderPlaceholder")).setValue(d.folder || "");
-          fIn.inputEl.style.flex = "1";
+          fIn.inputEl.setCssStyles({ flex: "1" });
           const tIn = new obsidian4.TextComponent(row);
           tIn.setPlaceholder(t("settings.templatePlaceholder")).setValue(d.template || "");
-          tIn.inputEl.style.flex = "1.4";
+          tIn.inputEl.setCssStyles({ flex: "1.4" });
           const updateTemplateSource = () => {
             const match = this.plugin.templateProvider.templaterTemplateFor(d.folder);
             tIn.setDisabled(!!match);
@@ -3735,7 +3757,7 @@ var createSettingsTab = ({ obsidian: obsidian4, PluginSettingTab: PluginSettingT
           reorder.attach(row, i);
         });
         const addDict = dictsWrap.createEl("button", { text: t("settings.addDictionary") });
-        addDict.style.marginTop = "2px";
+        addDict.setCssStyles({ marginTop: "2px" });
         addDict.addEventListener("click", async () => {
           this.plugin.settings.dicts.push({ folder: "", template: "" });
           await save();
@@ -4118,7 +4140,7 @@ var createSettingsTab = ({ obsidian: obsidian4, PluginSettingTab: PluginSettingT
           reorder.attach(cell, i);
         });
         const addRule = rulesWrap.createEl("button", { text: t("settings.addTagRule") });
-        addRule.style.marginTop = "2px";
+        addRule.setCssStyles({ marginTop: "2px" });
         addRule.addEventListener("click", async () => {
           this.plugin.settings.tagRules.push({ tag: "", color: accentHex, style: "" });
           await save();
@@ -4265,7 +4287,7 @@ var createSettingsTab = ({ obsidian: obsidian4, PluginSettingTab: PluginSettingT
       }));
       new Setting2(bridgeSection).setName(t("settings.token")).setDesc(t("settings.tokenDesc")).addText((input) => {
         input.setValue(this.plugin.settings.bridgeToken || t("settings.tokenPending")).setDisabled(true);
-        input.inputEl.style.width = "260px";
+        input.inputEl.setCssStyles({ width: "260px" });
       }).addExtraButton((b) => b.setIcon("copy").setTooltip(t("settings.copyToken")).onClick(async () => {
         if (this.plugin.settings.bridgeToken) {
           await navigator.clipboard.writeText(this.plugin.settings.bridgeToken);
@@ -4386,8 +4408,8 @@ var DEFAULT_SETTINGS = {
 };
 var escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var boundedSource = (word) => {
-  const lb = /^[A-Za-z0-9_]/.test(word) ? "(?<![A-Za-z0-9_])" : "";
-  const rb = /[A-Za-z0-9_]$/.test(word) ? "(?![A-Za-z0-9_])" : "";
+  const lb = /^[A-Za-z0-9_]/.test(word) ? "\\b" : "";
+  const rb = /[A-Za-z0-9_]$/.test(word) ? "\\b" : "";
   return lb + escapeRe(word) + rb;
 };
 var escHtml = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] || c);
@@ -4400,7 +4422,7 @@ function cssColorToHex(c) {
   if (!c) return "#888888";
   if (/^#[0-9a-fA-F]{6}$/.test(c.trim())) return c.trim();
   const tmp = document.createElement("div");
-  tmp.style.color = c;
+  tmp.setCssStyles({ color: c });
   document.body.appendChild(tmp);
   const rgb = getComputedStyle(tmp).color;
   tmp.remove();
@@ -4462,7 +4484,7 @@ var LexisReviewView = createReviewView({
   todayStr,
   renderLexisMarkdown
 });
-var LexisBridge = createBridgeServer({ Notice: import_obsidian2.Notice });
+var LexisBridge = createBridgeServer({ Notice: import_obsidian2.Notice, Platform: import_obsidian2.Platform });
 var LexisPlugin = class extends import_obsidian2.Plugin {
   async onload() {
     try {
@@ -4510,7 +4532,7 @@ var LexisPlugin = class extends import_obsidian2.Plugin {
       this.registerEvent(this.app.workspace.on("active-leaf-change", (leaf) => this.syncActivePageHighlightState(leaf)));
       this.statusBarEl = this.addStatusBarItem();
       if (this.statusBarEl) {
-        this.statusBarEl.style.cursor = "pointer";
+        this.statusBarEl.setCssStyles({ cursor: "pointer" });
         this.statusBarEl.setAttribute("aria-label", this.t("status.rebuildAria"));
         this.registerDomEvent(this.statusBarEl, "click", () => this.rebuildIndex(true));
       }

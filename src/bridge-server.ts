@@ -2,12 +2,43 @@
 
 import type { LexisRuntime } from "./types";
 
-function createBridgeServer({ Notice }) {
+interface HttpRequest {
+  method?: string;
+  url?: string;
+  headers: Record<string, string | string[] | undefined>;
+  on(event: "data", listener: (chunk: unknown) => void): void;
+  on(event: "end" | "error", listener: () => void): void;
+  destroy(): void;
+}
+
+interface HttpResponse {
+  writeHead(statusCode: number, headers?: Record<string, string>): void;
+  end(data?: string): void;
+}
+
+interface HttpServer {
+  on(event: "error", listener: (error: Error & { code?: string }) => void): void;
+  listen(port: number, host: string, listener: () => void): void;
+  close(): void;
+}
+
+interface HttpModule {
+  createServer(listener: (request: HttpRequest, response: HttpResponse) => void): HttpServer;
+}
+
+type DesktopGlobal = typeof globalThis & { require?: (moduleName: "http") => HttpModule };
+
+interface BridgeServerDeps {
+  Notice: typeof import("obsidian").Notice;
+  Platform: typeof import("obsidian").Platform;
+}
+
+function createBridgeServer({ Notice, Platform }: BridgeServerDeps) {
   // 外部阅读端（浏览器、未来的 Zotero）只通过这条本机桥接访问 Lexis。
   // 这里负责 HTTP 生命周期与路由；词典规则和写入动作仍由 LexisPlugin 作为唯一真相处理。
   class LexisBridge {
     plugin: LexisRuntime;
-    server: any;
+    server: HttpServer | null;
 
     constructor(plugin: LexisRuntime) {
       this.plugin = plugin;
@@ -24,13 +55,14 @@ function createBridgeServer({ Notice }) {
 
     start() {
       if (this.server) return;
-      let http;
-      try { http = require("http"); } catch (_e) {}
+      if (!Platform.isDesktopApp) { new Notice(this.plugin.t("notice.desktopBridge")); return; }
+      let http: HttpModule | null = null;
+      try { http = (globalThis as DesktopGlobal).require?.("http") ?? null; } catch (_error) {}
       if (!http) { new Notice(this.plugin.t("notice.desktopBridge")); return; }
       const port = Number(this.plugin.settings.bridgePort) || 45945;
       const server = http.createServer((req, res) => {
         this.handle(req, res).catch((err) => {
-          try { res.writeHead(500); res.end(String(err && err.message || err)); } catch (_e) {}
+          try { res.writeHead(500); res.end(String(err instanceof Error ? err.message : err)); } catch (_error) {}
         });
       });
       server.on("error", (err) => {
@@ -62,15 +94,15 @@ function createBridgeServer({ Notice }) {
       };
     }
 
-    async handle(req, res) {
+    async handle(req: HttpRequest, res: HttpResponse) {
       const plugin = this.plugin;
       const cors = this.cors();
-      const send = (code, obj) => {
+      const send = (code: number, obj: unknown) => {
         res.writeHead(code, Object.assign({ "Content-Type": "application/json; charset=utf-8" }, cors));
         res.end(JSON.stringify(obj));
       };
       if (req.method === "OPTIONS") { res.writeHead(204, cors); res.end(); return; }
-      const url = new URL(req.url, "http://127.0.0.1");
+      const url = new URL(req.url ?? "/", "http://127.0.0.1");
       const path = url.pathname.replace(/\/+$/, "") || "/";
       if (path === "/ping" || path === "/") return send(200, { ok: true, app: "lexis", version: plugin.manifest.version, vault: plugin.app.vault.getName() });
       const token = req.headers["x-lexis-token"] || url.searchParams.get("token") || "";
@@ -86,11 +118,14 @@ function createBridgeServer({ Notice }) {
       return send(404, { ok: false, error: "not-found" });
     }
 
-    readBody(req) {
+    readBody(req: HttpRequest): Promise<unknown> {
       return new Promise((resolve) => {
         let data = "";
-        req.on("data", (chunk) => { data += chunk; if (data.length > 1e6) req.destroy(); });
-        req.on("end", () => { try { resolve(JSON.parse(data || "{}")); } catch (_e) { resolve({}); } });
+        req.on("data", (chunk) => {
+          data += typeof chunk === "string" ? chunk : chunk instanceof Uint8Array ? new TextDecoder().decode(chunk) : String(chunk);
+          if (data.length > 1e6) req.destroy();
+        });
+        req.on("end", () => { try { resolve(JSON.parse(data || "{}") as unknown); } catch (_error) { resolve({}); } });
         req.on("error", () => resolve({}));
       });
     }

@@ -54,14 +54,14 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }) => 
       }
     }
     this.backEl = card.createDiv({ cls: "lexis-rv-back" });
-    this.backEl.style.display = "none";
+    this.backEl.setCssStyles({ display: "none" });
     this.showBtn = c.createEl("button", { cls: "mod-cta lexis-rv-show", text: this.plugin.t("review.show") });
     this.showBtn.addEventListener("click", () => this.reveal());
     this.rateBar = c.createDiv({ cls: "lexis-rv-rate" });
-    this.rateBar.style.display = "none";
+    this.rateBar.setCssStyles({ display: "none" });
     const bs = this.plugin.settings.reviewBottomSpace || 70;
     const isPhone = document.body.classList.contains("is-phone");
-    this.rateBar.style.marginBottom = isPhone ? "" : bs + "px";
+    this.rateBar.setCssStyles({ marginBottom: isPhone ? "" : bs + "px" });
     if (isPhone) this.updateMobileRateBarOffset();
     const grades = [[1, "review.again"], [2, "review.hard"], [3, "review.good"], [4, "review.easy"]];
     for (const [g, key] of grades) {
@@ -75,9 +75,9 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }) => 
   async reveal() {
     if (this.revealed) return;
     this.revealed = true;
-    this.showBtn.style.display = "none";
-    this.backEl.style.display = "";
-    this.rateBar.style.display = "";
+    this.showBtn.setCssStyles({ display: "none" });
+    this.backEl.setCssStyles({ display: "" });
+    this.rateBar.setCssStyles({ display: "" });
     try {
       if (this._comp) this._comp.unload();
       this._comp = new Component(); this._comp.load();
@@ -93,7 +93,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }) => 
   updateMobileRateBarOffset() {
     if (!this.rateBar || !document.body.classList.contains("is-phone")) return;
     const navbarHeight = Math.ceil(document.querySelector(".mobile-navbar")?.getBoundingClientRect().height || 58);
-    this.rateBar.style.setProperty("--lexis-mobile-navbar-height", `${navbarHeight}px`);
+    this.rateBar.setCssProps({ "--lexis-mobile-navbar-height": `${navbarHeight}px` });
   }
   async grade(g) {
     if (!this.revealed) { new Notice(this.plugin.t("review.revealFirst")); return; }
@@ -206,7 +206,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }) => 
     const b = d.createEl("button", { cls: "mod-cta", text: this.plugin.t("review.checkAgain") });
     b.onclick = () => { this.plugin.rebuildIndex(false); this.refresh(); };
     this.plugin.renderHeatmap(d.createDiv({ cls: "lexis-hm-wrap" }));
-    c.style.paddingBottom = (this.plugin.settings.reviewBottomSpace || 70) + "px";
+    c.setCssStyles({ paddingBottom: (this.plugin.settings.reviewBottomSpace || 70) + "px" });
   }
 };
 

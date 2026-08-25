@@ -133,10 +133,10 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
           const row = dictsWrap.createDiv({ cls: "lexis-setting-row lexis-dictionary-row" });
           const fIn = new obsidian.TextComponent(row);
           fIn.setPlaceholder(t("settings.folderPlaceholder")).setValue(d.folder || "");
-          fIn.inputEl.style.flex = "1";
+          fIn.inputEl.setCssStyles({ flex: "1" });
           const tIn = new obsidian.TextComponent(row);
           tIn.setPlaceholder(t("settings.templatePlaceholder")).setValue(d.template || "");
-          tIn.inputEl.style.flex = "1.4";
+          tIn.inputEl.setCssStyles({ flex: "1.4" });
           const updateTemplateSource = () => {
             const match = this.plugin.templateProvider.templaterTemplateFor(d.folder);
             tIn.setDisabled(!!match);
@@ -167,7 +167,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
           reorder.attach(row, i);
         });
         const addDict = dictsWrap.createEl("button", { text: t("settings.addDictionary") });
-        addDict.style.marginTop = "2px";
+        addDict.setCssStyles({ marginTop: "2px" });
         addDict.addEventListener("click", async () => { this.plugin.settings.dicts.push({ folder: "", template: "" }); await save(); renderDicts(); });
       };
       renderDicts();
@@ -435,7 +435,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
           reorder.attach(cell, i);
         });
         const addRule = rulesWrap.createEl("button", { text: t("settings.addTagRule") });
-        addRule.style.marginTop = "2px";
+        addRule.setCssStyles({ marginTop: "2px" });
         addRule.addEventListener("click", async () => { this.plugin.settings.tagRules.push({ tag: "", color: accentHex, style: "" }); await save(); renderRules(); });
       };
       renderRules();
@@ -528,7 +528,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
         .addText((t) => t.setValue(String(this.plugin.settings.bridgePort)).onChange(async (v) => { const n = parseInt(v, 10); if (n >= 1024 && n <= 65535) { this.plugin.settings.bridgePort = n; await save(); } }))
         .addExtraButton((b) => b.setIcon("rotate-ccw").setTooltip(t("settings.restartBridge")).onClick(() => { this.plugin.bridge.restart(); new Notice(t("notice.bridgeRestarted")); }));
       new Setting(bridgeSection).setName(t("settings.token")).setDesc(t("settings.tokenDesc"))
-        .addText((input) => { input.setValue(this.plugin.settings.bridgeToken || t("settings.tokenPending")).setDisabled(true); input.inputEl.style.width = "260px"; })
+        .addText((input) => { input.setValue(this.plugin.settings.bridgeToken || t("settings.tokenPending")).setDisabled(true); input.inputEl.setCssStyles({ width: "260px" }); })
         .addExtraButton((b) => b.setIcon("copy").setTooltip(t("settings.copyToken")).onClick(async () => { if (this.plugin.settings.bridgeToken) { await navigator.clipboard.writeText(this.plugin.settings.bridgeToken); new Notice(t("notice.tokenCopied")); } }))
         .addExtraButton((b) => b.setIcon("refresh-cw").setTooltip(t("settings.regenerateToken")).onClick(async () => { this.plugin.settings.bridgeToken = this.plugin.bridge.generateToken(); await save(); this.plugin.bridge.restart(); this.display(); }));
 

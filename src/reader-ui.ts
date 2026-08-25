@@ -42,7 +42,9 @@ function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr
       if (svg) {
         const due = card.due ? ` · 下次复习 ${String(card.due).slice(0, 10)}` : "";
         el.createDiv({ cls: "lexis-section-title", text: `🧠 记忆曲线（复习日期 × 保留率${due}）` });
-        el.createDiv({ cls: "lexis-curve" }).innerHTML = svg;
+        const parsed = new DOMParser().parseFromString(svg, "image/svg+xml");
+        const curve = el.createDiv({ cls: "lexis-curve" });
+        curve.appendChild(document.importNode(parsed.documentElement, true));
       }
     }
 
@@ -67,7 +69,7 @@ function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr
         add.addEventListener("click", async () => {
           if (add.dataset.done) return;
           add.dataset.done = "1";
-          if (await this.addExampleToWord(file, o.sentence, o.file, o.page)) { add.setText(" ✓"); add.style.cursor = "default"; add.removeAttribute("title"); } else delete add.dataset.done;
+          if (await this.addExampleToWord(file, o.sentence, o.file, o.page)) { add.setText(" ✓"); add.setCssStyles({ cursor: "default" }); add.removeAttribute("title"); } else delete add.dataset.done;
         });
         const s2 = dd.createSpan({ cls: "lexis-occ-src", text: " ↗ " + this.occurrenceLabel(o) });
         s2.addEventListener("click", () => this.openOccurrence(o.file, word, o.page));
@@ -190,8 +192,7 @@ function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr
     // 定位:选区下方略偏左;贴边时夹回视口
     const top = Math.min(rect.bottom + 6, window.innerHeight - 36);
     const left = Math.max(6, Math.min(rect.left, window.innerWidth - pill.offsetWidth - 6));
-    pill.style.top = top + "px";
-    pill.style.left = left + "px";
+    pill.setCssStyles({ top: top + "px", left: left + "px" });
     this._selPill = pill;
   }
   preferredSelectionFolder() {
@@ -534,7 +535,7 @@ function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr
             add.addEventListener("click", async () => {
               if (add.dataset.done) return;
               add.dataset.done = "1";
-              if (await this.addExampleToWord(entry.file, o.sentence, o.file, o.page)) { add.setText(" ✓"); add.style.cursor = "default"; add.removeAttribute("title"); } else delete add.dataset.done;
+              if (await this.addExampleToWord(entry.file, o.sentence, o.file, o.page)) { add.setText(" ✓"); add.setCssStyles({ cursor: "default" }); add.removeAttribute("title"); } else delete add.dataset.done;
             });
             const src = d.createSpan({ cls: "lexis-occ-src", text: " ↗ " + this.occurrenceLabel(o) });
             src.addEventListener("click", () => this.openOccurrence(o.file, entry.display, o.page));
@@ -555,22 +556,22 @@ function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr
     if (left < 10) left = 10;
     if (top + pr.height > window.innerHeight - 10) top = r.top + (frameRect ? frameRect.top : 0) - pr.height - 6;
     if (top < 10) top = 10;
-    pop.style.left = left + "px"; pop.style.top = top + "px";
+    pop.setCssStyles({ left: left + "px", top: top + "px" });
   }
   applyPopoverAppearance(pop) {
     if (!pop) return;
     const width = Math.max(260, Number(this.settings.popoverWidth) || 460);
     const height = Math.max(160, Number(this.settings.popoverMaxHeight) || 420);
     const fontSize = Math.max(11, Number(this.settings.popoverFontSize) || 14);
-    pop.style.setProperty("--lexis-popover-width", `${width}px`);
-    pop.style.setProperty("--lexis-popover-height", `${height}px`);
-    pop.style.setProperty("--lexis-popover-font-size", `${fontSize}px`);
+    pop.setCssProps({
+      "--lexis-popover-width": `${width}px`,
+      "--lexis-popover-height": `${height}px`,
+      "--lexis-popover-font-size": `${fontSize}px`,
+    });
     // 内联值保证主题样式无法盖掉用户设置；预览卡用实际高度演示“最大高度”。
-    pop.style.width = `${width}px`;
-    pop.style.fontSize = `${fontSize}px`;
+    pop.setCssStyles({ width: `${width}px`, fontSize: `${fontSize}px` });
     const isPreview = pop.classList?.contains("lexis-popover-preview");
-    pop.style.maxHeight = isPreview ? `${height}px` : "";
-    pop.style.height = isPreview ? `${height}px` : "";
+    pop.setCssStyles({ maxHeight: isPreview ? `${height}px` : "", height: isPreview ? `${height}px` : "" });
   }
   }
   const { constructor: _constructor, ...descriptors } = Object.getOwnPropertyDescriptors(ReaderUi.prototype);

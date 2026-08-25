@@ -1,5 +1,7 @@
 "use strict";
 
+import { Decoration, type DecorationSet, type EditorView, type ViewUpdate, ViewPlugin } from "@codemirror/view";
+import { RangeSetBuilder, StateEffect } from "@codemirror/state";
 import * as obsidian from "obsidian";
 import type { InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats } from "./types";
 
@@ -737,7 +739,7 @@ function createHighlightEngine({ FSRS, Notice, boundedSource, todayStr }) {
     const page = layer.parentElement;
     // pdf.js 的 canvas 实际包在 .canvasWrapper 里,插到 canvas 后面会落进那层容器,
     // 定位/裁切都跟着 canvasWrapper 走,容易跟 textLayer 对不齐——直接挂在 .page 下、textLayer 前面最稳。
-    if (getComputedStyle(page).position === "static") page.style.position = "relative";
+    if (getComputedStyle(page).position === "static") page.setCssStyles({ position: "relative" });
     let hl = page.querySelector(":scope > .lexis-pdf-hl-layer");
     if (!hl) {
       hl = document.createElement("div");
@@ -749,8 +751,16 @@ function createHighlightEngine({ FSRS, Notice, boundedSource, todayStr }) {
     const layerH = layer.offsetHeight || layer.clientHeight || hlBB.height || 1;
     const scaleX = hlBB.width ? hlBB.width / layerW : 1;
     const scaleY = hlBB.height ? hlBB.height / layerH : 1;
-    hl.style.cssText = `position:absolute;left:${layer.offsetLeft}px;top:${layer.offsetTop}px;width:${layerW}px;height:${layerH}px;z-index:1;pointer-events:none;`;
-    hl.innerHTML = "";
+    hl.setCssStyles({
+      position: "absolute",
+      left: `${layer.offsetLeft}px`,
+      top: `${layer.offsetTop}px`,
+      width: `${layerW}px`,
+      height: `${layerH}px`,
+      zIndex: "1",
+      pointerEvents: "none",
+    });
+    hl.empty();
     // 4. 遍历内联 .lexis-hl,在 overlay 层画出对应荧光笔矩形
     const spans = layer.querySelectorAll(".lexis-hl") as NodeListOf<HTMLElement>;
     for (const s of spans) {
@@ -767,7 +777,16 @@ function createHighlightEngine({ FSRS, Notice, boundedSource, todayStr }) {
           const d = document.createElement("div");
           d.className = "lexis-pdf-hl";
           d.dataset.lexisKey = key;
-          d.style.cssText = `position:absolute;left:${(rect.left - hlBB.left) / scaleX}px;top:${(rect.top - hlBB.top) / scaleY}px;width:${rect.width / scaleX}px;height:${rect.height / scaleY}px;background:${this.applyAlpha(color, alpha)};border-radius:2px;pointer-events:auto;`;
+          d.setCssStyles({
+            position: "absolute",
+            left: `${(rect.left - hlBB.left) / scaleX}px`,
+            top: `${(rect.top - hlBB.top) / scaleY}px`,
+            width: `${rect.width / scaleX}px`,
+            height: `${rect.height / scaleY}px`,
+            background: this.applyAlpha(color, alpha),
+            borderRadius: "2px",
+            pointerEvents: "auto",
+          });
           hl.appendChild(d);
         }
       } catch (_e) {}
@@ -871,43 +890,47 @@ function createHighlightEngine({ FSRS, Notice, boundedSource, todayStr }) {
   // ---------- 实时预览高亮 ----------
   setupLiveExtension() {
     try {
-      const { ViewPlugin, Decoration } = require("@codemirror/view");
-      const { RangeSetBuilder, StateEffect } = require("@codemirror/state");
       const editorInfoField = obsidian.editorInfoField;
-      const plugin = this;
-      const refreshEffect = StateEffect.define();
+      const refreshEffect = StateEffect.define<void>();
       this._liveRefreshEffect = refreshEffect;
+      const buildDecorations = (view: EditorView): DecorationSet => {
+        const builder = new RangeSetBuilder<Decoration>();
+        if (!this.settings.enableHighlight || !this.settings.enableLivePreview || !this._pattern) return builder.finish();
+        let selfKeys: Set<string> | null = null;
+        if (editorInfoField) {
+          try {
+            const info = view.state.field(editorInfoField, false);
+            if (info?.file?.path) selfKeys = this.selfKeysFor(info.file.path);
+          } catch (_error) {}
+        }
+        const regex = new RegExp(this._pattern, "gi");
+        for (const { from, to } of view.visibleRanges) {
+          const text = view.state.doc.sliceString(from, to);
+          regex.lastIndex = 0;
+          let match: RegExpExecArray | null;
+          while ((match = regex.exec(text))) {
+            const key = match[0].toLowerCase();
+            if (selfKeys?.has(key)) {
+              if (match[0].length === 0) regex.lastIndex++;
+              continue;
+            }
+            const start = from + match.index;
+            const end = start + match[0].length;
+            const entry = this.index.get(key);
+            if (entry && !entry.inline) this.passiveEncounter(entry.file);
+            builder.add(start, end, Decoration.mark({ class: "lexis-hl", attributes: { "data-lexis-key": key, style: this.inlineStyleForEntry(entry) } }));
+            if (match[0].length === 0) regex.lastIndex++;
+          }
+        }
+        return builder.finish();
+      };
       const ext = ViewPlugin.fromClass(
         class {
-          decorations: any;
-          constructor(view) { this.decorations = this.build(view); }
-          update(u) {
-            const indexChanged = u.transactions.some((tr) => tr.effects.some((effect) => effect.is(refreshEffect)));
-            if (u.docChanged || u.viewportChanged || indexChanged) this.decorations = this.build(u.view);
-          }
-          build(view) {
-            const builder = new RangeSetBuilder();
-            if (!plugin.settings.enableHighlight || !plugin.settings.enableLivePreview || !plugin._pattern) return builder.finish();
-            let selfKeys = null;
-            if (editorInfoField) {
-              try { const info = view.state.field(editorInfoField, false); if (info?.file?.path) selfKeys = plugin.selfKeysFor(info.file.path); } catch (_e) {}
-            }
-            const regex = new RegExp(plugin._pattern, "gi");
-            for (const { from, to } of view.visibleRanges) {
-              const text = view.state.doc.sliceString(from, to);
-              regex.lastIndex = 0;
-              let m;
-              while ((m = regex.exec(text))) {
-                const key = m[0].toLowerCase();
-                if (selfKeys && selfKeys.has(key)) { if (m[0].length === 0) regex.lastIndex++; continue; }
-                const start = from + m.index, end = start + m[0].length;
-                const entry = plugin.index.get(key);
-                if (entry && !entry.inline) plugin.passiveEncounter(entry.file);
-                builder.add(start, end, Decoration.mark({ class: "lexis-hl", attributes: { "data-lexis-key": key, style: plugin.inlineStyleForEntry(entry) } }));
-                if (m[0].length === 0) regex.lastIndex++;
-              }
-            }
-            return builder.finish();
+          decorations: DecorationSet;
+          constructor(view: EditorView) { this.decorations = buildDecorations(view); }
+          update(update: ViewUpdate) {
+            const indexChanged = update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(refreshEffect)));
+            if (update.docChanged || update.viewportChanged || indexChanged) this.decorations = buildDecorations(update.view);
           }
         },
         { decorations: (v) => v.decorations }

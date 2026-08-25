@@ -40,8 +40,7 @@ function createReorderController({ container, onMove, setIcon, label = "Reorder"
   };
   const floatingPosition = (x, y) => {
     if (!draggedRow) return;
-    draggedRow.style.left = `${Math.round(x - offsetX)}px`;
-    draggedRow.style.top = `${Math.round(y - offsetY)}px`;
+    draggedRow.setCssStyles({ left: `${Math.round(x - offsetX)}px`, top: `${Math.round(y - offsetY)}px` });
   };
   const targetAt = (x, y) => {
     const doc = container.ownerDocument || document;
@@ -81,16 +80,18 @@ function createReorderController({ container, onMove, setIcon, label = "Reorder"
     placeholder = doc.createElement("div");
     placeholder.className = "lexis-sortable-placeholder";
     placeholder.setAttribute("aria-hidden", "true");
-    placeholder.style.height = `${Math.ceil(rect.height)}px`;
+    placeholder.setCssStyles({ height: `${Math.ceil(rect.height)}px` });
     container.insertBefore(placeholder, row);
     row.classList.add("is-dragging", "is-floating");
-    row.style.position = "fixed";
-    row.style.width = `${Math.ceil(rect.width)}px`;
-    row.style.left = `${Math.round(rect.left)}px`;
-    row.style.top = `${Math.round(rect.top)}px`;
-    row.style.margin = "0";
-    row.style.zIndex = "1000";
-    row.style.pointerEvents = "none";
+    row.setCssStyles({
+      position: "fixed",
+      width: `${Math.ceil(rect.width)}px`,
+      left: `${Math.round(rect.left)}px`,
+      top: `${Math.round(rect.top)}px`,
+      margin: "0",
+      zIndex: "1000",
+      pointerEvents: "none",
+    });
     floatingPosition(pointerX, pointerY);
     try { handle.setPointerCapture?.(event.pointerId); } catch (_e) {}
   };
@@ -168,7 +169,7 @@ function addAppearanceButton({ app, obsidian, parent, title, state, onChange, on
   const button = new obsidian.ExtraButtonComponent(parent).setIcon("palette").setTooltip(title);
   const refreshButton = () => {
     const color = state().color;
-    button.extraSettingsEl.style.color = color || "var(--text-accent)";
+    button.extraSettingsEl.setCssStyles({ color: color || "var(--text-accent)" });
   };
   button.onClick(() => {
     const modal = new obsidian.Modal(app);

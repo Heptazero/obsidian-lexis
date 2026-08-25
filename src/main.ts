@@ -8,7 +8,7 @@
  */
 
 import * as obsidian from "obsidian";
-import { Plugin, PluginSettingTab, Setting, Notice, TFolder, TFile, Component, MarkdownRenderer, ItemView, Modal, finishRenderMath } from "obsidian";
+import { Plugin, PluginSettingTab, Setting, Notice, Platform, TFolder, TFile, Component, MarkdownRenderer, ItemView, Modal, finishRenderMath } from "obsidian";
 import { createI18n } from "./i18n";
 import { buildCurveSVG } from "./curve";
 import { createReviewView } from "./review-view";
@@ -109,8 +109,8 @@ const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // 词边界(支持中文):只有当词以英文字母/数字/下划线开头或结尾时才加 ASCII 边界
 // (避免 cat 命中 category);中文/日文等无空格语言不加边界,否则 \b 永不命中。
 const boundedSource = (word) => {
-  const lb = /^[A-Za-z0-9_]/.test(word) ? "(?<![A-Za-z0-9_])" : "";
-  const rb = /[A-Za-z0-9_]$/.test(word) ? "(?![A-Za-z0-9_])" : "";
+  const lb = /^[A-Za-z0-9_]/.test(word) ? "\\b" : "";
+  const rb = /[A-Za-z0-9_]$/.test(word) ? "\\b" : "";
   return lb + escapeRe(word) + rb;
 };
 const escHtml = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] || c));
@@ -127,7 +127,7 @@ function cssColorToHex(c) {
   if (!c) return "#888888";
   if (/^#[0-9a-fA-F]{6}$/.test(c.trim())) return c.trim();
   const tmp = document.createElement("div");
-  tmp.style.color = c; document.body.appendChild(tmp);
+  tmp.setCssStyles({ color: c }); document.body.appendChild(tmp);
   const rgb = getComputedStyle(tmp).color; tmp.remove();
   const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(rgb);
   if (!m) return "#888888";
@@ -163,7 +163,7 @@ const LexisReviewView = createReviewView({
   renderLexisMarkdown,
 });
 
-const LexisBridge = createBridgeServer({ Notice });
+const LexisBridge = createBridgeServer({ Notice, Platform });
 
 class LexisPlugin extends Plugin {
   [key: string]: any;
@@ -220,7 +220,7 @@ class LexisPlugin extends Plugin {
 
     this.statusBarEl = this.addStatusBarItem();
     if (this.statusBarEl) {
-      this.statusBarEl.style.cursor = "pointer";
+      this.statusBarEl.setCssStyles({ cursor: "pointer" });
       this.statusBarEl.setAttribute("aria-label", this.t("status.rebuildAria"));
       this.registerDomEvent(this.statusBarEl, "click", () => this.rebuildIndex(true));
     }

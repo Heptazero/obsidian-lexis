@@ -2,6 +2,16 @@
 
 自建的 Obsidian 单词学习插件。源码使用 TypeScript，发布时由 esbuild 合并为单个 `main.js`；数据仍全部存在自己的 `.md` 文件里。
 
+## fix: 通过社区目录自动审核 v1.15.2
+
+- 接入 Obsidian 官方 `eslint-plugin-obsidianmd`，本地复现社区目录的源码扫描。
+- 清除 32 项审核风险：动态样式改用 `setCssStyles` / `setCssProps`，HTML 与 SVG 改用 `DOMParser`，移除正则后行断言。
+- `minAppVersion` 从 `1.4.0` 校准为实际 API 下限 `1.7.2`，不再把新 API 伪装成旧版本兼容。
+- CodeMirror 改为明确依赖和静态类型导入；本机 HTTP 桥接收口到 `Platform.isDesktopApp` 后的桌面适配层。
+- 发布前门槛增加 TypeScript 检查、正式构建和官方风险规则复核。
+
+---
+
 ## refactor: Obsidian 源码迁移到 TypeScript v1.15.1
 
 - `src/` 全部迁移为 `.ts`，新增 `LexisSettings`、`LexisEntry`、内联分类、桥接词条等核心类型。

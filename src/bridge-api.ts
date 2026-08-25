@@ -440,9 +440,9 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, escapeR
         host.remove();
         if (prev && /^H[1-6]$/.test(prev.tagName)) { const nx = prev.nextElementSibling; if (!nx || /^H[1-6]$/.test(nx.tagName)) prev.remove(); }
       } else {
-        const wrap = document.createElement("div");
-        wrap.innerHTML = html;
-        host.replaceWith(...Array.from(wrap.childNodes));
+        const parsed = new DOMParser().parseFromString(html, "text/html");
+        const nodes = Array.from(parsed.body.childNodes, (node) => document.importNode(node, true));
+        host.replaceWith(...nodes);
       }
     }
     // 压缩空段标题:遍历 h1~h6,到下一个标题之间无内容且无 .lexis-web-* 块则删除
