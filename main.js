@@ -2044,8 +2044,8 @@ function createHighlightEngine({ Notice: Notice3, boundedSource: boundedSource2,
         regex.lastIndex = 0;
         const frag = createFragment();
         let last = 0;
-        let m = regex.exec(text);
-        while (m) {
+        let m;
+        while (m = regex.exec(text)) {
           if (m.index > last) frag.appendChild(doc.createTextNode(text.slice(last, m.index)));
           const key = m[0].toLowerCase();
           if (excludeKeys && excludeKeys.has(key)) {
@@ -2064,7 +2064,6 @@ function createHighlightEngine({ Notice: Notice3, boundedSource: boundedSource2,
           frag.appendChild(span);
           last = m.index + m[0].length;
           if (m[0].length === 0) regex.lastIndex++;
-          m = regex.exec(text);
         }
         if (last < text.length) frag.appendChild(doc.createTextNode(text.slice(last)));
         node.parentNode?.replaceChild(frag, node);
@@ -2160,12 +2159,13 @@ function createHighlightEngine({ Notice: Notice3, boundedSource: boundedSource2,
       const streams = runs.map((run) => this.pdfRunStream(run));
       const candidates = [];
       const nodeOrder = /* @__PURE__ */ new WeakMap();
+      const regex = new RegExp(this._pattern, "gi");
       let order = 0;
       for (const run of runs) for (const part of run.parts) if (!nodeOrder.has(part.node)) nodeOrder.set(part.node, order++);
       const collect = (stream, accepts, droppedHyphen) => {
-        const regex = new RegExp(this._pattern, "gi");
-        let match = regex.exec(stream.text);
-        while (match) {
+        regex.lastIndex = 0;
+        let match;
+        while (match = regex.exec(stream.text)) {
           const refs = stream.map.slice(match.index, match.index + match[0].length).filter((ref) => ref !== null);
           if (!refs.length || !accepts(refs)) {
             if (!match[0].length) regex.lastIndex++;
@@ -2189,7 +2189,6 @@ function createHighlightEngine({ Notice: Notice3, boundedSource: boundedSource2,
           const segments = [...byNode.values()].sort((a, b) => (nodeOrder.get(a.node) || 0) - (nodeOrder.get(b.node) || 0));
           candidates.push({ key, entry, segments, length: match[0].length });
           if (!match[0].length) regex.lastIndex++;
-          match = regex.exec(stream.text);
         }
       };
       for (let i = 0; i < runs.length; i++) {
@@ -2293,17 +2292,21 @@ function createHighlightEngine({ Notice: Notice3, boundedSource: boundedSource2,
         window.clearTimeout(this._pdfResizeTimer);
         this._pdfResizeTimer = 0;
       }
+      this._pdfScheduleFlush = null;
       this._pdfObservedLayers = /* @__PURE__ */ new WeakSet();
       if (!this.settings.enablePdfHighlight || typeof MutationObserver === "undefined") return;
       this._pdfPending = /* @__PURE__ */ new Set();
       const flush = () => {
         this._pdfRaf = 0;
-        const items = [...this._pdfPending];
-        this._pdfPending.clear();
-        for (const layer of items) if (layer.isConnected) this.scanPdfLayer(layer);
-        activeDocument.querySelectorAll(".lexis-pdf-hl-layer.is-geometry-changing").forEach((el) => el.classList.remove("is-geometry-changing"));
+        const next = this._pdfPending.values().next();
+        if (!next.done) {
+          this._pdfPending.delete(next.value);
+          if (next.value.isConnected) this.scanPdfLayer(next.value);
+        }
+        if (this._pdfPending.size) this._pdfRaf = window.requestAnimationFrame(flush);
+        else activeDocument.querySelectorAll(".lexis-pdf-hl-layer.is-geometry-changing").forEach((el) => el.classList.remove("is-geometry-changing"));
       };
-      const scheduleFlush = (delay) => {
+      const scheduleFlush = (delay = 0) => {
         if (delay) {
           window.clearTimeout(this._pdfResizeTimer);
           this._pdfResizeTimer = window.setTimeout(() => {
@@ -2312,6 +2315,7 @@ function createHighlightEngine({ Notice: Notice3, boundedSource: boundedSource2,
           }, delay);
         } else if (this._pdfPending.size && !this._pdfRaf) this._pdfRaf = window.requestAnimationFrame(flush);
       };
+      this._pdfScheduleFlush = scheduleFlush;
       if (typeof ResizeObserver !== "undefined") {
         this._pdfResizeObserver = new ResizeObserver((entries) => {
           for (const entry of entries) {
@@ -2357,7 +2361,8 @@ function createHighlightEngine({ Notice: Notice3, boundedSource: boundedSource2,
         if (geometryChanged) scheduleFlush(220);
       });
       this._pdfObserver.observe(activeDocument.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["style"] });
-      activeDocument.querySelectorAll(".textLayer").forEach((layer) => this.scanPdfLayer(layer));
+      activeDocument.querySelectorAll(".textLayer").forEach((layer) => this.markPdfGeometryChanging(layer));
+      scheduleFlush();
     }
     observePdfLayer(layer) {
       if (!this._pdfResizeObserver || !layer || this._pdfObservedLayers?.has(layer)) return;
@@ -2448,6 +2453,7 @@ function createHighlightEngine({ Notice: Notice3, boundedSource: boundedSource2,
         window.clearTimeout(this._pdfResizeTimer);
         this._pdfResizeTimer = 0;
       }
+      this._pdfScheduleFlush = null;
       this._pdfObservedLayers = null;
       activeDocument.querySelectorAll(".lexis-pdf-hl-layer").forEach((layer) => layer.remove());
       activeDocument.querySelectorAll(".textLayer .lexis-hl").forEach((span) => {
@@ -2464,8 +2470,9 @@ function createHighlightEngine({ Notice: Notice3, boundedSource: boundedSource2,
       activeDocument.querySelectorAll(".lexis-pdf-hl-layer").forEach((layer) => layer.remove());
       activeDocument.querySelectorAll(".textLayer").forEach((layer) => {
         layer.normalize();
-        this.scanPdfLayer(layer);
+        this.markPdfGeometryChanging(layer);
       });
+      this._pdfScheduleFlush?.();
     }
     // ---------- 第三方 EPUB 阅读器高亮 ----------
     // EPUB Marginalia 与 ePub Reader 都用 epub.js,章节放在同源 iframe 中。
