@@ -1,5 +1,8 @@
 "use strict";
 
+import type { App } from "obsidian";
+import type { HighlightStyle } from "./types";
+
 function moveItem<T>(items: Iterable<T> | ArrayLike<T>, from: number, to: number): T[] {
   const next = Array.from(items || []);
   if (from === to || from < 0 || to < 0 || from >= next.length || to >= next.length) return next;
@@ -20,17 +23,17 @@ function createReorderController({ container, onMove, setIcon, label = "Reorder"
   let from = -1;
   let active = false;
   let timer = 0;
-  let pointerId = null;
+  let pointerId: number | null = null;
   let activeHandle: HTMLElement | null = null;
   let draggedRow: HTMLElement | null = null;
   let placeholder: HTMLElement | null = null;
-  let savedStyle = null;
+  let savedStyle: string | null = null;
   let offsetX = 0;
   let offsetY = 0;
   let pointerX = 0;
   let pointerY = 0;
 
-  const rows = () => Array.from(container.children).filter((el): el is HTMLElement => el instanceof HTMLElement && el.classList.contains("lexis-sortable-item"));
+  const rows = () => Array.from(container.children).filter((el): el is HTMLElement => el.instanceOf(HTMLElement) && el.classList.contains("lexis-sortable-item"));
   const candidates = () => rows().filter((row) => row !== draggedRow);
   const restoreRow = () => {
     if (!draggedRow) return;
@@ -38,15 +41,15 @@ function createReorderController({ container, onMove, setIcon, label = "Reorder"
     if (savedStyle == null) draggedRow.removeAttribute("style");
     else draggedRow.setAttribute("style", savedStyle);
   };
-  const floatingPosition = (x, y) => {
+  const floatingPosition = (x: number, y: number) => {
     if (!draggedRow) return;
     draggedRow.setCssStyles({ left: `${Math.round(x - offsetX)}px`, top: `${Math.round(y - offsetY)}px` });
   };
-  const targetAt = (x, y) => {
+  const targetAt = (x: number, y: number): HTMLElement | null => {
     const doc = container.ownerDocument || document;
     const direct = doc.elementFromPoint?.(x, y)?.closest?.(".lexis-sortable-item");
-    if (direct?.parentElement === container && direct !== draggedRow) return direct;
-    let nearest = null;
+    if (direct?.instanceOf(HTMLElement) && direct.parentElement === container && direct !== draggedRow) return direct;
+    let nearest: HTMLElement | null = null;
     let distance = Infinity;
     for (const row of candidates()) {
       const rect = row.getBoundingClientRect();
@@ -57,7 +60,7 @@ function createReorderController({ container, onMove, setIcon, label = "Reorder"
     }
     return nearest;
   };
-  const movePlaceholder = (target, x, y) => {
+  const movePlaceholder = (target: HTMLElement | null, x: number, y: number) => {
     if (!placeholder || !target) return;
     const rect = target.getBoundingClientRect();
     const view = container.ownerDocument?.defaultView || window;
@@ -67,8 +70,7 @@ function createReorderController({ container, onMove, setIcon, label = "Reorder"
     const reference = after ? target.nextSibling : target;
     if (reference !== placeholder) container.insertBefore(placeholder, reference);
   };
-  const begin = (row, handle, index, event) => {
-    const doc = container.ownerDocument || document;
+  const begin = (row: HTMLElement, handle: HTMLElement, index: number, event: PointerEvent) => {
     const rect = row.getBoundingClientRect();
     from = index;
     active = true;
@@ -77,8 +79,7 @@ function createReorderController({ container, onMove, setIcon, label = "Reorder"
     savedStyle = row.getAttribute("style");
     offsetX = pointerX - rect.left;
     offsetY = pointerY - rect.top;
-    placeholder = doc.createElement("div");
-    placeholder.className = "lexis-sortable-placeholder";
+    placeholder = container.createDiv({ cls: "lexis-sortable-placeholder" });
     placeholder.setAttribute("aria-hidden", "true");
     placeholder.setCssStyles({ height: `${Math.ceil(rect.height)}px` });
     container.insertBefore(placeholder, row);
@@ -93,7 +94,7 @@ function createReorderController({ container, onMove, setIcon, label = "Reorder"
       pointerEvents: "none",
     });
     floatingPosition(pointerX, pointerY);
-    try { handle.setPointerCapture?.(event.pointerId); } catch (_e) {}
+    try { handle.setPointerCapture?.(event.pointerId); } catch { /* Pointer capture is optional. */ }
   };
   const finish = () => {
     window.clearTimeout(timer);
@@ -101,7 +102,7 @@ function createReorderController({ container, onMove, setIcon, label = "Reorder"
     const start = from;
     let target = start;
     if (active && placeholder && draggedRow) {
-      const order = Array.from(container.children).filter((el) => el === placeholder || (el instanceof HTMLElement && el.classList.contains("lexis-sortable-item") && el !== draggedRow));
+      const order = Array.from(container.children).filter((el) => el === placeholder || (el.instanceOf(HTMLElement) && el.classList.contains("lexis-sortable-item") && el !== draggedRow));
       target = order.indexOf(placeholder);
       container.insertBefore(draggedRow, placeholder);
       placeholder.remove();
@@ -110,14 +111,14 @@ function createReorderController({ container, onMove, setIcon, label = "Reorder"
     from = -1;
     active = false;
     if (activeHandle && pointerId != null) {
-      try { activeHandle.releasePointerCapture?.(pointerId); } catch (_e) {}
+      try { activeHandle.releasePointerCapture?.(pointerId); } catch { /* Pointer capture is optional. */ }
     }
     activeHandle = null;
     pointerId = null;
     draggedRow = null;
     placeholder = null;
     savedStyle = null;
-    if (start >= 0 && target >= 0 && start !== target) onMove(start, target);
+    if (start >= 0 && target >= 0 && start !== target) void onMove(start, target);
   };
 
   return {
@@ -141,7 +142,7 @@ function createReorderController({ container, onMove, setIcon, label = "Reorder"
         pointerId = event.pointerId;
         pointerX = event.clientX;
         pointerY = event.clientY;
-        try { handle.setPointerCapture?.(event.pointerId); } catch (_e) {}
+        try { handle.setPointerCapture?.(event.pointerId); } catch { /* Pointer capture is optional. */ }
         if (event.pointerType === "touch") timer = window.setTimeout(() => begin(item, handle, index, event), longPressMs);
         else {
           event.preventDefault();
@@ -165,7 +166,43 @@ function createReorderController({ container, onMove, setIcon, label = "Reorder"
   };
 }
 
-function addAppearanceButton({ app, obsidian, parent, title, state, onChange, onReset, labels, allowStyle = false }) {
+interface AppearanceState {
+  color: string;
+  opacity: number;
+  style?: HighlightStyle | "";
+}
+
+interface AppearancePatch {
+  color?: string;
+  opacity?: number;
+  style?: HighlightStyle | "";
+}
+
+interface AppearanceLabels {
+  color: string;
+  opacity: string;
+  style: string;
+  defaultStyle: string;
+  wavy: string;
+  underline: string;
+  background: string;
+  reset: string;
+  done: string;
+}
+
+interface AppearanceButtonOptions {
+  app: App;
+  obsidian: typeof import("obsidian");
+  parent: HTMLElement;
+  title: string;
+  state: () => AppearanceState;
+  onChange: (patch: AppearancePatch) => void | Promise<void>;
+  onReset: () => void | Promise<void>;
+  labels: AppearanceLabels;
+  allowStyle?: boolean;
+}
+
+function addAppearanceButton({ app, obsidian, parent, title, state, onChange, onReset, labels, allowStyle = false }: AppearanceButtonOptions) {
   const button = new obsidian.ExtraButtonComponent(parent).setIcon("palette").setTooltip(title);
   const refreshButton = () => {
     const color = state().color;
@@ -177,9 +214,9 @@ function addAppearanceButton({ app, obsidian, parent, title, state, onChange, on
       modal.contentEl.empty();
       modal.contentEl.createEl("h3", { text: title });
       new obsidian.Setting(modal.contentEl).setName(labels.color)
-        .addColorPicker((picker) => picker.setValue(state().color).onChange(async (color) => { await onChange({ color }); refreshButton(); }));
+        .addColorPicker((picker) => picker.setValue(state().color).onChange((color) => { void Promise.resolve(onChange({ color })).then(refreshButton); }));
       new obsidian.Setting(modal.contentEl).setName(labels.opacity)
-        .addSlider((slider) => slider.setLimits(0.1, 1, 0.05).setValue(state().opacity).setDynamicTooltip().onChange((opacity) => onChange({ opacity })));
+        .addSlider((slider) => slider.setLimits(0.1, 1, 0.05).setValue(state().opacity).onChange((opacity) => { void onChange({ opacity }); }));
       if (allowStyle) {
         new obsidian.Setting(modal.contentEl).setName(labels.style)
           .addDropdown((dropdown) => dropdown
@@ -188,10 +225,10 @@ function addAppearanceButton({ app, obsidian, parent, title, state, onChange, on
             .addOption("underline", labels.underline)
             .addOption("background", labels.background)
             .setValue(state().style || "")
-            .onChange((style) => onChange({ style })));
+            .onChange((style) => { void onChange({ style: style as HighlightStyle | "" }); }));
       }
       new obsidian.Setting(modal.contentEl)
-        .addButton((reset) => reset.setButtonText(labels.reset).onClick(async () => { await onReset(); refreshButton(); modal.close(); }))
+        .addButton((reset) => reset.setButtonText(labels.reset).onClick(() => { void Promise.resolve(onReset()).then(() => { refreshButton(); modal.close(); }); }))
         .addButton((done) => done.setButtonText(labels.done).setCta().onClick(() => modal.close()));
     };
     modal.open();

@@ -1,6 +1,7 @@
 "use strict";
 
-import type { LexisRuntime } from "./types";
+import type { App } from "obsidian";
+import type { LexisSettings } from "./types";
 
 interface HttpRequest {
   method?: string;
@@ -26,7 +27,23 @@ interface HttpModule {
   createServer(listener: (request: HttpRequest, response: HttpResponse) => void): HttpServer;
 }
 
-type DesktopGlobal = typeof globalThis & { require?: (moduleName: "http") => HttpModule };
+type DesktopWindow = Window & { require?: (moduleName: "http") => HttpModule };
+
+interface BridgePlugin {
+  app: App;
+  manifest: { version: string };
+  settings: LexisSettings;
+  t(key: string, vars?: Record<string, string | number | boolean | null | undefined>): string;
+  updateStatusBar(): void;
+  bridgeWordList(): unknown;
+  bridgeWordDetail(key: string | null): Promise<unknown>;
+  bridgeDeleteWord(key: string): Promise<unknown>;
+  bridgeAddWord(payload: Record<string, unknown>): Promise<unknown>;
+  bridgeTagWord(payload: Record<string, unknown>): Promise<unknown>;
+  bridgeAnnotate(payload: Record<string, unknown>): Promise<unknown>;
+  bridgeMoveWord(payload: Record<string, unknown>): Promise<unknown>;
+  bridgeEncounter(payload: Record<string, unknown>): Promise<unknown>;
+}
 
 interface BridgeServerDeps {
   Notice: typeof import("obsidian").Notice;
@@ -37,10 +54,10 @@ function createBridgeServer({ Notice, Platform }: BridgeServerDeps) {
   // 外部阅读端（浏览器、未来的 Zotero）只通过这条本机桥接访问 Lexis。
   // 这里负责 HTTP 生命周期与路由；词典规则和写入动作仍由 LexisPlugin 作为唯一真相处理。
   class LexisBridge {
-    plugin: LexisRuntime;
+    plugin: BridgePlugin;
     server: HttpServer | null;
 
-    constructor(plugin: LexisRuntime) {
+    constructor(plugin: BridgePlugin) {
       this.plugin = plugin;
       this.server = null;
     }
@@ -57,12 +74,12 @@ function createBridgeServer({ Notice, Platform }: BridgeServerDeps) {
       if (this.server) return;
       if (!Platform.isDesktopApp) { new Notice(this.plugin.t("notice.desktopBridge")); return; }
       let http: HttpModule | null = null;
-      try { http = (globalThis as DesktopGlobal).require?.("http") ?? null; } catch (_error) {}
+      try { http = (window as DesktopWindow).require?.("http") ?? null; } catch { /* Desktop require may be unavailable during shutdown. */ }
       if (!http) { new Notice(this.plugin.t("notice.desktopBridge")); return; }
       const port = Number(this.plugin.settings.bridgePort) || 45945;
       const server = http.createServer((req, res) => {
         this.handle(req, res).catch((err) => {
-          try { res.writeHead(500); res.end(String(err instanceof Error ? err.message : err)); } catch (_error) {}
+          try { res.writeHead(500); res.end(err instanceof Error ? err.message : "Internal error"); } catch { /* The socket may already be closed. */ }
         });
       });
       server.on("error", (err) => {
@@ -76,7 +93,7 @@ function createBridgeServer({ Notice, Platform }: BridgeServerDeps) {
 
     stop() {
       if (!this.server) return;
-      try { this.server.close(); } catch (_e) {}
+      this.server.close();
       this.server = null;
       this.plugin.updateStatusBar();
     }
@@ -105,7 +122,8 @@ function createBridgeServer({ Notice, Platform }: BridgeServerDeps) {
       const url = new URL(req.url ?? "/", "http://127.0.0.1");
       const path = url.pathname.replace(/\/+$/, "") || "/";
       if (path === "/ping" || path === "/") return send(200, { ok: true, app: "lexis", version: plugin.manifest.version, vault: plugin.app.vault.getName() });
-      const token = req.headers["x-lexis-token"] || url.searchParams.get("token") || "";
+      const tokenHeader = req.headers["x-lexis-token"];
+      const token = (Array.isArray(tokenHeader) ? tokenHeader[0] : tokenHeader) || url.searchParams.get("token") || "";
       if (!plugin.settings.bridgeToken || token !== plugin.settings.bridgeToken) return send(401, { ok: false, error: "bad-token" });
       if (path === "/words" && req.method === "GET") return send(200, plugin.bridgeWordList());
       if (path === "/word" && req.method === "GET") return send(200, await plugin.bridgeWordDetail(url.searchParams.get("key") || url.searchParams.get("w")));
@@ -118,14 +136,14 @@ function createBridgeServer({ Notice, Platform }: BridgeServerDeps) {
       return send(404, { ok: false, error: "not-found" });
     }
 
-    readBody(req: HttpRequest): Promise<unknown> {
+    readBody(req: HttpRequest): Promise<Record<string, unknown>> {
       return new Promise((resolve) => {
         let data = "";
         req.on("data", (chunk) => {
-          data += typeof chunk === "string" ? chunk : chunk instanceof Uint8Array ? new TextDecoder().decode(chunk) : String(chunk);
+          data += typeof chunk === "string" ? chunk : chunk instanceof Uint8Array ? new TextDecoder().decode(chunk) : "";
           if (data.length > 1e6) req.destroy();
         });
-        req.on("end", () => { try { resolve(JSON.parse(data || "{}") as unknown); } catch (_error) { resolve({}); } });
+        req.on("end", () => { try { const parsed: unknown = JSON.parse(data || "{}"); resolve(parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}); } catch { resolve({}); } });
         req.on("error", () => resolve({}));
       });
     }

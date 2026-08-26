@@ -1,10 +1,69 @@
 "use strict";
 
+import type { App, TFile } from "obsidian";
+
 // 出处搜索只负责把不同文件类型统一成 { file, sentence, page? }。
 // UI、收藏格式和跳转行为留在主插件，后续接 EPUB/Zotero 时不用改搜索核心。
 
-function pdfItemsToText(items) {
-  let out = "", prev = null;
+interface PdfTextItem {
+  str?: string;
+  hasEOL?: boolean;
+  transform?: number[];
+  width?: number;
+}
+
+interface PdfTextContent {
+  items: PdfTextItem[];
+}
+
+interface PdfPage {
+  getTextContent(): Promise<PdfTextContent>;
+  cleanup?(): void;
+}
+
+interface PdfDocument {
+  numPages: number;
+  getPage(page: number): Promise<PdfPage>;
+  destroy?(): Promise<void>;
+}
+
+interface PdfLoadingTask {
+  promise: Promise<PdfDocument>;
+}
+
+export interface PdfJsRuntime {
+  getDocument(options: { data: Uint8Array }): PdfLoadingTask;
+}
+
+export interface Occurrence {
+  file: TFile;
+  sentence: string;
+  page?: number;
+}
+
+interface PdfPageText {
+  page: number;
+  text: string;
+}
+
+interface OccurrenceSearchOptions {
+  app: App;
+  loadPdfJs: () => Promise<PdfJsRuntime>;
+  boundedSource: (word: string) => string;
+  extractSentence: (content: string, index: number) => string;
+  markdownAllowed: (file: TFile) => boolean;
+  inScope: (path: string, scope: string[]) => boolean;
+}
+
+export interface OccurrenceSearch {
+  clearResults(): void;
+  invalidatePdf(path?: string): void;
+  find(word: string, options?: { limit?: number; scope?: string[]; includePdf?: boolean }): Promise<Occurrence[]>;
+}
+
+function pdfItemsToText(items: PdfTextItem[]): string {
+  let out = "";
+  let prev: PdfTextItem | null = null;
   for (const item of items || []) {
     const text = String(item && item.str || "");
     if (!text) { if (item && item.hasEOL) out += "\n"; continue; }
@@ -31,15 +90,15 @@ function pdfItemsToText(items) {
   return out;
 }
 
-function normalizePdfText(text) {
+function normalizePdfText(text: string): string {
   return String(text || "")
     .replace(/([\p{L}\p{N}])-\s*\n\s*([\p{L}\p{N}])/gu, "$1$2")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-function mergeOccurrences(markdown, pdf, limit) {
-  const out = [], max = Math.max(1, Number(limit) || 1);
+function mergeOccurrences(markdown: Occurrence[], pdf: Occurrence[], limit: number): Occurrence[] {
+  const out: Occurrence[] = [], max = Math.max(1, Number(limit) || 1);
   for (let i = 0; out.length < max && (i < markdown.length || i < pdf.length); i++) {
     if (i < markdown.length) out.push(markdown[i]);
     if (out.length < max && i < pdf.length) out.push(pdf[i]);
@@ -47,22 +106,22 @@ function mergeOccurrences(markdown, pdf, limit) {
   return out;
 }
 
-function createOccurrenceSearch(options) {
+function createOccurrenceSearch(options: OccurrenceSearchOptions): OccurrenceSearch {
   const { app, loadPdfJs, boundedSource, extractSentence, markdownAllowed, inScope } = options;
-  const pdfCache = new Map();
+  const pdfCache = new Map<string, { signature: string; promise: Promise<PdfPageText[]> }>();
 
-  const readPdfPages = async (file) => {
+  const readPdfPages = async (file: TFile): Promise<PdfPageText[]> => {
     const signature = `${file.stat && file.stat.mtime || 0}:${file.stat && file.stat.size || 0}`;
     const cached = pdfCache.get(file.path);
     if (cached && cached.signature === signature) return cached.promise;
     const promise = (async () => {
-      let doc = null;
+      let doc: PdfDocument | null = null;
       try {
         const pdfjs = await loadPdfJs();
         const buffer = await app.vault.readBinary(file);
         const task = pdfjs.getDocument({ data: new Uint8Array(buffer) });
         doc = await task.promise;
-        const pages = [];
+        const pages: PdfPageText[] = [];
         for (let page = 1; page <= doc.numPages; page++) {
           const pdfPage = await doc.getPage(page);
           const content = await pdfPage.getTextContent();
@@ -75,28 +134,30 @@ function createOccurrenceSearch(options) {
         console.warn(`[Lexis] PDF 出处扫描失败: ${file.path}`, error);
         return [];
       } finally {
-        if (doc && doc.destroy) { try { await doc.destroy(); } catch (_e) {} }
+        if (doc?.destroy) {
+          try { await doc.destroy(); } catch { /* PDF.js cleanup is best-effort. */ }
+        }
       }
     })();
     pdfCache.set(file.path, { signature, promise });
     return promise;
   };
 
-  const searchMarkdown = async (word, limit, scope) => {
-    const re = new RegExp(boundedSource(word), "i"), results = [];
+  const searchMarkdown = async (word: string, limit: number, scope: string[]): Promise<Occurrence[]> => {
+    const re = new RegExp(boundedSource(word), "i"), results: Occurrence[] = [];
     const files = app.vault.getMarkdownFiles().filter((file) => markdownAllowed(file) && inScope(file.path, scope));
     for (const file of files) {
       if (results.length >= limit) break;
-      let content;
-      try { content = await app.vault.cachedRead(file); } catch (_e) { continue; }
+      let content: string;
+      try { content = await app.vault.cachedRead(file); } catch { continue; }
       const index = content.search(re);
       if (index >= 0) results.push({ file, sentence: extractSentence(content, index) });
     }
     return results;
   };
 
-  const searchPdf = async (word, limit, scope) => {
-    const re = new RegExp(boundedSource(word), "i"), results = [];
+  const searchPdf = async (word: string, limit: number, scope: string[]): Promise<Occurrence[]> => {
+    const re = new RegExp(boundedSource(word), "i"), results: Occurrence[] = [];
     const files = app.vault.getFiles().filter((file) => file.extension === "pdf" && inScope(file.path, scope));
     for (const file of files) {
       if (results.length >= limit) break;
@@ -112,11 +173,11 @@ function createOccurrenceSearch(options) {
   };
 
   return {
-    clearResults() {},
-    invalidatePdf(path) { if (path) pdfCache.delete(path); else pdfCache.clear(); },
+    clearResults() { return; },
+    invalidatePdf(path?: string) { if (path) pdfCache.delete(path); else pdfCache.clear(); },
     async find(word, { limit = 6, scope = [], includePdf = true } = {}) {
       const markdownPromise = searchMarkdown(word, limit, scope);
-      const pdfPromise = includePdf ? searchPdf(word, limit, scope) : Promise.resolve([]);
+      const pdfPromise = includePdf ? searchPdf(word, limit, scope) : Promise.resolve<Occurrence[]>([]);
       const [markdown, pdf] = await Promise.all([markdownPromise, pdfPromise]);
       return mergeOccurrences(markdown, pdf, limit);
     },

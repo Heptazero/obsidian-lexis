@@ -15,15 +15,15 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
 .lexis-hl {
     cursor: pointer;
     background-color: var(--lexis-hl-background, transparent);
-    text-decoration-line: var(--lexis-hl-line, underline);
-    text-decoration-style: var(--lexis-hl-line-style, wavy);
-    text-decoration-color: var(--lexis-hl-line-color, var(--text-accent));
-    text-underline-offset: 3px;
+    background-image: var(--lexis-hl-underline, none);
+    background-position: 0 100%, 2px 100%;
+    background-repeat: repeat-x;
+    background-size: var(--lexis-hl-underline-size, 0 0);
 }
 
 /* 当前标签页隐藏视觉高亮；保留命中节点，悬浮卡和点击跳转仍可用。 */
 .lexis-page-highlights-hidden .lexis-hl {
-    --lexis-hl-line-color: transparent;
+    --lexis-hl-underline: none;
     --lexis-hl-background: transparent;
 }
 .lexis-page-highlights-hidden .lexis-pdf-hl-layer {
@@ -31,6 +31,12 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
 }
 
 /* 设置页:功能分组折叠区 */
+.lexis-settings-root {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 0;
+}
 .lexis-settings-section {
     margin: 10px 0;
     border: 1px solid var(--background-modifier-border);
@@ -199,9 +205,8 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
 .lexis-inline-category-row button.lexis-inline-category-link:hover,
 .lexis-inline-category-row button.lexis-inline-category-link:focus-visible {
     background-color: transparent;
-    box-shadow: none;
+    box-shadow: inset 0 -1px currentColor;
     color: var(--text-accent);
-    text-decoration-line: underline;
 }
 .lexis-inline-category-controls {
     display: flex;
@@ -384,7 +389,7 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     border-radius: 7px;
 }
 .lexis-popover-title:hover {
-    text-decoration-line: underline;
+    box-shadow: inset 0 -1px currentColor;
 }
 .lexis-popover-alias {
     font-size: calc(var(--lexis-popover-font-size, 14px) - 2px);
@@ -411,7 +416,6 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
 .lexis-popover-archive:hover {
     background: var(--interactive-accent);
     color: var(--text-on-accent);
-    text-decoration-line: none;
 }
 .lexis-restore-modal .lexis-modal-btns {
     display: flex;
@@ -456,7 +460,7 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     margin-left: 6px;
 }
 .lexis-occ-src:hover {
-    text-decoration-line: underline;
+    box-shadow: inset 0 -1px currentColor;
 }
 
 /* 背单词复习视图 */
@@ -560,8 +564,7 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     margin: 0;
 }
 .lexis-rv-word:hover {
-    text-decoration-line: underline;
-    text-decoration-thickness: 1px;
+    box-shadow: inset 0 -1px currentColor;
 }
 .lexis-rv-label {
     font-weight: 600;

@@ -1,11 +1,35 @@
 "use strict";
 
+import type { ReviewHistoryEvent } from "./types";
+
+interface CurveCard {
+  s?: number | null;
+  history?: ReviewHistoryEvent[];
+  last?: string | null;
+  due?: string | null;
+}
+
+interface CurveDependencies {
+  requestRetention: number;
+  nextInterval: (stability: number, retention: number) => number;
+  retrievability: (elapsedDays: number, stability: number) => number;
+  addDaysStr: (date: string, days: number) => string;
+  daysBetween: (start: string, end: string) => number;
+  todayStr: () => string;
+}
+
+interface CurveEvent {
+  date: string;
+  s: number;
+  retention?: number;
+}
+
 // 纯呈现：按真实复习日期画分段遗忘曲线；调度参数和日期工具由主插件注入。
-function buildCurveSVG(card, { requestRetention, nextInterval, retrievability, addDaysStr, daysBetween, todayStr }) {
+function buildCurveSVG(card: CurveCard, { requestRetention, nextInterval, retrievability, addDaysStr, daysBetween, todayStr }: CurveDependencies): string | null {
   const currentS = Number(card.s);
   if (!currentS || isNaN(currentS)) return null;
 
-  const eventsByDate = new Map();
+  const eventsByDate = new Map<string, CurveEvent>();
   for (const raw of Array.isArray(card.history) ? card.history : []) {
     const date = String(raw?.date || "").slice(0, 10);
     const s = Number(raw?.s);
@@ -31,9 +55,9 @@ function buildCurveSVG(card, { requestRetention, nextInterval, retrievability, a
   const H = 122, left = 34, right = 12, top = 8, bottom = 26;
   const W = Math.max(300, Math.min(1800, Math.max(totalDays * 12 + left + right, events.length * 64 + left + right)));
   const plotW = W - left - right, plotH = H - top - bottom;
-  const xDay = (day) => left + plotW * Math.max(0, Math.min(totalDays, day)) / totalDays;
-  const xDate = (date) => xDay(daysBetween(startDate, date));
-  const y = (retention) => top + plotH * (1 - Math.max(0, Math.min(1, retention)));
+  const xDay = (day: number) => left + plotW * Math.max(0, Math.min(totalDays, day)) / totalDays;
+  const xDate = (date: string) => xDay(daysBetween(startDate, date));
+  const y = (retention: number) => top + plotH * (1 - Math.max(0, Math.min(1, retention)));
 
   let path = "";
   for (let i = 0; i < events.length; i++) {

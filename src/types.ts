@@ -1,4 +1,4 @@
-import type { App, TFile } from "obsidian";
+import type { TFile } from "obsidian";
 
 export type Language = "zh" | "en";
 export type HighlightStyle = "wavy" | "underline" | "background";
@@ -142,15 +142,4 @@ export interface BridgeWord {
   opacity: number;
   visible: boolean;
   wstyle: HighlightStyle;
-}
-
-// Obsidian、CodeMirror 与 PDF.js 的运行时接口有一部分没有公开类型。
-// 宽索引只留在这一层；稳定的业务数据仍使用上面的明确类型。
-export interface LexisRuntime {
-  [key: string]: any;
-  app: App;
-  settings: LexisSettings;
-  index: Map<string, LexisEntry>;
-  stats: LexisStats;
-  inlineCategoryOccurrences: InlineCategoryOccurrence[];
 }

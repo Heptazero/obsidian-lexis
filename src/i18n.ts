@@ -1,7 +1,16 @@
 "use strict";
 
+import type { Language } from "./types";
+
+interface TranslationPair {
+  zh: string;
+  en: string;
+}
+
+export type TranslationVars = Record<string, string | number | boolean | null | undefined>;
+
 // Keep both translations beside each other. UI code refers only to semantic keys.
-const MESSAGES = {
+const MESSAGES: Record<string, TranslationPair> = {
   "language.name": { zh: "界面语言", en: "Interface language" },
   "language.zh": { zh: "中文", en: "中文" },
   "language.en": { zh: "English", en: "English" },
@@ -290,9 +299,9 @@ const MESSAGES = {
   "settings.stats": { zh: "索引：{words} 词条 · {aliases} 别名 · {inline} 内联 · {due} 待复习", en: "Index: {words} entries · {aliases} aliases · {inline} inline · {due} due" },
 };
 
-function createI18n(getLanguage) {
-  const language = () => getLanguage?.() === "en" ? "en" : "zh";
-  const t = (key, vars = {}) => {
+function createI18n(getLanguage: () => Language) {
+  const language = (): Language => getLanguage() === "en" ? "en" : "zh";
+  const t = (key: string, vars: TranslationVars = {}): string => {
     const pair = MESSAGES[key];
     let text = pair ? (pair[language()] || pair.zh || key) : key;
     for (const [name, value] of Object.entries(vars)) text = text.replaceAll(`{${name}}`, String(value));

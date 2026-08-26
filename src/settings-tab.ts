@@ -1,14 +1,87 @@
 "use strict";
 
-import type { LexisRuntime } from "./types";
+import type { App, ColorComponent, MetadataCache, Plugin, Setting, SettingDefinitionItem, TextComponent, View } from "obsidian";
+import type { TranslationVars } from "./i18n";
+import type { HighlightStyle, InlineCategoryOccurrence, LexisSettings, LexisStats } from "./types";
 
-const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolder, DEFAULT_SETTINGS, cssColorToHex, addAppearanceButton, createReorderController, moveItem, LEXIS_HOME_VIEW, LEXIS_REVIEW_VIEW }) => {
+interface SettingsRuntime extends Plugin {
+  settings: LexisSettings;
+  stats: LexisStats;
+  inlineCategoryOccurrences: InlineCategoryOccurrence[];
+  liveAvailable: boolean;
+  _occCache: Map<string, unknown>;
+  templateProvider: {
+    templaterTemplateFor(folder: string): { path: string } | null;
+  };
+  bridge: {
+    generateToken(): string;
+    restart(): void;
+  };
+  t(key: string, vars?: TranslationVars): string;
+  saveSettings(): Promise<void>;
+  refreshAllViews(): void;
+  rebuildIndex(notify?: boolean): Promise<void>;
+  collectVocabTags(): string[];
+  inlineDelimiter(): string;
+  removeSelPill(): void;
+  setupPdfHighlight(): void;
+  teardownPdfHighlight(): void;
+  rescanPdfLayers(): void;
+  parseTags(text: string): string[];
+  applyPopoverAppearance(popover: HTMLElement): void;
+  applyReviewMetadataVisibility(): void;
+  openReview(): Promise<void>;
+}
+
+interface SettingsTabDependencies {
+  obsidian: typeof import("obsidian");
+  PluginSettingTab: typeof import("obsidian").PluginSettingTab;
+  Setting: typeof import("obsidian").Setting;
+  Notice: typeof import("obsidian").Notice;
+  TFolder: typeof import("obsidian").TFolder;
+  DEFAULT_SETTINGS: Pick<LexisSettings, "occurrenceTemplate">;
+  cssColorToHex: (color: string) => string;
+  addAppearanceButton: typeof import("./settings-controls").addAppearanceButton;
+  createReorderController: typeof import("./settings-controls").createReorderController;
+  moveItem: typeof import("./settings-controls").moveItem;
+  LEXIS_HOME_VIEW: string;
+  LEXIS_REVIEW_VIEW: string;
+}
+
+interface SuggestOptions {
+  multi?: boolean;
+  sep?: string;
+}
+
+interface InlineGroup {
+  id: string;
+  key: string;
+  name: string;
+  count: number;
+  children: InlineCategoryOccurrence[];
+}
+
+type AppWithSettingsModal = App & { setting?: { close(): void } };
+type RenderableView = View & { render?: () => void };
+type MetadataCacheWithSuggestions = MetadataCache & {
+  getTags?: () => Record<string, number>;
+  getAllPropertyInfos?: () => Record<string, { name?: string }>;
+};
+
+const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolder, DEFAULT_SETTINGS, cssColorToHex, addAppearanceButton, createReorderController, moveItem, LEXIS_HOME_VIEW, LEXIS_REVIEW_VIEW }: SettingsTabDependencies) => {
   // 输入时模糊匹配建议。AbstractInputSuggest 在 Obsidian 1.0+ 运行时可用;
   // 缺失时 `|| class {}` 避免 extends undefined 报错,且调用处会跳过实例化。
   // opts.multi=true 时按最后一个分隔符后的"活动 token"匹配,选中后追加(用于逗号/空格分隔的标签/属性多值字段)。
-  class PathSuggest extends (obsidian.AbstractInputSuggest || class {}) {
-    constructor(app, inputEl, getItems, onPick, opts: { multi?: boolean; sep?: string } = {}) {
+  class PathSuggest extends obsidian.AbstractInputSuggest<string> {
+    getItems: () => string[];
+    onPick: (value: string) => void;
+    multi: boolean;
+    sep: string;
+    inputEl: HTMLInputElement;
+
+    constructor(app: App, inputEl: HTMLInputElement, getItems: () => string[], onPick: (value: string) => void, opts: SuggestOptions = {}) {
       super(app, inputEl);
+      this.inputEl = inputEl;
       this.getItems = getItems;
       this.onPick = onPick;
       this.multi = !!(opts && opts.multi);
@@ -20,9 +93,9 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       const token = m ? m[0] : "";
       return { before: v.slice(0, v.length - token.length), token };
     }
-    getSuggestions(query) {
+    getSuggestions(query: string): string[] {
       let items = this.getItems();
-      let q;
+      let q: string;
       if (this.multi) {
         const { token } = this._split();
         q = token.toLowerCase();
@@ -33,8 +106,8 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       }
       return items.filter((p) => p.toLowerCase().includes(q)).slice(0, 50);
     }
-    renderSuggestion(value, el) { el.setText(value); }
-    selectSuggestion(value) {
+    renderSuggestion(value: string, el: HTMLElement) { el.setText(value); }
+    selectSuggestion(value: string) {
       if (this.multi) {
         // 多值:把选中项追加到当前列表后,重新触发建议(列表保持打开),可以接着选下一个
         const { before } = this._split();
@@ -53,11 +126,12 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
   }
 
   return class LexisSettingTab extends PluginSettingTab {
-    [key: string]: any;
-    declare plugin: LexisRuntime;
-    constructor(app, plugin: LexisRuntime) { super(app, plugin as any); this.plugin = plugin; }
+    declare plugin: SettingsRuntime;
+    statsEl: HTMLElement | null = null;
+    _colorComp: ColorComponent | null = null;
+    constructor(app: App, plugin: SettingsRuntime) { super(app, plugin); this.plugin = plugin; }
 
-    section(containerEl, title, { open = false, desc = "" } = {}) {
+    section(containerEl: HTMLElement, title: string, { open = false, desc = "" }: { open?: boolean; desc?: string } = {}): HTMLElement {
       const details = containerEl.createEl("details", { cls: "lexis-settings-section" });
       details.open = open;
       const summary = details.createEl("summary");
@@ -66,11 +140,22 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       return details.createDiv({ cls: "lexis-settings-section-body" });
     }
 
-    display() {
-      const { containerEl } = this;
+    getSettingDefinitions(): SettingDefinitionItem[] {
+      return [{
+        name: "Lexis",
+        aliases: ["dictionary", "highlight", "review", "browser", "PDF", "词典", "高亮", "复习"],
+        render: (setting: Setting) => {
+          setting.settingEl.empty();
+          setting.settingEl.addClass("lexis-settings-root");
+          this.renderSettings(setting.settingEl);
+        },
+      }];
+    }
+
+    renderSettings(containerEl: HTMLElement): void {
       containerEl.empty();
-      const t = (key: string, vars?: Record<string, unknown>) => this.plugin.t(key, vars);
-      const accentHex = cssColorToHex(getComputedStyle(document.body).getPropertyValue("--text-accent"));
+      const t = (key: string, vars?: TranslationVars) => this.plugin.t(key, vars);
+      const accentHex = cssColorToHex(activeDocument.defaultView?.getComputedStyle(activeDocument.body).getPropertyValue("--text-accent") || "");
       const save = () => this.plugin.saveSettings();
       const refresh = () => this.plugin.refreshAllViews();
       const appearanceLabels = {
@@ -84,7 +169,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
         reset: t("settings.resetAppearance"),
         done: t("common.done"),
       };
-      containerEl.createEl("h3", { text: t("settings.title") });
+      new Setting(containerEl).setName(t("settings.title")).setHeading();
 
       new Setting(containerEl).setName(t("language.name"))
         .addDropdown((dd) => dd.addOption("zh", t("language.zh")).addOption("en", t("language.en")).setValue(this.plugin.settings.language || "zh").onChange(async (value) => {
@@ -93,10 +178,10 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
           this.plugin.refreshAllViews();
           this.app.workspace.iterateAllLeaves((leaf) => {
             const type = leaf?.view?.getViewType?.();
-            if (type === LEXIS_HOME_VIEW || type === LEXIS_REVIEW_VIEW) leaf.view.render?.();
+            if (type === LEXIS_HOME_VIEW || type === LEXIS_REVIEW_VIEW) (leaf.view as RenderableView).render?.();
           });
           new Notice(t("language.reload"));
-          this.display();
+          this.update();
         }));
 
       const folders = this.app.vault.getAllLoadedFiles().filter((f) => f instanceof TFolder).map((f) => f.path).filter((p) => p && p !== "/").sort();
@@ -104,14 +189,17 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       const hasSuggest = !!obsidian.AbstractInputSuggest;
       const allTags = (() => {
         const s = new Set(this.plugin.collectVocabTags());
-        try { const tg = this.app.metadataCache.getTags() || {}; for (const k in tg) s.add(k.replace(/^#/, "").toLowerCase()); } catch (_e) {}
+        try { const tg = (this.app.metadataCache as MetadataCacheWithSuggestions).getTags?.() || {}; for (const k in tg) s.add(k.replace(/^#/, "").toLowerCase()); } catch { /* Suggestions are optional. */ }
         return [...s].filter(Boolean).sort();
       })();
       const allProps = (() => {
-        try { const infos = this.app.metadataCache.getAllPropertyInfos ? this.app.metadataCache.getAllPropertyInfos() : null; if (infos) return Object.values(infos).map((x: any) => x?.name).filter(Boolean).sort(); } catch (_e) {}
+        try {
+          const infos = (this.app.metadataCache as MetadataCacheWithSuggestions).getAllPropertyInfos?.();
+          if (infos) return Object.values(infos).map((info) => info.name).filter((name): name is string => !!name).sort();
+        } catch { /* Suggestions are optional. */ }
         return [];
       })();
-      const tagSuggest = (comp, apply) => { if (hasSuggest) new PathSuggest(this.app, comp.inputEl, () => allTags, (v) => { comp.setValue(v); apply(v); }, { multi: true }); };
+      const tagSuggest = (comp: TextComponent, apply: (value: string) => void | Promise<void>) => { if (hasSuggest) new PathSuggest(this.app, comp.inputEl, () => allTags, (value) => { comp.setValue(value); void apply(value); }, { multi: true }); };
 
       const dictSection = this.section(containerEl, t("settings.dictionary"), { open: true });
       new Setting(dictSection).setDesc(t("settings.dictionaryDesc")).setHeading();
@@ -125,7 +213,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
           onMove: async (from, to) => {
             this.plugin.settings.dicts = moveItem(this.plugin.settings.dicts, from, to);
             await save();
-            this.plugin.rebuildIndex(false);
+            await this.plugin.rebuildIndex(false);
             renderDicts();
           },
         });
@@ -143,14 +231,14 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
             tIn.setValue(match ? match.path : (d.template || ""));
             tIn.inputEl.title = match ? t("settings.templaterTemplate", { path: match.path }) : "";
           };
-          const onFolder = async (v) => { d.folder = (v || "").trim(); updateTemplateSource(); await save(); this.plugin.rebuildIndex(false); this.renderStats(); };
+          const onFolder = async (v: string) => { d.folder = (v || "").trim(); updateTemplateSource(); await save(); void this.plugin.rebuildIndex(false); this.renderStats(); };
           fIn.onChange(onFolder);
-          const onTpl = async (v) => { d.template = (v || "").trim(); await save(); };
+          const onTpl = async (v: string) => { d.template = (v || "").trim(); await save(); };
           tIn.onChange(onTpl);
           updateTemplateSource();
           if (hasSuggest) {
-            new PathSuggest(this.app, fIn.inputEl, () => folders, (v) => { fIn.setValue(v); onFolder(v); });
-            new PathSuggest(this.app, tIn.inputEl, () => mdFiles, (v) => { tIn.setValue(v); onTpl(v); });
+            new PathSuggest(this.app, fIn.inputEl, () => folders, (v) => { fIn.setValue(v); void onFolder(v); });
+            new PathSuggest(this.app, tIn.inputEl, () => mdFiles, (v) => { tIn.setValue(v); void onTpl(v); });
           }
           const globalColor = this.plugin.settings.highlightColor || accentHex;
           addAppearanceButton({
@@ -163,28 +251,28 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
             onChange: async (patch) => { Object.assign(d, patch); await save(); refresh(); },
             onReset: async () => { delete d.color; delete d.opacity; await save(); refresh(); },
           });
-          new obsidian.ExtraButtonComponent(row).setIcon("trash").setTooltip(t("settings.deleteDictionary")).onClick(async () => { this.plugin.settings.dicts.splice(i, 1); await save(); this.plugin.rebuildIndex(false); renderDicts(); this.renderStats(); });
+          new obsidian.ExtraButtonComponent(row).setIcon("trash").setTooltip(t("settings.deleteDictionary")).onClick(async () => { this.plugin.settings.dicts.splice(i, 1); await save(); await this.plugin.rebuildIndex(false); renderDicts(); this.renderStats(); });
           reorder.attach(row, i);
         });
         const addDict = dictsWrap.createEl("button", { text: t("settings.addDictionary") });
         addDict.setCssStyles({ marginTop: "2px" });
-        addDict.addEventListener("click", async () => { this.plugin.settings.dicts.push({ folder: "", template: "" }); await save(); renderDicts(); });
+        addDict.addEventListener("click", () => { void (async () => { this.plugin.settings.dicts.push({ folder: "", template: "" }); await save(); renderDicts(); })(); });
       };
       renderDicts();
       new Setting(dictSection).setName(t("settings.tagsAsEntries")).setDesc(t("settings.tagsAsEntriesDesc"))
         .addText((t) => {
           t.setPlaceholder("词汇 术语").setValue(this.plugin.settings.vocabTags);
-          const apply = async (v) => { this.plugin.settings.vocabTags = v; await save(); this.plugin.rebuildIndex(true); this.renderStats(); };
+          const apply = async (v: string) => { this.plugin.settings.vocabTags = v; await save(); void this.plugin.rebuildIndex(true); this.renderStats(); };
           t.onChange(apply); tagSuggest(t, apply);
         });
       new Setting(dictSection).setName(t("settings.includeAliases"))
-        .addToggle((t) => t.setValue(this.plugin.settings.includeAliases).onChange(async (v) => { this.plugin.settings.includeAliases = v; await save(); this.plugin.rebuildIndex(false); this.renderStats(); }));
+        .addToggle((t) => t.setValue(this.plugin.settings.includeAliases).onChange(async (v) => { this.plugin.settings.includeAliases = v; await save(); await this.plugin.rebuildIndex(false); this.renderStats(); }));
       new Setting(dictSection).setName(t("settings.aliasProperties")).setDesc(t("settings.aliasPropertiesDesc"))
         .addText((t) => {
-          t.setPlaceholder("past,forms,variants").setValue(this.plugin.settings.aliasSources);
-          const apply = async (v) => { this.plugin.settings.aliasSources = (v || "").trim(); await save(); if (this.plugin.settings.includeAliases) { this.plugin.rebuildIndex(false); this.renderStats(); } };
+          t.setPlaceholder("Past, forms, variants").setValue(this.plugin.settings.aliasSources);
+          const apply = async (v: string) => { this.plugin.settings.aliasSources = (v || "").trim(); await save(); if (this.plugin.settings.includeAliases) { void this.plugin.rebuildIndex(false); this.renderStats(); } };
           t.onChange(apply);
-          if (hasSuggest) new PathSuggest(this.app, t.inputEl, () => allProps, (v) => { t.setValue(v); apply(v); }, { multi: true, sep: "," });
+          if (hasSuggest) new PathSuggest(this.app, t.inputEl, () => allProps, (v) => { t.setValue(v); void apply(v); }, { multi: true, sep: "," });
         });
 
       const inlineSection = this.section(containerEl, t("settings.inline"), { desc: t("settings.inlineDesc") });
@@ -197,16 +285,16 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
           .addOption("heading", t("settings.classifyByHeading"))
           .addOption("file", t("settings.classifyByFile"))
           .setValue(this.plugin.settings.inlineClassificationMode)
-          .onChange(async (mode) => { this.plugin.settings.inlineClassificationMode = mode; await save(); renderCategoryColors(); refresh(); }))
+          .onChange(async (mode) => { this.plugin.settings.inlineClassificationMode = mode === "file" ? "file" : "heading"; await save(); renderCategoryColors(); refresh(); }))
         .addExtraButton((button) => button.setIcon("refresh-cw").setTooltip(t("settings.refreshCategories")).onClick(async () => { await this.plugin.rebuildIndex(false); renderCategoryColors(); this.renderStats(); }));
       const categoryColorsWrap = inlineSection.createDiv({ cls: "lexis-inline-tree" });
-      const openInlineHeading = async (node) => {
-        this.app.setting?.close?.();
+      const openInlineHeading = async (node: InlineCategoryOccurrence) => {
+        (this.app as AppWithSettingsModal).setting?.close();
         const leaf = this.app.workspace.getLeaf(false);
         await leaf.openFile(node.file, { active: true });
-        this.app.workspace.revealLeaf?.(leaf);
+        await this.app.workspace.revealLeaf(leaf);
         const reveal = () => {
-          const editor = leaf.view?.editor;
+          const editor = leaf.view instanceof obsidian.MarkdownView ? leaf.view.editor : null;
           if (!editor) return;
           const position = { line: node.line, ch: 0 };
           editor.setCursor(position);
@@ -223,7 +311,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
           return;
         }
         const mode = this.plugin.settings.inlineClassificationMode === "file" ? "file" : "heading";
-        const groupMap = new Map();
+        const groupMap = new Map<string, InlineGroup>();
         for (const node of occurrences) {
           const key = mode === "file" ? node.file.path : node.name;
           let group = groupMap.get(key);
@@ -278,7 +366,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
           const enabled = visibility[group.key] !== false;
           const details = categoryColorsWrap.createEl("details", { cls: "lexis-inline-group" });
           details.open = collapsed[group.id] !== true;
-          details.addEventListener("toggle", async () => { collapsed[group.id] = !details.open; await save(); });
+          details.addEventListener("toggle", () => { void (async () => { collapsed[group.id] = !details.open; await save(); })(); });
           const summary = details.createEl("summary", { cls: "lexis-setting-row lexis-inline-group-row" });
           const chevron = summary.createSpan({ cls: "lexis-inline-chevron" });
           obsidian.setIcon(chevron, "chevron-right");
@@ -324,7 +412,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
               text: label,
               attr: { type: "button", title: `${node.file.path}:${node.line + 1}` },
             });
-            link.addEventListener("click", () => openInlineHeading(node));
+            link.addEventListener("click", () => { void openInlineHeading(node); });
             const childControls = row.createDiv({ cls: "lexis-inline-category-controls" });
             const childCount = t("settings.entryCount", { count: node.count });
             childControls.createSpan({ cls: "lexis-inline-count", text: childCount, attr: { title: childCount } });
@@ -346,16 +434,16 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       new Setting(hlSection).setName(t("settings.pdfHighlight")).setDesc(t("settings.pdfHighlightDesc"))
         .addToggle((t) => t.setValue(this.plugin.settings.enablePdfHighlight).onChange(async (v) => { this.plugin.settings.enablePdfHighlight = v; await save(); if (v) this.plugin.setupPdfHighlight(); else { this.plugin.teardownPdfHighlight(); this.plugin.rescanPdfLayers(); } }));
       new Setting(hlSection).setName(t("settings.highlightStyle"))
-        .addDropdown((dd) => dd.addOption("wavy", t("settings.wavy")).addOption("underline", t("settings.underline")).addOption("background", t("settings.background")).setValue(this.plugin.settings.highlightStyle).onChange(async (v) => { this.plugin.settings.highlightStyle = v; await save(); refresh(); }));
+        .addDropdown((dd) => dd.addOption("wavy", t("settings.wavy")).addOption("underline", t("settings.underline")).addOption("background", t("settings.background")).setValue(this.plugin.settings.highlightStyle).onChange(async (v) => { this.plugin.settings.highlightStyle = ["wavy", "underline", "background"].includes(v) ? v as HighlightStyle : "wavy"; await save(); refresh(); }));
       new Setting(hlSection).setName(t("settings.highlightColor"))
         .addColorPicker((cp) => { this._colorComp = cp; cp.setValue(this.plugin.settings.highlightColor || accentHex).onChange(async (v) => { this.plugin.settings.highlightColor = v; await save(); refresh(); }); })
-        .addExtraButton((b) => b.setIcon("reset").setTooltip(t("settings.resetTheme")).onClick(async () => { this.plugin.settings.highlightColor = ""; if (this._colorComp) this._colorComp.setValue(accentHex); await save(); refresh(); }));
+        .addExtraButton((b) => b.setIcon("reset").setTooltip(t("settings.resetTheme")).onClick(async () => { this.plugin.settings.highlightColor = ""; this._colorComp?.setValue(accentHex); await save(); refresh(); }));
       new Setting(hlSection).setName(t("settings.opacity"))
-        .addSlider((s) => s.setLimits(0.1, 1, 0.05).setValue(this.plugin.settings.highlightOpacity).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.highlightOpacity = v; await save(); refresh(); }));
+        .addSlider((s) => s.setLimits(0.1, 1, 0.05).setValue(this.plugin.settings.highlightOpacity).onChange(async (v) => { this.plugin.settings.highlightOpacity = v; await save(); refresh(); }));
       new Setting(hlSection).setName(t("settings.fade")).setDesc(t("settings.fadeDesc"))
         .addToggle((t) => t.setValue(this.plugin.settings.fadeByMemory).onChange(async (v) => { this.plugin.settings.fadeByMemory = v; await save(); refresh(); }));
       new Setting(hlSection).setName(t("settings.fadeFloor"))
-        .addSlider((s) => s.setLimits(0, 0.9, 0.05).setValue(this.plugin.settings.fadeFloor).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.fadeFloor = v; await save(); refresh(); }));
+        .addSlider((s) => s.setLimits(0, 0.9, 0.05).setValue(this.plugin.settings.fadeFloor).onChange(async (v) => { this.plugin.settings.fadeFloor = v; await save(); refresh(); }));
       const excludeSetting = new Setting(hlSection).setName(t("settings.excludeTags")).setDesc(t("settings.excludeTagsDesc"));
       excludeSetting.settingEl.addClass("lexis-tags-setting");
       const excludeEditor = excludeSetting.controlEl.createDiv({ cls: "lexis-tag-editor" });
@@ -363,7 +451,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       const excludeAdd = excludeEditor.createDiv({ cls: "lexis-tag-editor-add" });
       const excludeInput = new obsidian.TextComponent(excludeAdd).setPlaceholder(t("settings.addExcludedTag"));
       const excludedTags = () => [...new Set(this.plugin.parseTags(this.plugin.settings.excludeTags))];
-      const saveExcludedTags = async (tags) => {
+      const saveExcludedTags = async (tags: string[]) => {
         this.plugin.settings.excludeTags = tags.join(" ");
         await save();
         await this.plugin.rebuildIndex(false);
@@ -374,10 +462,10 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
           const chip = excludeChips.createEl("button", { cls: "lexis-tag-editor-chip", attr: { type: "button", title: t("settings.removeExcludedTag", { tag }) } });
           chip.createSpan({ text: `#${tag}` });
           chip.createSpan({ cls: "lexis-tag-editor-remove", text: "×" });
-          chip.addEventListener("click", async () => { await saveExcludedTags(excludedTags().filter((value) => value !== tag)); renderExcludedTags(); });
+          chip.addEventListener("click", () => { void (async () => { await saveExcludedTags(excludedTags().filter((value) => value !== tag)); renderExcludedTags(); })(); });
         }
       };
-      const addExcludedTags = async (raw) => {
+      const addExcludedTags = async (raw: string) => {
         const incoming = this.plugin.parseTags(raw);
         if (!incoming.length) return;
         await saveExcludedTags([...new Set([...excludedTags(), ...incoming])]);
@@ -388,14 +476,14 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       excludeInput.inputEl.addEventListener("keydown", (event) => {
         if (["Enter", ",", "，", ";", "；"].includes(event.key)) {
           event.preventDefault();
-          addExcludedTags(excludeInput.inputEl.value);
+          void addExcludedTags(excludeInput.inputEl.value);
         } else if (event.key === "Backspace" && !excludeInput.inputEl.value) {
           const tags = excludedTags();
-          if (tags.length) { tags.pop(); saveExcludedTags(tags).then(renderExcludedTags); }
+          if (tags.length) { tags.pop(); void saveExcludedTags(tags).then(renderExcludedTags); }
         }
       });
-      new obsidian.ExtraButtonComponent(excludeAdd).setIcon("plus").setTooltip(t("settings.addExcludedTag")).onClick(() => addExcludedTags(excludeInput.inputEl.value));
-      if (hasSuggest) new PathSuggest(this.app, excludeInput.inputEl, () => allTags.filter((tag) => !excludedTags().includes(tag)), (value) => addExcludedTags(value));
+      new obsidian.ExtraButtonComponent(excludeAdd).setIcon("plus").setTooltip(t("settings.addExcludedTag")).onClick(() => { void addExcludedTags(excludeInput.inputEl.value); });
+      if (hasSuggest) new PathSuggest(this.app, excludeInput.inputEl, () => allTags.filter((tag) => !excludedTags().includes(tag)), (value) => { void addExcludedTags(value); });
       renderExcludedTags();
 
       const tagColorSection = this.section(containerEl, t("settings.tagColors"));
@@ -417,9 +505,9 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
         this.plugin.settings.tagRules.forEach((rule, i) => {
           const cell = grid.createDiv({ cls: "lexis-setting-row lexis-rule" });
           const tagIn = new obsidian.TextComponent(cell).setPlaceholder(t("settings.tagPlaceholder")).setValue(rule.tag);
-          const applyTag = async (v) => { rule.tag = (v || "").trim(); await save(); refresh(); };
+          const applyTag = async (v: string) => { rule.tag = (v || "").trim(); await save(); refresh(); };
           tagIn.onChange(applyTag);
-          if (hasSuggest) new PathSuggest(this.app, tagIn.inputEl, () => allTags, (v) => { tagIn.setValue(v); applyTag(v); });
+          if (hasSuggest) new PathSuggest(this.app, tagIn.inputEl, () => allTags, (v) => { tagIn.setValue(v); void applyTag(v); });
           addAppearanceButton({
             app: this.app,
             obsidian,
@@ -436,7 +524,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
         });
         const addRule = rulesWrap.createEl("button", { text: t("settings.addTagRule") });
         addRule.setCssStyles({ marginTop: "2px" });
-        addRule.addEventListener("click", async () => { this.plugin.settings.tagRules.push({ tag: "", color: accentHex, style: "" }); await save(); renderRules(); });
+        addRule.addEventListener("click", () => { void (async () => { this.plugin.settings.tagRules.push({ tag: "", color: accentHex, style: "" }); await save(); renderRules(); })(); });
       };
       renderRules();
 
@@ -447,23 +535,23 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       const updateCards = () => {
         this.plugin.applyPopoverAppearance(preview);
         const doc = preview.ownerDocument || document;
-        doc.querySelectorAll(".lexis-popover:not(.lexis-popover-preview)").forEach((el) => this.plugin.applyPopoverAppearance(el));
+        doc.querySelectorAll<HTMLElement>(".lexis-popover:not(.lexis-popover-preview)").forEach((el) => this.plugin.applyPopoverAppearance(el));
       };
       updateCards();
       new Setting(cardSection).setName(t("settings.popoverWidth"))
-        .addSlider((s) => s.setLimits(280, 800, 10).setValue(this.plugin.settings.popoverWidth).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.popoverWidth = v; updateCards(); await save(); }));
+        .addSlider((s) => s.setLimits(280, 800, 10).setValue(this.plugin.settings.popoverWidth).onChange(async (v) => { this.plugin.settings.popoverWidth = v; updateCards(); await save(); }));
       new Setting(cardSection).setName(t("settings.popoverHeight")).setDesc(t("settings.popoverHeightDesc"))
-        .addSlider((s) => s.setLimits(200, 800, 10).setValue(this.plugin.settings.popoverMaxHeight).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.popoverMaxHeight = v; updateCards(); await save(); }));
+        .addSlider((s) => s.setLimits(200, 800, 10).setValue(this.plugin.settings.popoverMaxHeight).onChange(async (v) => { this.plugin.settings.popoverMaxHeight = v; updateCards(); await save(); }));
       new Setting(cardSection).setName(t("settings.popoverFont"))
-        .addSlider((s) => s.setLimits(11, 24, 1).setValue(this.plugin.settings.popoverFontSize).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.popoverFontSize = v; updateCards(); await save(); }));
+        .addSlider((s) => s.setLimits(11, 24, 1).setValue(this.plugin.settings.popoverFontSize).onChange(async (v) => { this.plugin.settings.popoverFontSize = v; updateCards(); await save(); }));
       new Setting(cardSection).setName(t("settings.hoverDelay")).setDesc(t("settings.hoverDelayDesc"))
-        .addSlider((s) => s.setLimits(0, 3, 0.1).setValue((this.plugin.settings.hoverDelayMs || 0) / 1000).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.hoverDelayMs = Math.round(v * 1000); await save(); }));
+        .addSlider((s) => s.setLimits(0, 3, 0.1).setValue((this.plugin.settings.hoverDelayMs || 0) / 1000).onChange(async (v) => { this.plugin.settings.hoverDelayMs = Math.round(v * 1000); await save(); }));
       new Setting(cardSection).setName(t("settings.showRelated")).addToggle((toggle) => toggle.setValue(this.plugin.settings.showRelated).onChange(async (v) => { this.plugin.settings.showRelated = v; await save(); }));
       new Setting(cardSection).setName(t("settings.showOccurrences")).setDesc(t("settings.showOccurrencesDesc"))
         .addToggle((t) => t.setValue(this.plugin.settings.showOccurrences).onChange(async (v) => { this.plugin.settings.showOccurrences = v; await save(); }));
       new Setting(cardSection).setName(t("settings.pdfOccurrences")).setDesc(t("settings.pdfOccurrencesDesc"))
         .addToggle((toggle) => toggle.setValue(this.plugin.settings.includePdfOccurrences !== false).onChange(async (v) => { this.plugin.settings.includePdfOccurrences = v; this.plugin._occCache.clear(); await save(); }));
-      new Setting(cardSection).setName(t("settings.occurrenceLimit")).addSlider((s) => s.setLimits(1, 15, 1).setValue(this.plugin.settings.occurrenceLimit).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.occurrenceLimit = v; await save(); this.plugin._occCache.clear(); }));
+      new Setting(cardSection).setName(t("settings.occurrenceLimit")).addSlider((s) => s.setLimits(1, 15, 1).setValue(this.plugin.settings.occurrenceLimit).onChange(async (v) => { this.plugin.settings.occurrenceLimit = v; await save(); this.plugin._occCache.clear(); }));
       new Setting(cardSection).setName(t("settings.occurrenceScope")).setDesc(t("settings.occurrenceScopeDesc"))
         .addText((input) => input.setPlaceholder(t("settings.wholeVault")).setValue(this.plugin.settings.occurrenceFolders).onChange(async (v) => { this.plugin.settings.occurrenceFolders = v.trim(); await save(); this.plugin._occCache.clear(); }));
 
@@ -477,9 +565,9 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       new Setting(addSection).setName(t("settings.defaultTemplate")).setDesc(t("settings.defaultTemplateDesc"))
         .addText((input) => {
           input.setPlaceholder("template/word.md").setValue(this.plugin.settings.newWordTemplate);
-          const onTpl = async (v) => { this.plugin.settings.newWordTemplate = (v || "").trim(); await save(); };
+          const onTpl = async (v: string) => { this.plugin.settings.newWordTemplate = (v || "").trim(); await save(); };
           input.onChange(onTpl);
-          if (hasSuggest) new PathSuggest(this.app, input.inputEl, () => mdFiles, (v) => { input.setValue(v); onTpl(v); });
+          if (hasSuggest) new PathSuggest(this.app, input.inputEl, () => mdFiles, (v) => { input.setValue(v); void onTpl(v); });
         });
       const occurrenceSetting = new Setting(addSection).setName(t("settings.occurrenceTemplate")).setDesc(t("settings.occurrenceTemplateDesc"))
         .addTextArea((input) => input
@@ -492,11 +580,11 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
 
       const fsrsSection = this.section(containerEl, t("settings.review"));
       new Setting(fsrsSection).setName(t("settings.retention")).setDesc(t("settings.retentionDesc"))
-        .addSlider((s) => s.setLimits(0.8, 0.97, 0.01).setValue(this.plugin.settings.requestRetention).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.requestRetention = v; await save(); }));
-      new Setting(fsrsSection).setName(t("settings.newLimit")).addSlider((s) => s.setLimits(0, 100, 5).setValue(this.plugin.settings.newPerDay).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.newPerDay = v; await save(); }));
-      new Setting(fsrsSection).setName(t("settings.sessionLimit")).addSlider((s) => s.setLimits(10, 500, 10).setValue(this.plugin.settings.maxReviewsPerSession).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.maxReviewsPerSession = v; await save(); }));
+        .addSlider((s) => s.setLimits(0.8, 0.97, 0.01).setValue(this.plugin.settings.requestRetention).onChange(async (v) => { this.plugin.settings.requestRetention = v; await save(); }));
+      new Setting(fsrsSection).setName(t("settings.newLimit")).addSlider((s) => s.setLimits(0, 100, 5).setValue(this.plugin.settings.newPerDay).onChange(async (v) => { this.plugin.settings.newPerDay = v; await save(); }));
+      new Setting(fsrsSection).setName(t("settings.sessionLimit")).addSlider((s) => s.setLimits(10, 500, 10).setValue(this.plugin.settings.maxReviewsPerSession).onChange(async (v) => { this.plugin.settings.maxReviewsPerSession = v; await save(); }));
       new Setting(fsrsSection).setName(t("settings.cardFront")).setDesc(t("settings.cardFrontDesc"))
-        .addDropdown((dd) => dd.addOption("note", t("settings.noteCard")).addOption("cloze", t("settings.clozeCard")).setValue(this.plugin.settings.cardFront).onChange(async (v) => { this.plugin.settings.cardFront = v; await save(); }));
+        .addDropdown((dd) => dd.addOption("note", t("settings.noteCard")).addOption("cloze", t("settings.clozeCard")).setValue(this.plugin.settings.cardFront).onChange(async (v) => { this.plugin.settings.cardFront = v === "cloze" ? "cloze" : "note"; await save(); }));
       new Setting(fsrsSection).setName(t("settings.showReviewMetadata")).setDesc(t("settings.showReviewMetadataDesc"))
         .addToggle((toggle) => toggle.setValue(!!this.plugin.settings.showReviewMetadata).onChange(async (value) => {
           this.plugin.settings.showReviewMetadata = value;
@@ -504,14 +592,14 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
           await save();
         }));
       new Setting(fsrsSection).setName(t("settings.ratingOffset")).setDesc(t("settings.ratingOffsetDesc"))
-        .addSlider((s) => s.setLimits(0, 200, 5).setValue(this.plugin.settings.reviewBottomSpace).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.reviewBottomSpace = v; await save(); }));
+        .addSlider((s) => s.setLimits(0, 200, 5).setValue(this.plugin.settings.reviewBottomSpace).onChange(async (v) => { this.plugin.settings.reviewBottomSpace = v; await save(); }));
       new Setting(fsrsSection).setName(t("home.start")).addButton((b) => b.setButtonText(t("settings.openReview")).setCta().onClick(() => this.plugin.openReview()));
       new Setting(fsrsSection).setName(t("settings.hoverFeedback")).setDesc(t("settings.hoverFeedbackDesc"))
         .addToggle((t) => t.setValue(this.plugin.settings.hoverFeedback).onChange(async (v) => { this.plugin.settings.hoverFeedback = v; await save(); }));
       new Setting(fsrsSection).setName(t("settings.feedbackDays")).setDesc(t("settings.feedbackDaysDesc"))
-        .addSlider((s) => s.setLimits(1, 30, 1).setValue(this.plugin.settings.hoverFeedbackDays).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.hoverFeedbackDays = v; await save(); }));
+        .addSlider((s) => s.setLimits(1, 30, 1).setValue(this.plugin.settings.hoverFeedbackDays).onChange(async (v) => { this.plugin.settings.hoverFeedbackDays = v; await save(); }));
       new Setting(fsrsSection).setName(t("settings.retireDays")).setDesc(t("settings.retireDaysDesc"))
-        .addSlider((s) => s.setLimits(14, 365, 1).setValue(this.plugin.settings.retireCandidateDays).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.retireCandidateDays = v; await save(); }));
+        .addSlider((s) => s.setLimits(14, 365, 1).setValue(this.plugin.settings.retireCandidateDays).onChange(async (v) => { this.plugin.settings.retireCandidateDays = v; await save(); }));
 
       const bridgeSection = this.section(containerEl, t("settings.bridge"), { desc: t("settings.bridgeDesc") });
       new Setting(bridgeSection).setName(t("settings.annotationHeading")).setDesc(t("settings.annotationHeadingDesc"))
@@ -522,7 +610,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
           if (v && !this.plugin.settings.bridgeToken) this.plugin.settings.bridgeToken = this.plugin.bridge.generateToken();
           await save();
           this.plugin.bridge.restart();
-          this.display();
+          this.update();
         }));
       new Setting(bridgeSection).setName(t("settings.port")).setDesc(t("settings.portDesc"))
         .addText((t) => t.setValue(String(this.plugin.settings.bridgePort)).onChange(async (v) => { const n = parseInt(v, 10); if (n >= 1024 && n <= 65535) { this.plugin.settings.bridgePort = n; await save(); } }))
@@ -530,9 +618,9 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       new Setting(bridgeSection).setName(t("settings.token")).setDesc(t("settings.tokenDesc"))
         .addText((input) => { input.setValue(this.plugin.settings.bridgeToken || t("settings.tokenPending")).setDisabled(true); input.inputEl.setCssStyles({ width: "260px" }); })
         .addExtraButton((b) => b.setIcon("copy").setTooltip(t("settings.copyToken")).onClick(async () => { if (this.plugin.settings.bridgeToken) { await navigator.clipboard.writeText(this.plugin.settings.bridgeToken); new Notice(t("notice.tokenCopied")); } }))
-        .addExtraButton((b) => b.setIcon("refresh-cw").setTooltip(t("settings.regenerateToken")).onClick(async () => { this.plugin.settings.bridgeToken = this.plugin.bridge.generateToken(); await save(); this.plugin.bridge.restart(); this.display(); }));
+        .addExtraButton((b) => b.setIcon("refresh-cw").setTooltip(t("settings.regenerateToken")).onClick(async () => { this.plugin.settings.bridgeToken = this.plugin.bridge.generateToken(); await save(); this.plugin.bridge.restart(); this.update(); }));
 
-      new Setting(containerEl).setName(t("settings.rebuild")).addButton((b) => b.setButtonText(t("settings.rebuildNow")).onClick(() => { this.plugin.rebuildIndex(true); this.renderStats(); }));
+      new Setting(containerEl).setName(t("settings.rebuild")).addButton((b) => b.setButtonText(t("settings.rebuildNow")).onClick(() => { void this.plugin.rebuildIndex(true); this.renderStats(); }));
       this.statsEl = containerEl.createEl("p", { cls: "lexis-stats" });
       this.renderStats();
     }
