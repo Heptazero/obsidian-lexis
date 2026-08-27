@@ -40,7 +40,7 @@ interface SettingsTabDependencies {
   Notice: typeof import("obsidian").Notice;
   TFolder: typeof import("obsidian").TFolder;
   DEFAULT_SETTINGS: Pick<LexisSettings, "occurrenceTemplate">;
-  cssColorToHex: (color: string) => string;
+  cssColorToHex: (color: string, document: Document) => string;
   addAppearanceButton: typeof import("./settings-controls").addAppearanceButton;
   createReorderController: typeof import("./settings-controls").createReorderController;
   moveItem: typeof import("./settings-controls").moveItem;
@@ -155,7 +155,8 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
     renderSettings(containerEl: HTMLElement): void {
       containerEl.empty();
       const t = (key: string, vars?: TranslationVars) => this.plugin.t(key, vars);
-      const accentHex = cssColorToHex(activeDocument.defaultView?.getComputedStyle(activeDocument.body).getPropertyValue("--text-accent") || "");
+      const document = containerEl.ownerDocument;
+      const accentHex = cssColorToHex(document.defaultView?.getComputedStyle(document.body).getPropertyValue("--text-accent") || "", document);
       const save = () => this.plugin.saveSettings();
       const refresh = () => this.plugin.refreshAllViews();
       const appearanceLabels = {
@@ -538,10 +539,6 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
         doc.querySelectorAll<HTMLElement>(".lexis-popover:not(.lexis-popover-preview)").forEach((el) => this.plugin.applyPopoverAppearance(el));
       };
       updateCards();
-      new Setting(cardSection).setName(t("settings.popoverWidth"))
-        .addSlider((s) => s.setLimits(280, 800, 10).setValue(this.plugin.settings.popoverWidth).onChange(async (v) => { this.plugin.settings.popoverWidth = v; updateCards(); await save(); }));
-      new Setting(cardSection).setName(t("settings.popoverHeight")).setDesc(t("settings.popoverHeightDesc"))
-        .addSlider((s) => s.setLimits(200, 800, 10).setValue(this.plugin.settings.popoverMaxHeight).onChange(async (v) => { this.plugin.settings.popoverMaxHeight = v; updateCards(); await save(); }));
       new Setting(cardSection).setName(t("settings.popoverFont"))
         .addSlider((s) => s.setLimits(11, 24, 1).setValue(this.plugin.settings.popoverFontSize).onChange(async (v) => { this.plugin.settings.popoverFontSize = v; updateCards(); await save(); }));
       new Setting(cardSection).setName(t("settings.hoverDelay")).setDesc(t("settings.hoverDelayDesc"))

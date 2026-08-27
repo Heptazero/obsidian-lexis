@@ -1,4 +1,5 @@
 (function (ns) {
+  const PREF = "extensions.lexis-zotero.";
   const fileName = (path) => String(path || "").split("/").pop() || path || "";
 
   class CardView {
@@ -40,6 +41,7 @@
       this.logger(`leave 触发: ${this.currentMeta?.key}，220ms 后关闭（若鼠标进入卡片会取消）`);
       this.win.clearTimeout(this.showTimer);
       this.hideTimer = this.win.setTimeout(() => {
+        if (this.card?.dataset.lexisResizing === "1") return;
         this.logger(`卡片关闭(超时): ${this.currentMeta?.key}`);
         this.remove();
       }, 220);
@@ -89,9 +91,16 @@
       card.className = "lexis-web-pop";
       card.dataset.k = meta.key;
       card.style.setProperty("--lexis-web-color", this.index.accent());
-      card.style.setProperty("--lexis-popover-width", Math.max(260, Number(this.index.styleConfig.popoverWidth || 460)) + "px");
-      card.style.setProperty("--lexis-popover-height", Math.max(160, Number(this.index.styleConfig.popoverMaxHeight || 420)) + "px");
+      const savedWidth = Number(Zotero.Prefs.get(PREF + "popoverWidth", true) || 0);
+      const savedHeight = Number(Zotero.Prefs.get(PREF + "popoverHeight", true) || 0);
+      const width = Math.max(260, savedWidth || Number(this.index.styleConfig.popoverWidth || 460));
+      const height = Math.max(160, savedHeight || Number(this.index.styleConfig.popoverMaxHeight || 420));
+      card.style.setProperty("--lexis-popover-width", width + "px");
+      card.style.setProperty("--lexis-popover-height", height + "px");
       card.style.setProperty("--lexis-popover-font-size", Math.max(11, Number(this.index.styleConfig.popoverFontSize || 14)) + "px");
+      card.style.width = width + "px";
+      card.style.height = height + "px";
+      card.style.maxHeight = height + "px";
       card.innerHTML = `<div class="lexis-web-pop-title">${this.escape(meta.key)}</div><div class="lexis-web-pop-corner"></div><div class="lexis-web-pop-meta"></div><div class="lexis-web-pop-body">加载中…</div>`;
       card.addEventListener("mouseenter", () => {
         this.logger(`卡片被 hover: ${this.currentMeta?.key}`);
@@ -100,6 +109,7 @@
       card.addEventListener("mouseleave", () => {
         this.logger(`鼠标离开卡片: ${this.currentMeta?.key}`);
         this.hideTimer = this.win.setTimeout(() => {
+          if (card.dataset.lexisResizing === "1") return;
           this.logger(`卡片关闭(超时,来自卡片): ${this.currentMeta?.key}`);
           this.remove();
         }, 220);
@@ -117,6 +127,7 @@
       this.doc.body.appendChild(host);
       this.host = host;
       this.card = card;
+      this.attachResize(card, span);
       this.position(span);
 
       let data = this.detailCache.get(meta.key);
@@ -338,6 +349,57 @@
       if (rect.bottom + height + 12 > this.doc.documentElement.clientHeight) top = rect.top + this.win.scrollY - height - 6;
       this.host.style.left = Math.max(8, left) + "px";
       this.host.style.top = Math.max(8, top) + "px";
+    }
+
+    attachResize(card, anchor) {
+      if (this.win.matchMedia?.("(pointer: coarse)").matches) return;
+      const handle = this.doc.createElement("div");
+      handle.className = "lexis-web-resize";
+      handle.setAttribute("role", "separator");
+      handle.setAttribute("aria-label", "拖动调整卡片大小");
+      handle.title = "拖动调整卡片大小";
+      handle.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        this.win.clearTimeout(this.hideTimer);
+        const start = card.getBoundingClientRect();
+        const startX = event.clientX;
+        const startY = event.clientY;
+        card.dataset.lexisResizing = "1";
+        try { handle.setPointerCapture(event.pointerId); } catch (_error) {}
+        const resize = (move) => {
+          const maxWidth = Math.max(260, this.win.innerWidth - start.left - 10);
+          const maxHeight = Math.max(160, this.win.innerHeight - start.top - 10);
+          const width = Math.max(260, Math.min(maxWidth, start.width + move.clientX - startX));
+          const height = Math.max(160, Math.min(maxHeight, start.height + move.clientY - startY));
+          card.style.width = width + "px";
+          card.style.height = height + "px";
+          card.style.maxHeight = height + "px";
+        };
+        const finish = (cancelled) => {
+          handle.removeEventListener("pointermove", resize);
+          handle.removeEventListener("pointerup", onPointerUp);
+          handle.removeEventListener("pointercancel", onPointerCancel);
+          delete card.dataset.lexisResizing;
+          if (cancelled) {
+            card.style.width = start.width + "px";
+            card.style.height = start.height + "px";
+            card.style.maxHeight = start.height + "px";
+          } else {
+            const result = card.getBoundingClientRect();
+            Zotero.Prefs.set(PREF + "popoverWidth", Math.round(result.width), true);
+            Zotero.Prefs.set(PREF + "popoverHeight", Math.round(result.height), true);
+          }
+          this.position(anchor);
+        };
+        const onPointerUp = () => finish(false);
+        const onPointerCancel = () => finish(true);
+        handle.addEventListener("pointermove", resize);
+        handle.addEventListener("pointerup", onPointerUp);
+        handle.addEventListener("pointercancel", onPointerCancel);
+      });
+      card.appendChild(handle);
     }
 
     toast(message, ok = true) {

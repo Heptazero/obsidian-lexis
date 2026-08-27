@@ -461,7 +461,7 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, escapeR
     return { title, subtitle };
   }
   bridgeMathCss() {
-    const style = activeDocument.getElementById("MJX-CHTML-styles") as HTMLStyleElement | null;
+    const style = this.app.workspace.containerEl.ownerDocument.getElementById("MJX-CHTML-styles") as HTMLStyleElement | null;
     return style?.sheet ? Array.from(style.sheet.cssRules, (rule: CSSRule) => rule.cssText).join("\n") : "";
   }
   async bridgeWordDetail(key: unknown) {
@@ -553,7 +553,7 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, escapeR
         if (prev && /^H[1-6]$/.test(prev.tagName)) { const nx = prev.nextElementSibling; if (!nx || /^H[1-6]$/.test(nx.tagName)) prev.remove(); }
       } else {
         const parsed = new DOMParser().parseFromString(html, "text/html");
-        const nodes = Array.from(parsed.body.childNodes, (node) => activeDocument.importNode(node, true));
+        const nodes = Array.from(parsed.body.childNodes, (node) => div.ownerDocument.importNode(node, true));
         host.replaceWith(...nodes);
       }
     }

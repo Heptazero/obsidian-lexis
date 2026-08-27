@@ -18,6 +18,7 @@
   let scanTimer = null;
   let selTimer = null;
   let lastSelectionFolder = "";
+  let popoverSize = null;
   let pendingRoots = new Set();
   let styleCfg = null;
   const detailCache = new Map();
@@ -341,7 +342,63 @@
     if (popHost) popHost.remove();
     popHost = null; pop = null;
   }
-  function scheduleHide() { clearTimeout(hideTimer); hideTimer = setTimeout(removePop, 220); }
+  function scheduleHide() {
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+      if (pop?.dataset.lexisResizing !== "1") removePop();
+    }, 220);
+  }
+
+  function attachPopoverResize(box, anchor) {
+    if (window.matchMedia?.("(pointer: coarse)").matches) return;
+    const handle = document.createElement("div");
+    handle.className = "lexis-web-resize";
+    handle.setAttribute("role", "separator");
+    handle.setAttribute("aria-label", "拖动调整卡片大小");
+    handle.title = "拖动调整卡片大小";
+    handle.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      clearTimeout(hideTimer);
+      const start = box.getBoundingClientRect();
+      const startX = event.clientX;
+      const startY = event.clientY;
+      box.dataset.lexisResizing = "1";
+      try { handle.setPointerCapture(event.pointerId); } catch (_error) {}
+      const resize = (move) => {
+        const maxWidth = Math.max(260, window.innerWidth - start.left - 10);
+        const maxHeight = Math.max(160, window.innerHeight - start.top - 10);
+        const width = Math.max(260, Math.min(maxWidth, start.width + move.clientX - startX));
+        const height = Math.max(160, Math.min(maxHeight, start.height + move.clientY - startY));
+        box.style.width = width + "px";
+        box.style.height = height + "px";
+        box.style.maxHeight = height + "px";
+      };
+      const finish = (cancelled) => {
+        handle.removeEventListener("pointermove", resize);
+        handle.removeEventListener("pointerup", onPointerUp);
+        handle.removeEventListener("pointercancel", onPointerCancel);
+        delete box.dataset.lexisResizing;
+        if (cancelled) {
+          box.style.width = start.width + "px";
+          box.style.height = start.height + "px";
+          box.style.maxHeight = start.height + "px";
+        } else {
+          const result = box.getBoundingClientRect();
+          popoverSize = { width: Math.round(result.width), height: Math.round(result.height) };
+          void chrome.storage.local.set({ popoverSize });
+        }
+        position(popHost, anchor);
+      };
+      const onPointerUp = () => finish(false);
+      const onPointerCancel = () => finish(true);
+      handle.addEventListener("pointermove", resize);
+      handle.addEventListener("pointerup", onPointerUp);
+      handle.addEventListener("pointercancel", onPointerCancel);
+    });
+    box.appendChild(handle);
+  }
 
   async function showPop(span) {
     const key = span.dataset.k;
@@ -362,12 +419,16 @@
     pop.addEventListener("mouseleave", scheduleHide);
     shadow.appendChild(pop);
     document.body.appendChild(popHost);
-    const width = Math.max(260, Number(styleCfg && styleCfg.popoverWidth) || 460);
-    const height = Math.max(160, Number(styleCfg && styleCfg.popoverMaxHeight) || 420);
+    const width = Math.max(260, Number(popoverSize && popoverSize.width) || Number(styleCfg && styleCfg.popoverWidth) || 460);
+    const height = Math.max(160, Number(popoverSize && popoverSize.height) || Number(styleCfg && styleCfg.popoverMaxHeight) || 420);
     const fontSize = Math.max(11, Number(styleCfg && styleCfg.popoverFontSize) || 14);
     pop.style.setProperty("--lexis-popover-width", width + "px");
     pop.style.setProperty("--lexis-popover-height", height + "px");
     pop.style.setProperty("--lexis-popover-font-size", fontSize + "px");
+    pop.style.width = width + "px";
+    pop.style.height = height + "px";
+    pop.style.maxHeight = height + "px";
+    attachPopoverResize(pop, span);
     position(popHost, span);
 
     let data = detailCache.get(key);
@@ -862,10 +923,11 @@
 
   // ---- 启动 / 配置变化 ----
   async function init() {
-    const { cfg: c, words, styleConfig, lastSelectionFolder: savedFolder } = await chrome.storage.local.get(["cfg", "words", "styleConfig", "lastSelectionFolder"]);
+    const { cfg: c, words, styleConfig, lastSelectionFolder: savedFolder, popoverSize: savedPopoverSize } = await chrome.storage.local.get(["cfg", "words", "styleConfig", "lastSelectionFolder", "popoverSize"]);
     cfg = Object.assign({}, DEFAULT_CFG, c || {});
     styleCfg = styleConfig || null;
     lastSelectionFolder = typeof savedFolder === "string" ? savedFolder : "";
+    popoverSize = savedPopoverSize && typeof savedPopoverSize === "object" ? savedPopoverSize : null;
     applyTheme();
     build(words || []);
     if (cfg.highlight) { scan(document.body); startObserver(); }
@@ -882,6 +944,7 @@
       }
       if (changes.styleConfig) styleCfg = changes.styleConfig.newValue || null;
       if (changes.lastSelectionFolder) lastSelectionFolder = typeof changes.lastSelectionFolder.newValue === "string" ? changes.lastSelectionFolder.newValue : "";
+      if (changes.popoverSize) popoverSize = changes.popoverSize.newValue || null;
       if (changes.words) build(changes.words.newValue || []);
       const styleChanged = oldCfg && cfg && (oldCfg.useObsidianStyle !== cfg.useObsidianStyle
         || oldCfg.color !== cfg.color || oldCfg.style !== cfg.style || oldCfg.opacity !== cfg.opacity);

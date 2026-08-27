@@ -315,6 +315,22 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     overflow: hidden;
     box-sizing: border-box;
 }
+.lexis-popover-resize-handle {
+    position: absolute;
+    right: 2px;
+    bottom: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 0 0 8px 0;
+    background: linear-gradient(135deg, transparent 48%, var(--text-faint) 49%, var(--text-faint) 55%, transparent 56%, transparent 66%, var(--text-faint) 67%, var(--text-faint) 73%, transparent 74%);
+    cursor: nwse-resize;
+    opacity: 0.45;
+    touch-action: none;
+}
+.lexis-popover-resize-handle:hover { opacity: 0.85; }
+@media (pointer: coarse) {
+    .lexis-popover-resize-handle { display: none; }
+}
 .lexis-popover-title {
     display: flex;
     align-items: baseline;

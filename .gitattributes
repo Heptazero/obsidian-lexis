@@ -1,0 +1,5 @@
+# Obsidian loads this bundled artifact; the maintained source is src/**/*.ts.
+main.js linguist-generated=true
+
+# Packaged Zotero releases are binary build artifacts.
+pkg/zotero-extension/dist/*.xpi binary

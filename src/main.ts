@@ -8,7 +8,12 @@
  */
 
 import * as obsidian from "obsidian";
-import { Plugin, PluginSettingTab, Setting, Notice, Platform, TFolder, TFile, Component, MarkdownRenderer, ItemView, Modal, finishRenderMath } from "obsidian";
+import { Plugin, PluginSettingTab, Setting, Notice, Platform, TFolder, TFile, Component, finishRenderMath } from "obsidian";
+import { LexisAliasPicker } from "./alias-picker";
+import { LEXIS_HOME_VIEW, LEXIS_REVIEW_VIEW } from "./constants";
+import { DEFAULT_SETTINGS } from "./default-settings";
+import { FSRS } from "./fsrs";
+import { LexisHomeView, type RetireCandidate } from "./home-view";
 import { createI18n } from "./i18n";
 import { buildCurveSVG } from "./curve";
 import { createReviewView } from "./review-view";
@@ -16,145 +21,28 @@ import { createOccurrenceSearch } from "./occurrence-search";
 import { createBridgeServer } from "./bridge-server";
 import { createBridgeApi } from "./bridge-api";
 import { createHighlightEngine } from "./highlight-engine";
+import { createDocumentHighlights } from "./document-highlights";
+import { createReaderInteractions } from "./reader-interactions";
 import { createReaderUi } from "./reader-ui";
 import { addAppearanceButton, createReorderController, moveItem } from "./settings-controls";
 import { createTemplateProvider } from "./template-provider";
 import { createSettingsTab } from "./settings-tab";
+import { WorkspaceDocuments } from "./workspace-documents";
+import { LexisRestoreModal } from "./restore-modal";
+import {
+  addDaysString as addDaysStr,
+  boundedSource,
+  cssColorToHex,
+  daysBetween,
+  escapeHtml as escHtml,
+  escapeRe,
+  formatDate as fmtDate,
+  renderLexisMarkdown,
+  round2,
+  todayString as todayStr,
+} from "./shared-utils";
 import type { Occurrence, OccurrenceSearch, PdfJsRuntime } from "./occurrence-search";
 import type { HighlightStyle, InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats, ReviewHistoryEvent, TagRule } from "./types";
-
-const LEXIS_REVIEW_VIEW = "lexis-review-view";
-const LEXIS_HOME_VIEW = "lexis-home-view";
-
-type DefaultLexisSettings = Omit<LexisSettings, "dicts" | "vocabFolders" | "excludeTags">;
-
-const DEFAULT_SETTINGS: DefaultLexisSettings = {
-  language: "zh",
-  // 收录范围:多个文件夹(逗号/换行分隔) ∪ 携带任一标签的笔记(并集)。
-  // vocabFolders / excludeTags 不放默认值,迁移与兜底在 loadSettings 里做(留默认会盖掉用户老值)。
-  vocabTags: "", // 带任一此标签的笔记也算词库(与文件夹取并集)
-  includeAliases: true,
-  aliasSources: "", // 额外的别名来源属性名,逗号分隔(如 past,forms,variants)。留空只读 aliases/alias。
-  // 内联条目库:带 lexis-inline 属性(或 #lexis-inline 标签)的笔记可用「词条::批注」维护轻量词条。
-  inlineEntriesEnabled: true,
-  inlineEntryDelimiter: "::",
-  inlineClassificationMode: "heading", // heading=同名最近标题共用外观；file=同一来源文件共用外观
-  inlineCategoryColors: {}, // { "人物": "#d9534f" }，由资料笔记的标题分类自动生成设置项
-  inlineCategoryOpacity: {}, // { "人物": 0.65 }，留空时跟随全局高亮透明度
-  inlineCategoryHighlight: {}, // { "人物": false }，关闭后仍识别和显示悬浮批注，只隐藏高亮
-  inlineFileColors: {}, // { "资料/小说.md": "#d9534f" }，按文件分类时使用
-  inlineFileOpacity: {},
-  inlineFileHighlight: {},
-  inlineSourceHighlight: {}, // { "资料/小说.md::人物": false }，父级下单独关闭某个子集
-  inlineCollapsedGroups: {},
-  inlineCategoryOrder: [], // 设置页分类顺序；新发现的分类追加在末尾
-  inlineFileOrder: [],
-  inlineCategoryOrderByParent: {}, // 每个分类父级独立保存子集顺序
-  enableHighlight: true,
-  enableLivePreview: true,
-  highlightStyle: "wavy",
-  highlightColor: "",
-  highlightOpacity: 1,
-  popoverWidth: 460,
-  popoverMaxHeight: 420,
-  popoverFontSize: 14,
-  hoverDelayMs: 250,
-  // 高亮渐隐:强度随 FSRS stability 单调变淡,归档词完全不高亮(见 fadeAlphaFor)
-  fadeByMemory: true,
-  fadeFloor: 0.25, // 淡到最后不低于这个透明度(0~1)
-  // 悬停回流:悬停查释义时,如果到期日比 N 天后还远,拉近到今天,提醒尽快复习(只挪 due,不碰 stability)
-  hoverFeedback: true,
-  hoverFeedbackDays: 3,
-  // 淘汰候选:入库满这么多天、且这么多天没自然相遇过,才会进候选列表(同一个阈值管两个条件)
-  retireCandidateDays: 90,
-  tagRules: [],
-  showRelated: true,
-  showOccurrences: true,
-  includePdfOccurrences: true,
-  occurrenceLimit: 6,
-  occurrenceFolders: "",
-  // Stage 3 (FSRS)
-  requestRetention: 0.9,
-  newPerDay: 20,
-  maxReviewsPerSession: 200,
-  reviewLog: {}, // { "YYYY-MM-DD": count } 供热力图(Stage 5)
-  reviewHistory: {}, // { "词条路径": [{date, s, grade, retention}] } 供单词级记忆曲线
-  showReviewMetadata: false,
-  // Stage 4
-  newWordTemplate: "template/单词模板.md",
-  emptyNotePreset: "blank",
-  // 划词出处模板:首行若为 Markdown 标题,其余内容作为每条出处的格式;留空则不自动写出处。
-  occurrenceTemplate: "#### 出处\n> {{sentence}}{{sourceSuffix}}",
-  // 批注小节标题:可以只填文字(默认按 #### 级别),也可以带级别(比如 "## 引用");留空用默认 "#### 批注"
-  annotationHeading: "",
-  // 卡片正面:note=单词→整篇;cloze=出处填空
-  cardFront: "note",
-  // 桌面端评分按钮底部间距(px)；移动端固定在原生工具栏上方。
-  reviewBottomSpace: 70,
-  // 浏览器扩展排除标签:打上任一此标签的单词不在网页高亮(多标签,逗号/空格分隔)。
-  // excludeTags 不放默认值,迁移在 loadSettings 里做。
-  // 浏览器桥接(本地 HTTP,只听 127.0.0.1,供 Chrome 扩展拉词库/划词添加)
-  bridgeEnabled: false,
-  bridgePort: 45945,
-  bridgeToken: "",
-  // 在 Obsidian 笔记里划词后,选区旁冒出"+ 加入词库"浮动药丸(阅读/编辑两种模式都生效)
-  selectionPill: true,
-  // 划词药丸上次选中的词典
-  lastSelectionFolder: "",
-  // 在 Obsidian 内置 PDF 阅读器里也高亮词库词(钩 pdf.js 文字层;扫描版无文字层则无效)
-  enablePdfHighlight: true,
-};
-
-// ---------- 小工具 ----------
-const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-// 词边界(支持中文):只有当词以英文字母/数字/下划线开头或结尾时才加 ASCII 边界
-// (避免 cat 命中 category);中文/日文等无空格语言不加边界,否则 \b 永不命中。
-const boundedSource = (word: string): string => {
-  const lb = /^[A-Za-z0-9_]/.test(word) ? "\\b" : "";
-  const rb = /[A-Za-z0-9_]$/.test(word) ? "\\b" : "";
-  return lb + escapeRe(word) + rb;
-};
-const escHtml = (s: string | number | null | undefined): string => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] || c));
-// 从网页/富文本粘贴来的不换行空格会被 MarkdownRenderer 转成 &nbsp;，落进 TeX 后触发 MathJax 的 Misplaced &。
-// 只规范传给渲染器的副本，不改用户笔记原文。
-const renderLexisMarkdown = (app: obsidian.App, md: string, el: HTMLElement, sourcePath: string, comp: Component): Promise<void> => {
-  const clean = String(md == null ? "" : md).replace(/\u00a0/g, " ");
-  return MarkdownRenderer.render(app, clean, el, sourcePath, comp);
-};
-const round2 = (x: number): number => Math.round(x * 100) / 100;
-function cssColorToHex(c: string): string {
-  if (!c) return "#888888";
-  if (/^#[0-9a-fA-F]{6}$/.test(c.trim())) return c.trim();
-  const tmp = activeDocument.body.createDiv();
-  tmp.setCssStyles({ color: c });
-  const rgb = tmp.win.getComputedStyle(tmp).color; tmp.remove();
-  const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(rgb);
-  if (!m) return "#888888";
-  return "#" + [m[1], m[2], m[3]].map((x) => (+x).toString(16).padStart(2, "0")).join("");
-}
-function fmtDate(d: Date): string { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
-function todayStr() { return fmtDate(new Date()); }
-function parseDate(s: string): Date { const [y, m, d] = String(s).slice(0, 10).split("-").map(Number); return new Date(y, (m || 1) - 1, d || 1); }
-function addDaysStr(baseStr: string, days: number): string { const d = baseStr ? parseDate(baseStr) : new Date(); d.setDate(d.getDate() + days); return fmtDate(d); }
-function daysBetween(aStr: string, bStr: string): number { return Math.max(0, Math.round((parseDate(bStr).getTime() - parseDate(aStr).getTime()) / 86400000)); }
-
-// ---------- FSRS ----------
-const FSRS_W = [0.40255, 1.18385, 3.173, 15.69105, 7.1949, 0.5345, 1.4604, 0.0046, 1.54575, 0.1192, 1.01925, 1.9395, 0.11, 0.29605, 2.2698, 0.2315, 2.9898, 0.51655, 0.6621];
-const FSRS_DECAY = -0.5;
-const FSRS_FACTOR = Math.pow(0.9, 1 / FSRS_DECAY) - 1;
-const MAX_IVL = 36500;
-const FSRS = {
-  clampD: (d: number) => Math.min(10, Math.max(1, d)),
-  initStability: (g: number) => Math.max(0.1, FSRS_W[g - 1]),
-  initDifficulty: (g: number) => FSRS.clampD(FSRS_W[4] - Math.exp(FSRS_W[5] * (g - 1)) + 1),
-  linearDamping: (delta: number, d: number) => (delta * (10 - d)) / 9,
-  meanReversion: (init: number, cur: number) => FSRS_W[7] * init + (1 - FSRS_W[7]) * cur,
-  nextDifficulty(d: number, g: number) { const delta = -FSRS_W[6] * (g - 3); const dd = d + FSRS.linearDamping(delta, d); return FSRS.clampD(FSRS.meanReversion(FSRS.initDifficulty(4), dd)); },
-  retrievability(t: number, s: number) { return Math.pow(1 + FSRS_FACTOR * t / s, FSRS_DECAY); },
-  nextRecallStability(d: number, s: number, r: number, g: number) { const hard = g === 2 ? FSRS_W[15] : 1; const easy = g === 4 ? FSRS_W[16] : 1; return s * (1 + Math.exp(FSRS_W[8]) * (11 - d) * Math.pow(s, -FSRS_W[9]) * (Math.exp((1 - r) * FSRS_W[10]) - 1) * hard * easy); },
-  nextForgetStability(d: number, s: number, r: number) { return FSRS_W[11] * Math.pow(d, -FSRS_W[12]) * (Math.pow(s + 1, FSRS_W[13]) - 1) * Math.exp((1 - r) * FSRS_W[14]); },
-  nextInterval(s: number, retention: number) { const ivl = (s / FSRS_FACTOR) * (Math.pow(retention, 1 / FSRS_DECAY) - 1); return Math.min(MAX_IVL, Math.max(1, Math.round(ivl))); },
-};
 
 const LexisReviewView = createReviewView({
   reviewViewType: LEXIS_REVIEW_VIEW,
@@ -173,7 +61,6 @@ type RelationBag = Record<string, Relation[]>;
 type ReviewOptions = { folder?: string; tag?: string; order?: "due" | "frequency" | "random" };
 type ReviewItem = { file: TFile; card: ReviewCard };
 type Encounter = { hoverCount: number; encounterCount: number; lastEncounter: string };
-type RetireCandidate = { file: TFile; display: string; created: string; lastEncounter: string; encounterCount: number; hoverCount: number; occCount: number; sinceLast: number };
 type BridgeRuntime = { running: boolean; generateToken(): string; start(): void; stop(): void; restart(): void };
 type AddSelectionOptions = { openExisting?: boolean };
 type HighlightPage = { leaf: obsidian.WorkspaceLeaf; container: HTMLElement; key: string };
@@ -209,13 +96,15 @@ class LexisPlugin extends Plugin {
   declare _passiveSeenToday: Set<string>;
   declare _pageHighlightState: WeakMap<obsidian.WorkspaceLeaf, { key: string; hidden: boolean }>;
   declare _reviewSessions: WeakMap<object, unknown>;
+  declare _workspaceDocuments: WorkspaceDocuments;
+  declare _selPill: HTMLElement | null;
   declare highlightElement: (el: HTMLElement, ctx: obsidian.MarkdownPostProcessorContext) => void;
   declare renderLexisBlock: (el: HTMLElement, ctx: obsidian.MarkdownPostProcessorContext, src: string) => Promise<void>;
   declare renderHeatmap: (el: HTMLElement) => void;
   declare renderHomeBlock: (el: HTMLElement) => void;
   declare setupLiveExtension: () => void;
-  declare setupPdfHighlight: () => void;
-  declare setupEpubIframeHighlight: () => void;
+  declare setupPdfHighlight: (document?: Document) => void;
+  declare setupEpubIframeHighlight: (document?: Document) => void;
   declare teardownPdfHighlight: () => void;
   declare teardownEpubIframeHighlight: () => void;
   declare onMouseOver: (event: MouseEvent) => void;
@@ -255,7 +144,6 @@ class LexisPlugin extends Plugin {
   declare bridgeEncounter: (payload: Record<string, unknown>) => Promise<unknown>;
 
   async onload() {
-    try {
     await this.loadSettings();
     this.i18n = createI18n(() => this.settings.language);
     this.templateProvider = createTemplateProvider({
@@ -274,6 +162,7 @@ class LexisPlugin extends Plugin {
     this._rebuildTimer = null;
     this._popover = null;
     this._popoverComp = null;
+    this._selPill = null;
     this._hideTimer = null;
     this._showTimer = null;
     this._showTarget = null;
@@ -298,7 +187,6 @@ class LexisPlugin extends Plugin {
       if (file instanceof TFile && this.inVocabFolder(file.path)) this.recordEncounter(file, "open");
       window.requestAnimationFrame(() => this.syncActivePageHighlightState());
     }));
-    this.registerEvent(this.app.workspace.on("active-leaf-change", (leaf) => this.syncActivePageHighlightState(leaf)));
 
     this.statusBarEl = this.addStatusBarItem();
     if (this.statusBarEl) {
@@ -393,22 +281,39 @@ class LexisPlugin extends Plugin {
     this.registerMarkdownCodeBlockProcessor("lexis-heatmap", (src, el) => this.renderHeatmap(el));
     this.registerMarkdownCodeBlockProcessor("lexis-home", (src, el) => this.renderHomeBlock(el));
     this.setupLiveExtension();
-    this.setupPdfHighlight();
-    this.setupEpubIframeHighlight();
+    this._workspaceDocuments = new WorkspaceDocuments(this, {
+      mouseover: (event) => this.onMouseOver(event),
+      mouseout: (event) => this.onMouseOut(event),
+      click: (event) => this.onClick(event),
+      mouseup: (event) => this.maybeShowSelPill(event),
+      escape: () => this.removeSelPill(),
+      scroll: (event) => {
+        const target = event.target;
+        const node = target && typeof target === "object" && "nodeType" in target ? target as Node : null;
+        if (this._popover && node && this._popover.contains(node)) return;
+        this.removePopover();
+        this.removeSelPill();
+      },
+      activate: (document, documentChanged) => {
+        if (documentChanged) {
+          this.setupPdfHighlight(document);
+          this.setupEpubIframeHighlight(document);
+        }
+        this.applyReviewMetadataVisibility();
+        this.syncActivePageHighlightState();
+      },
+      close: (document) => {
+        if (this._popover?.ownerDocument === document) this.removePopover();
+        if (this._selPill?.ownerDocument === document) this.removeSelPill();
+      },
+    });
+    this._workspaceDocuments.start();
 
-    this.registerDomEvent(activeDocument, "mouseover", (e) => this.onMouseOver(e));
-    this.registerDomEvent(activeDocument, "mouseout", (e) => this.onMouseOut(e));
-    this.registerDomEvent(activeDocument, "click", (e) => this.onClick(e));
-    this.registerDomEvent(window, "scroll", (e) => {
-      const target = e.target as Node | null;
-      if (this._popover && target?.instanceOf?.(Node) && this._popover.contains(target)) return;
-      this.removePopover(); this.removeSelPill();
-    }, { capture: true });
-    // 划词添加:松开鼠标后,若选区在笔记里则冒出"+ 加入词库"药丸
-    this.registerDomEvent(activeDocument, "mouseup", (e) => this.maybeShowSelPill(e));
-    this.registerDomEvent(activeDocument, "keydown", (e) => { if (e.key === "Escape") this.removeSelPill(); });
-
-    this.app.workspace.onLayoutReady(() => { void this.rebuildIndex(false); this.syncActivePageHighlightState(); });
+    this.app.workspace.onLayoutReady(() => {
+      this._workspaceDocuments.activateLeaf(this.app.workspace.getMostRecentLeaf());
+      void this.rebuildIndex(false);
+      this.syncActivePageHighlightState();
+    });
     this.registerEvent(this.app.vault.on("create", (f) => { if (f instanceof TFile) this.maybeRebuild(f); }));
     this.registerEvent(this.app.vault.on("delete", (f) => { if (f instanceof TFile) this.maybeRebuild(f); }));
     this.registerEvent(this.app.vault.on("rename", (f, old) => { if (f instanceof TFile) this.maybeRebuild(f, old); }));
@@ -454,10 +359,6 @@ class LexisPlugin extends Plugin {
       if (!this.settings.bridgeToken) { this.settings.bridgeToken = this.bridge.generateToken(); await this.saveSettings(); }
       this.bridge.start();
     }
-    } catch (err) {
-      console.error("[Lexis] onload 失败:", err);
-      new Notice(this.t("notice.loadFailed", { error: errorMessage(err) }));
-    }
   }
 
   onunload() {
@@ -470,7 +371,7 @@ class LexisPlugin extends Plugin {
     this.teardownPdfHighlight();
     this.teardownEpubIframeHighlight();
     this.bridge?.stop();
-    activeDocument.body?.classList.remove("lexis-show-review-metadata");
+    this._workspaceDocuments?.forEach((document) => document.body?.classList.remove("lexis-show-review-metadata"));
   }
 
   async loadSettings() {
@@ -508,7 +409,11 @@ class LexisPlugin extends Plugin {
   t(key: string, vars?: TranslationVars): string { return this.i18n ? this.i18n.t(key, vars) : key; }
   async saveSettings() { await this.saveData(this.settings); }
   applyReviewMetadataVisibility() {
-    activeDocument.body?.classList.toggle("lexis-show-review-metadata", !!this.settings.showReviewMetadata);
+    if (this._workspaceDocuments) {
+      this._workspaceDocuments.forEach((document) => document.body?.classList.toggle("lexis-show-review-metadata", !!this.settings.showReviewMetadata));
+      return;
+    }
+    this.app.workspace.containerEl.ownerDocument.body?.classList.toggle("lexis-show-review-metadata", !!this.settings.showReviewMetadata);
   }
   parseTagRulesText(text: string): TagRule[] {
     const rules: TagRule[] = [];
@@ -552,7 +457,8 @@ class LexisPlugin extends Plugin {
   effectiveHighlightColor() {
     const c = (this.settings.highlightColor || "").trim();
     if (c) return c;
-    try { return cssColorToHex(activeDocument.defaultView?.getComputedStyle(activeDocument.body).getPropertyValue("--text-accent") || ""); }
+    const document = this._workspaceDocuments?.current() || this.app.workspace.containerEl.ownerDocument;
+    try { return cssColorToHex(document.defaultView?.getComputedStyle(document.body).getPropertyValue("--text-accent") || "", document); }
     catch { return "#7c5cff"; }
   }
   // { 规范化文件夹: 颜色 },只含设了专属色的词典;供网页按所属词典着色
@@ -1080,149 +986,6 @@ class LexisPlugin extends Plugin {
   }
 };
 
-// ---------- 别名选择器:给"设为别名"选目标词条(标题或别名都可搜到) ----------
-class LexisAliasPicker extends obsidian.FuzzySuggestModal<LexisEntry> {
-  declare plugin: LexisPlugin;
-  declare aliasText: string;
-  declare onPick: (entry: LexisEntry) => void;
-  constructor(app: obsidian.App, plugin: LexisPlugin, aliasText: string, onPick: (entry: LexisEntry) => void) {
-    super(app);
-    this.plugin = plugin;
-    this.aliasText = aliasText;
-    this.onPick = onPick;
-    if (this.setPlaceholder) this.setPlaceholder(this.plugin.t("selection.aliasPrompt", { alias: aliasText }));
-  }
-  getItems() {
-    const seen = new Set<string>(), out: LexisEntry[] = [];
-    for (const e of this.plugin.index.values()) {
-      if (!e || !e.file) continue;
-      const k = e.file.path + "|" + (e.display || "");
-      if (seen.has(k)) continue;
-      seen.add(k);
-      out.push(e);
-    }
-    return out;
-  }
-  getItemText(e: LexisEntry): string { return e.isAlias ? this.plugin.t("selection.aliasItem", { alias: e.display, word: e.file.basename }) : e.display; }
-  onChooseItem(e: LexisEntry): void { if (e.file) this.onPick(e); }
-}
-
-// ---------- 恢复:归档词要不要保留 FSRS 进度,二选一 ----------
-class LexisRestoreModal extends Modal {
-  declare plugin: LexisPlugin;
-  declare file: TFile;
-  constructor(app: obsidian.App, plugin: LexisPlugin, file: TFile) {
-    super(app);
-    this.plugin = plugin;
-    this.file = file;
-  }
-  onOpen() {
-    const { contentEl } = this;
-    contentEl.addClass("lexis-restore-modal");
-    contentEl.createEl("h3", { text: this.plugin.t("restore.title", { word: this.file.basename }) });
-    contentEl.createEl("p", { text: this.plugin.t("restore.question") });
-    const row = contentEl.createDiv({ cls: "lexis-modal-btns" });
-    const keepBtn = row.createEl("button", { cls: "mod-cta", text: this.plugin.t("restore.keep") });
-    keepBtn.addEventListener("click", () => { void (async () => {
-      await this.plugin.setArchived(this.file, false);
-      new Notice(this.plugin.t("restore.kept", { word: this.file.basename }));
-      this.close();
-    })(); });
-    const resetBtn = row.createEl("button", { text: this.plugin.t("restore.reset") });
-    resetBtn.addEventListener("click", () => { void (async () => {
-      await this.app.fileManager.processFrontMatter(this.file, (fm: Record<string, unknown>) => {
-        delete fm["lexis-status"];
-        delete fm["lexis-s"]; delete fm["lexis-d"]; delete fm["lexis-due"];
-        delete fm["lexis-last"]; delete fm["lexis-reps"]; delete fm["lexis-lapses"];
-      });
-      delete this.plugin.settings.reviewHistory[this.file.path];
-      await this.plugin.saveSettings();
-      await this.plugin.rebuildIndex(false);
-      new Notice(this.plugin.t("restore.resetDone", { word: this.file.basename }));
-      this.close();
-    })(); });
-  }
-  onClose() { this.contentEl.empty(); }
-}
-
-// ---------- Lexis 主页 ----------
-class LexisHomeView extends ItemView {
-  declare plugin: LexisPlugin;
-  declare _retireRenderTimer: number | undefined;
-  constructor(leaf: obsidian.WorkspaceLeaf, plugin: LexisPlugin) { super(leaf); this.plugin = plugin; }
-  getViewType() { return LEXIS_HOME_VIEW; }
-  getDisplayText() { return "Lexis"; }
-  getIcon() { return "graduation-cap"; }
-  async onOpen() { this.render(); }
-  render() {
-    const c = this.contentEl; c.empty(); c.addClass("lexis-home");
-    c.createEl("h3", { text: "📕 Lexis" });
-    const st = this.plugin.computeStats();
-    const stats = c.createDiv({ cls: "lexis-home-stats" });
-    stats.createDiv({ cls: "lexis-stat", text: `⏰ ${this.plugin.t("home.due", { count: st.due })}` });
-    stats.createDiv({ cls: "lexis-stat", text: `✨ ${this.plugin.t("home.new", { count: st.fresh })}` });
-    stats.createDiv({ cls: "lexis-stat", text: `📚 ${this.plugin.t("home.total", { count: st.total })}` });
-    this.plugin.renderHeatmap(c.createDiv({ cls: "lexis-hm-wrap" }));
-
-    c.createEl("h4", { text: this.plugin.t("home.start") });
-    const folders = this.plugin.dictFolders();
-    let selFolder = "", selOrder: "due" | "frequency" | "random" = "due";
-    new Setting(c).setName(this.plugin.t("home.reviewFolder")).addDropdown((dd) => { dd.addOption("", this.plugin.t("common.all")); for (const folder of folders) dd.addOption(folder, folder); dd.setValue(selFolder); dd.onChange((v) => { selFolder = v; }); });
-    new Setting(c).setName(this.plugin.t("home.order")).addDropdown((dd) => { dd.addOption("due", this.plugin.t("home.dueFirst")).addOption("frequency", this.plugin.t("home.frequency")).addOption("random", this.plugin.t("home.random")).setValue(selOrder); dd.onChange((v) => { if (v === "due" || v === "frequency" || v === "random") selOrder = v; }); });
-    new Setting(c).addButton((b) => b.setButtonText(`▶ ${this.plugin.t("home.start")}`).setCta().onClick(() => this.plugin.openReview({ folder: selFolder, order: selOrder })))
-      .addExtraButton((b) => b.setIcon("refresh-cw").setTooltip(this.plugin.t("common.refresh")).onClick(() => this.render()));
-
-    void this.renderRetireCandidates(c);
-  }
-  // 淘汰法庭:硬条件筛出来的候选,证据摆出来,判决权在用户——平时不主动打扰,只有打开主页才会看到。
-  async renderRetireCandidates(c: HTMLElement): Promise<void> {
-    const days = this.plugin.settings.retireCandidateDays ?? 90;
-    const wrap = c.createDiv({ cls: "lexis-retire-wrap" });
-    wrap.createEl("h4", { text: `🗑️ ${this.plugin.t("home.retire")}` });
-    // 阈值直接在主页调,不用跑去设置页;拖动时防抖,别每挪一格就重算一遍(候选计算要挨个查出处数,不便宜)
-    new Setting(wrap).setName(this.plugin.t("home.retireThreshold")).setDesc(this.plugin.t("home.retireThresholdDesc"))
-      .addSlider((s) => s.setLimits(14, 365, 1).setValue(days).onChange((v) => {
-        this.plugin.settings.retireCandidateDays = v;
-        void this.plugin.saveSettings();
-        if (this._retireRenderTimer) window.clearTimeout(this._retireRenderTimer);
-        this._retireRenderTimer = window.setTimeout(() => this.render(), 400);
-      }));
-    const listWrap = wrap.createDiv();
-    listWrap.setText(this.plugin.t("home.calculating"));
-    let candidates: RetireCandidate[];
-    try { candidates = await this.plugin.buildRetireCandidates(); } catch { candidates = []; }
-    if (!listWrap.isConnected) return; // 算的过程中视图已经关掉/刷新了,別再画
-    listWrap.empty();
-    if (!candidates.length) { listWrap.createDiv({ cls: "lexis-dim", text: this.plugin.t("home.noCandidates") }); return; }
-    const selected = new Set<string>();
-    const rowByPath = new Map<string, HTMLElement>();
-    const removeRows = (paths: string[]) => { for (const p of paths) { const row = rowByPath.get(p); if (row) row.remove(); rowByPath.delete(p); selected.delete(p); } };
-    for (const cand of candidates) {
-      const row = listWrap.createDiv({ cls: "lexis-retire-row" });
-      rowByPath.set(cand.file.path, row);
-      const cb = row.createEl("input", { type: "checkbox", cls: "lexis-retire-cb" });
-      cb.addEventListener("change", () => { if (cb.checked) selected.add(cand.file.path); else selected.delete(cand.file.path); });
-      const info = row.createDiv({ cls: "lexis-retire-info" });
-      const nameEl = info.createEl("a", { text: cand.display, href: "#", cls: "lexis-retire-name" });
-      nameEl.addEventListener("click", (e) => { e.preventDefault(); void this.plugin.app.workspace.getLeaf(false).openFile(cand.file); });
-      info.createDiv({ cls: "lexis-retire-meta", text: this.plugin.t("home.candidateMeta", { created: cand.created, encounters: cand.encounterCount, hovers: cand.hoverCount, occurrences: cand.occCount, days: cand.sinceLast }) });
-      const btns = row.createDiv({ cls: "lexis-retire-btns" });
-      const evictBtn = btns.createEl("button", { text: `🗑️ ${this.plugin.t("home.evict")}` });
-      evictBtn.addEventListener("click", () => { void this.plugin.setRetired(cand.file, true).then(() => removeRows([cand.file.path])); });
-      const pinBtn = btns.createEl("button", { text: `📌 ${this.plugin.t("home.keep")}` });
-      pinBtn.addEventListener("click", () => { void this.plugin.setPinned(cand.file, true).then(() => removeRows([cand.file.path])); });
-      const archiveBtn = btns.createEl("button", { text: `📦 ${this.plugin.t("home.mastered")}` });
-      archiveBtn.addEventListener("click", () => { void this.plugin.setArchived(cand.file, true).then(() => removeRows([cand.file.path])); });
-    }
-    const bulk = wrap.createDiv({ cls: "lexis-retire-bulk" });
-    const bulkRun = async (fn: (file: TFile) => Promise<void>) => { const paths = [...selected]; for (const p of paths) { const f = this.plugin.app.vault.getAbstractFileByPath(p); if (f instanceof TFile) await fn(f); } removeRows(paths); };
-    bulk.createEl("button", { text: this.plugin.t("home.bulkEvict") }).addEventListener("click", () => { void bulkRun((f) => this.plugin.setRetired(f, true)); });
-    bulk.createEl("button", { text: this.plugin.t("home.bulkKeep") }).addEventListener("click", () => { void bulkRun((f) => this.plugin.setPinned(f, true)); });
-    bulk.createEl("button", { text: this.plugin.t("home.bulkMastered") }).addEventListener("click", () => { void bulkRun((f) => this.plugin.setArchived(f, true)); });
-  }
-  async onClose() {}
-}
-
 Object.defineProperties(LexisPlugin.prototype, createBridgeApi({
   DEFAULT_SETTINGS,
   TFile,
@@ -1239,6 +1002,10 @@ Object.defineProperties(LexisPlugin.prototype, createHighlightEngine({
   boundedSource,
   todayStr,
 }));
+Object.defineProperties(LexisPlugin.prototype, createDocumentHighlights());
+Object.defineProperties(LexisPlugin.prototype, createReaderInteractions({
+  openAliasPicker: (app, plugin, text, select) => new LexisAliasPicker(app, plugin as LexisPlugin, text, (entry) => { void select(entry); }).open(),
+}));
 Object.defineProperties(LexisPlugin.prototype, createReaderUi({
   buildCurveSVG,
   FSRS,
@@ -1252,7 +1019,6 @@ Object.defineProperties(LexisPlugin.prototype, createReaderUi({
   escapeRe,
   Component,
   renderLexisMarkdown,
-  openAliasPicker: (app, plugin, text, select) => new LexisAliasPicker(app, plugin as LexisPlugin, text, (entry) => { void select(entry); }).open(),
   openRestoreModal: (app, plugin, file) => new LexisRestoreModal(app, plugin as LexisPlugin, file).open(),
 }));
 

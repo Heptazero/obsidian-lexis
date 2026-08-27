@@ -115,8 +115,8 @@ Lexis 不承诺读得更快，也不承诺不费力地学习。
 仓库同时包含三个端：
 
 - Obsidian：`src/`，构建为 `main.js`
-- 浏览器：`browser-extension/`
-- Zotero：`zotero-extension/`
+- 浏览器：`pkg/browser-extension/`
+- Zotero：`pkg/zotero-extension/`
 
 Obsidian 源码使用 TypeScript。首次运行 `npm install`，之后可用 `npm run typecheck`、`npm run build` 和 `npm run dev`。发布包仍只有移动端可用的 `main.js`、`manifest.json`、`styles.css`。
 

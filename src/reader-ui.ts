@@ -1,14 +1,14 @@
 "use strict";
 
 import * as obsidian from "obsidian";
-import type { App, Component as ObsidianComponent, Editor, MarkdownPostProcessorContext, MarkdownView, Notice as ObsidianNotice, TFile as ObsidianTFile, WorkspaceLeaf } from "obsidian";
+import type { App, Component as ObsidianComponent, Editor, MarkdownPostProcessorContext, Notice as ObsidianNotice, TFile as ObsidianTFile, WorkspaceLeaf } from "obsidian";
 import type { Occurrence } from "./occurrence-search";
+import { overlayDocumentFor } from "./reader-interactions";
 import type { InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats, ReviewHistoryEvent } from "./types";
 
 type CurveCard = { s?: number | null; due?: string | null; last?: string | null; history?: ReviewHistoryEvent[] };
 type BridgeResult = { ok: boolean; error?: string; tags?: string[] };
 type TranslationVars = Record<string, string | number | boolean>;
-type AddWordOptions = { openExisting?: boolean };
 type StatsSummary = { due: number; fresh: number; total: number };
 type Heading = { title: string; subtitle: string };
 interface FsrsDisplayApi { nextInterval(stability: number, retention: number): number; retrievability(elapsedDays: number, stability: number): number }
@@ -25,18 +25,10 @@ interface ReaderUiDependencies {
   escapeRe: (value: string) => string;
   Component: typeof ObsidianComponent;
   renderLexisMarkdown: (app: App, markdown: string, element: HTMLElement, sourcePath: string, component: ObsidianComponent) => Promise<void>;
-  openAliasPicker: (app: App, plugin: object, text: string, select: (entry: LexisEntry) => Promise<void>) => void;
   openRestoreModal: (app: App, plugin: object, file: ObsidianTFile) => void;
 }
 
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : typeof error === "string" ? error : "Unknown error"; }
-
-function eventElement(target: EventTarget | null): HTMLElement | null {
-  if (!target || typeof target !== "object" || !("nodeType" in target)) return null;
-  const node = target as Node;
-  const element = node.nodeType === Node.ELEMENT_NODE ? node as HTMLElement : node.parentElement;
-  return element && "dataset" in element ? element : null;
-}
 
 function confirmAction(app: App, title: string, message: string): Promise<boolean> {
   return new Promise((resolve) => {
@@ -55,7 +47,7 @@ function confirmAction(app: App, title: string, message: string): Promise<boolea
   });
 }
 
-function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr, fmtDate, TFile, Notice, boundedSource, escapeRe, Component, renderLexisMarkdown, openAliasPicker, openRestoreModal }: ReaderUiDependencies): PropertyDescriptorMap {
+function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr, fmtDate, TFile, Notice, boundedSource, escapeRe, Component, renderLexisMarkdown, openRestoreModal }: ReaderUiDependencies): PropertyDescriptorMap {
   class ReaderUi {
   declare app: App;
   declare settings: LexisSettings;
@@ -63,11 +55,8 @@ function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr
   declare stats: LexisStats;
   declare inlineCategoryOccurrences: InlineCategoryOccurrence[];
   declare _hideTimer: number;
-  declare _showTimer: number | null;
-  declare _showTarget: HTMLElement | null;
   declare _popover: HTMLElement | null;
   declare _popoverComp: ObsidianComponent | null;
-  declare _selPill: HTMLElement | null;
   declare _occLeaf: WorkspaceLeaf | null;
   declare readCard: (file: ObsidianTFile) => CurveCard;
   declare renderDerivedWords: (element: HTMLElement, file: ObsidianTFile) => Promise<void>;
@@ -79,9 +68,9 @@ function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr
   declare addExampleToWord: (wordFile: ObsidianTFile, sentence: string, sourceFile: ObsidianTFile, page?: number) => Promise<boolean>;
   declare t: (key: string, vars?: TranslationVars) => string;
   declare dictFolders: () => string[];
-  declare normalizeFolder: (folder: string) => string;
-  declare saveSettings: () => Promise<void>;
-  declare addWordFromSelection: (text: string, editor: Editor | null, view: MarkdownView | null, folder?: string, options?: AddWordOptions) => Promise<void>;
+  declare attachPopoverResize: (popover: HTMLElement, target: HTMLElement) => void;
+  declare scheduleHide: () => void;
+  declare removePopover: () => void;
   declare rebuildIndex: (notify: boolean) => Promise<LexisStats>;
   declare getTags: (file: ObsidianTFile) => Set<string>;
   declare computeStats: () => StatsSummary;
@@ -164,141 +153,7 @@ function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr
     if (el.children.length === countBefore) el.remove();
   }
 
-  // ---------- 悬浮卡 ----------
-  highlightTarget(target: EventTarget | null): HTMLElement | null { const element = eventElement(target); return element && (element.classList.contains("lexis-hl") || element.classList.contains("lexis-pdf-hl")) ? element : null; }
-  onMouseOver(e: MouseEvent): void {
-    const t = this.highlightTarget(e.target);
-    if (!t) return;
-    window.clearTimeout(this._hideTimer);
-    if (this._popover?.dataset.lexisKey === t.dataset.lexisKey) return;
-    if (this._showTarget === t) return;
-    window.clearTimeout(this._showTimer);
-    this._showTarget = t;
-    const open = () => {
-      this._showTimer = null;
-      if (this._showTarget === t && t.isConnected) void this.showPopover(t);
-    };
-    const delay = Math.max(0, Number(this.settings.hoverDelayMs) || 0);
-    if (delay) this._showTimer = window.setTimeout(open, delay); else open();
-  }
-  onMouseOut(e: MouseEvent): void {
-    const t = this.highlightTarget(e.target);
-    if (!t) return;
-    if (this._showTarget === t) {
-      window.clearTimeout(this._showTimer);
-      this._showTimer = null;
-      this._showTarget = null;
-    }
-    if (this._popover?.dataset.lexisKey === t.dataset.lexisKey) this.scheduleHide();
-  }
-  onClick(e: MouseEvent): void {
-    const t = this.highlightTarget(e.target);
-    if (t) {
-      const entry = this.index.get(t.dataset.lexisKey);
-      if (entry) {
-        e.preventDefault();
-        if (entry.inline) void this.openInlineEntry(entry, e.ctrlKey || e.metaKey);
-        else { void this.app.workspace.getLeaf(e.ctrlKey || e.metaKey ? "tab" : false).openFile(entry.file); this.removePopover(); }
-      }
-    } else if (this._popover && !this._popover.contains(eventElement(e.target))) this.removePopover();
-  }
-  scheduleHide() { window.clearTimeout(this._hideTimer); this._hideTimer = window.setTimeout(() => this.removePopover(), 220); }
-  removePopover() {
-    window.clearTimeout(this._showTimer);
-    this._showTimer = null;
-    this._showTarget = null;
-    if (this._popoverComp) { this._popoverComp.unload(); this._popoverComp = null; }
-    if (this._popover) { this._popover.remove(); this._popover = null; }
-  }
-  // ---------- 划词添加药丸(普通笔记,阅读/编辑两种模式) ----------
-  removeSelPill() { if (this._selPill) { this._selPill.remove(); this._selPill = null; } }
-  maybeShowSelPill(e: MouseEvent, fromEpubIframe = false): void {
-    if (!this.settings.selectionPill) return;
-    const tgt = eventElement(e.target);
-    // 点到自己的 UI(药丸/悬浮卡/菜单)不处理,避免抢选区
-    if (tgt?.closest(".lexis-sel-pill, .lexis-popover, .menu")) return;
-    const sourceDoc = tgt?.ownerDocument || document;
-    const sourceWin = sourceDoc.defaultView || window;
-    let sel: Selection | null, text: string;
-    try { sel = sourceWin.getSelection(); text = sel ? sel.toString().trim() : ""; } catch { return; }
-    if (!text || text.length > 60 || /[\n\r]/.test(text)) { this.removeSelPill(); return; }
-    // 选区必须落在 Markdown 笔记内容、PDF 文字层,或已识别的 EPUB iframe 里。
-    const node = sel.anchorNode;
-    const host = node ? (node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement) : null;
-    if (!host || (!fromEpubIframe && !host.closest(".markdown-source-view, .markdown-reading-view, .markdown-preview-view, .pdf-viewer, .pdf-container, .pdf-embed, .textLayer"))) { this.removeSelPill(); return; }
-    let rect: Pick<DOMRect, "left" | "right" | "top" | "bottom" | "width" | "height">; try { rect = sel.getRangeAt(0).getBoundingClientRect(); } catch { return; }
-    if (!rect || (!rect.width && !rect.height)) { this.removeSelPill(); return; }
-    if (sourceWin !== window && sourceWin.frameElement) {
-      const frameRect = sourceWin.frameElement.getBoundingClientRect();
-      rect = { left: rect.left + frameRect.left, right: rect.right + frameRect.left, top: rect.top + frameRect.top, bottom: rect.bottom + frameRect.top, width: rect.width, height: rect.height };
-    }
-    this.removeSelPill();
-    const known = this.index.has(text.toLowerCase());
-    const pill = activeDocument.body.createDiv({ cls: "lexis-sel-pill" });
-    // 阻止 mousedown 收起选区/夺焦(事件冒泡到 pill 即可覆盖子按钮)
-    pill.addEventListener("mousedown", (ev) => ev.preventDefault());
-    if (known) {
-      const b = pill.createSpan({ cls: "lexis-sel-pill-btn", text: `📖 ${this.t("selection.openExisting")}` });
-      b.addEventListener("click", (ev) => { ev.preventDefault(); ev.stopPropagation(); void this.addFromPill(text, undefined, { openExisting: true }); });
-    } else {
-      const dicts = this.dictFolders();
-      let selectedFolder = this.preferredSelectionFolder();
-      const folderLabel = (f: string) => String(f || this.t("common.root")).split("/").pop() || "";
-      const addB = pill.createSpan({ cls: "lexis-sel-pill-btn", text: "＋" });
-      addB.setAttribute("title", this.t("selection.add"));
-      addB.setAttribute("aria-label", this.t("selection.add"));
-      addB.addEventListener("click", (ev) => {
-        ev.preventDefault(); ev.stopPropagation();
-        void this.addFromPill(text, selectedFolder);
-      });
-      if (dicts.length > 1) {
-        const folderB = pill.createSpan({ cls: "lexis-sel-pill-btn lexis-sel-pill-folder", text: `📁 ${folderLabel(selectedFolder)}` });
-        folderB.setAttribute("title", this.t("selection.chooseDictionary"));
-        folderB.addEventListener("click", (ev) => {
-          ev.preventDefault(); ev.stopPropagation();
-          const menu = new obsidian.Menu();
-          for (const f of dicts) menu.addItem((it) => it.setTitle(f || this.t("common.root")).setIcon(f === selectedFolder ? "check" : "folder").onClick(() => {
-            selectedFolder = f;
-            folderB.setText(`📁 ${folderLabel(f)}`);
-            void this.rememberSelectionFolder(f);
-          }));
-          menu.showAtPosition({ x: ev.clientX, y: ev.clientY });
-        });
-      }
-      // 设为别名:选一个已有词条(标题或别名都行),把当前选中的词并入它的 aliases
-      const aliasB = pill.createSpan({ cls: "lexis-sel-pill-btn", text: "🔗" });
-      aliasB.setAttribute("title", this.t("selection.alias"));
-      aliasB.setAttribute("aria-label", this.t("selection.alias"));
-      aliasB.addEventListener("click", (ev) => {
-        ev.preventDefault(); ev.stopPropagation();
-        this.removeSelPill();
-        openAliasPicker(this.app, this, text, (entry) => this.attachAlias(text, entry.file));
-      });
-    }
-    // 定位:选区下方略偏左;贴边时夹回视口
-    const top = Math.min(rect.bottom + 6, window.innerHeight - 36);
-    const left = Math.max(6, Math.min(rect.left, window.innerWidth - pill.offsetWidth - 6));
-    pill.setCssStyles({ top: top + "px", left: left + "px" });
-    this._selPill = pill;
-  }
-  preferredSelectionFolder() {
-    const dicts = this.dictFolders();
-    const saved = this.normalizeFolder(this.settings.lastSelectionFolder || "");
-    return dicts.includes(saved) ? saved : (dicts[0] || "");
-  }
-  async rememberSelectionFolder(folder: string): Promise<void> {
-    const value = this.normalizeFolder(folder || "");
-    if (!this.dictFolders().includes(value) || this.settings.lastSelectionFolder === value) return;
-    this.settings.lastSelectionFolder = value;
-    await this.saveSettings();
-  }
-  async addFromPill(text: string, folder?: string, options: AddWordOptions = {}): Promise<void> {
-    const view = this.app.workspace.getActiveViewOfType(obsidian.MarkdownView);
-    const editor = (view && view.getMode && view.getMode() === "source" && view.editor) ? view.editor : null;
-    this.removeSelPill();
-    if (folder) await this.rememberSelectionFolder(folder);
-    await this.addWordFromSelection(text, editor, view, folder, options);
-  }
+
   // 把 alias 写进某词条文件的 frontmatter aliases(已存在则跳过,幂等)
   async addAliasToFile(file: ObsidianTFile, alias: string): Promise<void> {
     if (!(file instanceof TFile) || !alias) return;
@@ -561,7 +416,7 @@ function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr
     if (this._popover && this._popover.dataset.lexisKey === key) { window.clearTimeout(this._hideTimer); return; }
     if (!entry.inline) { this.recordEncounter(entry.file, "hover"); void this.hoverFeedback(entry.file); }
     this.removePopover();
-    const pop = activeDocument.body.createDiv({ cls: "lexis-popover" });
+    const pop = overlayDocumentFor(spanEl).body.createDiv({ cls: "lexis-popover" });
     pop.dataset.lexisKey = key;
     this.applyPopoverAppearance(pop);
     const title = pop.createDiv({ cls: "lexis-popover-title" });
@@ -588,6 +443,7 @@ function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr
     pop.addEventListener("mouseleave", () => this.scheduleHide());
     spanEl.addEventListener("mouseleave", () => this.scheduleHide(), { once: true });
     this._popover = pop;
+    this.attachPopoverResize(pop, spanEl);
     this.positionPopover(pop, spanEl);
     try {
       body.empty();
@@ -636,11 +492,12 @@ function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr
     const r = spanEl.getBoundingClientRect();
     const pr = pop.getBoundingClientRect();
     const ownerWin = spanEl.ownerDocument?.defaultView;
-    const frameRect = ownerWin && ownerWin !== window && ownerWin.frameElement ? ownerWin.frameElement.getBoundingClientRect() : null;
+    const hostWin = pop.ownerDocument.defaultView || window;
+    const frameRect = ownerWin?.frameElement?.ownerDocument === pop.ownerDocument ? ownerWin.frameElement.getBoundingClientRect() : null;
     let left = r.left + (frameRect ? frameRect.left : 0), top = r.bottom + (frameRect ? frameRect.top : 0) + 6;
-    if (left + pr.width > window.innerWidth - 10) left = window.innerWidth - pr.width - 10;
+    if (left + pr.width > hostWin.innerWidth - 10) left = hostWin.innerWidth - pr.width - 10;
     if (left < 10) left = 10;
-    if (top + pr.height > window.innerHeight - 10) top = r.top + (frameRect ? frameRect.top : 0) - pr.height - 6;
+    if (top + pr.height > hostWin.innerHeight - 10) top = r.top + (frameRect ? frameRect.top : 0) - pr.height - 6;
     if (top < 10) top = 10;
     pop.setCssStyles({ left: left + "px", top: top + "px" });
   }
@@ -653,10 +510,15 @@ function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr
       "--lexis-popover-height": `${height}px`,
       "--lexis-popover-font-size": `${fontSize}px`,
     });
-    // 内联值保证主题样式无法盖掉用户设置；预览卡用实际高度演示“最大高度”。
-    pop.setCssStyles({ width: `${width}px`, fontSize: `${fontSize}px` });
+    // 内联值保证主题样式无法盖掉用户设置；桌面实卡恢复上次拖拽后的实际尺寸。
     const isPreview = pop.classList.contains("lexis-popover-preview");
-    pop.setCssStyles({ maxHeight: isPreview ? `${height}px` : "", height: isPreview ? `${height}px` : "" });
+    const coarsePointer = pop.ownerDocument.defaultView?.matchMedia?.("(pointer: coarse)").matches;
+    pop.setCssStyles({
+      width: `${width}px`,
+      height: !isPreview && !coarsePointer ? `${height}px` : "",
+      maxHeight: `${height}px`,
+      fontSize: `${fontSize}px`,
+    });
   }
   }
   const { constructor: _constructor, ...descriptors } = Object.getOwnPropertyDescriptors(ReaderUi.prototype);

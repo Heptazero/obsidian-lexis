@@ -6,8 +6,8 @@ export default defineConfig(
   globalIgnores([
     "node_modules",
     "dist",
-    "browser-extension",
-    "zotero-extension",
+    "pkg/browser-extension",
+    "pkg/zotero-extension",
     "scripts",
     "esbuild.config.mjs",
     "main.js",

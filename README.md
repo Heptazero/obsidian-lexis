@@ -115,8 +115,8 @@ Lexis does not promise faster reading or learning without effort.
 The repository contains all three clients:
 
 - Obsidian: `src/`, bundled to `main.js`
-- Browser: `browser-extension/`
-- Zotero: `zotero-extension/`
+- Browser: `pkg/browser-extension/`
+- Zotero: `pkg/zotero-extension/`
 
 The Obsidian source is TypeScript. Run `npm install` once, then use `npm run typecheck`, `npm run build`, or `npm run dev`. Releases still contain the mobile-compatible `main.js`, `manifest.json`, and `styles.css` only.
 
