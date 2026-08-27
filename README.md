@@ -31,6 +31,7 @@ Lexis highlights known entries and shows their notes on hover in:
 - Zotero Reader through **Lexis for Zotero**
 
 Selected text can be added to a dictionary, saved as an occurrence, or attached as an alias. Obsidian remains the source of truth; the browser and Zotero companions communicate with it over an authenticated loopback-only bridge.
+<img width="727" height="465" alt="image" src="https://github.com/user-attachments/assets/d274dd14-7bd7-4003-9da6-3a7f8db02b06" />
 
 ### Review what still needs memory
 
