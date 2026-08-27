@@ -51,6 +51,7 @@ function createHighlightEngine({ Notice, boundedSource, todayStr }: HighlightDep
   declare _pdfResizeObserver: ResizeObserver | null;
   declare _pdfResizeTimer: number;
   declare _pdfObservedLayers: WeakSet<Element> | null;
+  declare _pdfObservedSizes: WeakMap<Element, string> | null;
   declare _pdfPending: Set<HTMLElement>;
   declare _pdfScheduleFlush: ((delay?: number) => void) | null;
   declare _epubIframeObserver: MutationObserver | null;
@@ -724,6 +725,7 @@ function createHighlightEngine({ Notice, boundedSource, todayStr }: HighlightDep
     if (this._pdfResizeTimer) { window.clearTimeout(this._pdfResizeTimer); this._pdfResizeTimer = 0; }
     this._pdfScheduleFlush = null;
     this._pdfObservedLayers = new WeakSet();
+    this._pdfObservedSizes = new WeakMap();
     if (!this.settings.enablePdfHighlight || typeof MutationObserver === "undefined") return;
     this._pdfPending = new Set();
     const flush = () => {
@@ -731,14 +733,17 @@ function createHighlightEngine({ Notice, boundedSource, todayStr }: HighlightDep
       const next = this._pdfPending.values().next();
       if (!next.done) {
         this._pdfPending.delete(next.value);
-        if (next.value.isConnected) this.scanPdfLayer(next.value);
+        if (next.value.isConnected) {
+          this.scanPdfLayer(next.value);
+          next.value.parentElement?.querySelector(":scope > .lexis-pdf-hl-layer")?.classList.remove("is-geometry-changing");
+        }
       }
       if (this._pdfPending.size) this._pdfRaf = window.requestAnimationFrame(flush);
       else activeDocument.querySelectorAll(".lexis-pdf-hl-layer.is-geometry-changing").forEach((el) => el.classList.remove("is-geometry-changing"));
     };
     const scheduleFlush = (delay = 0) => {
       if (delay) {
-        window.clearTimeout(this._pdfResizeTimer);
+        if (this._pdfResizeTimer || this._pdfRaf) return;
         this._pdfResizeTimer = window.setTimeout(() => {
           this._pdfResizeTimer = 0;
           if (!this._pdfRaf) this._pdfRaf = window.requestAnimationFrame(flush);
@@ -750,6 +755,10 @@ function createHighlightEngine({ Notice, boundedSource, todayStr }: HighlightDep
       this._pdfResizeObserver = new ResizeObserver((entries) => {
         for (const entry of entries) {
           const target = entry.target;
+          const size = `${entry.contentRect.width}:${entry.contentRect.height}`;
+          const previousSize = this._pdfObservedSizes?.get(target);
+          this._pdfObservedSizes?.set(target, size);
+          if (previousSize == null || previousSize === size) continue;
           const layer = target.classList.contains("textLayer") ? target : target.querySelector<HTMLElement>(".textLayer");
           if (layer?.instanceOf(HTMLElement)) this.markPdfGeometryChanging(layer);
         }
@@ -867,6 +876,7 @@ function createHighlightEngine({ Notice, boundedSource, todayStr }: HighlightDep
     if (this._pdfResizeTimer) { window.clearTimeout(this._pdfResizeTimer); this._pdfResizeTimer = 0; }
     this._pdfScheduleFlush = null;
     this._pdfObservedLayers = null;
+    this._pdfObservedSizes = null;
     activeDocument.querySelectorAll(".lexis-pdf-hl-layer").forEach((layer) => layer.remove());
     activeDocument.querySelectorAll(".textLayer .lexis-hl").forEach((span) => {
       const text = activeDocument.createTextNode(span.textContent || "");

@@ -17,6 +17,7 @@
   let observer = null;
   let scanTimer = null;
   let selTimer = null;
+  let lastSelectionFolder = "";
   let pendingRoots = new Set();
   let styleCfg = null;
   const detailCache = new Map();
@@ -749,9 +750,9 @@
     }
     hideSelBtn();
     const sentence = sentenceFromSelection(sel);
-    // 目标词典(文件夹)列表;>1 个才显示选择段,默认第一个
+    // 目标词典(文件夹)列表;优先沿用上次选择，目标已不存在时才回退到第一个。
     const dicts = (styleCfg && Array.isArray(styleCfg.dicts) ? styleCfg.dicts : []).filter(Boolean);
-    let selFolder = dicts[0] || "";
+    let selFolder = dicts.includes(lastSelectionFolder) ? lastSelectionFolder : (dicts[0] || "");
     const fname = (f) => (String(f).split("/").pop() || f);
 
     const pill = document.createElement("div");
@@ -791,7 +792,10 @@
           it.textContent = fname(f); it.title = f;
           it.addEventListener("mousedown", (ev) => {
             ev.preventDefault(); ev.stopPropagation();
-            selFolder = f; folderBtn.textContent = "📁 " + fname(f); closeFList();
+            selFolder = f;
+            lastSelectionFolder = f;
+            void chrome.storage.local.set({ lastSelectionFolder: f });
+            folderBtn.textContent = "📁 " + fname(f); closeFList();
           });
           flist.appendChild(it);
         });
@@ -858,9 +862,10 @@
 
   // ---- 启动 / 配置变化 ----
   async function init() {
-    const { cfg: c, words, styleConfig } = await chrome.storage.local.get(["cfg", "words", "styleConfig"]);
+    const { cfg: c, words, styleConfig, lastSelectionFolder: savedFolder } = await chrome.storage.local.get(["cfg", "words", "styleConfig", "lastSelectionFolder"]);
     cfg = Object.assign({}, DEFAULT_CFG, c || {});
     styleCfg = styleConfig || null;
+    lastSelectionFolder = typeof savedFolder === "string" ? savedFolder : "";
     applyTheme();
     build(words || []);
     if (cfg.highlight) { scan(document.body); startObserver(); }
@@ -876,6 +881,7 @@
         if (!cfg.highlight) { unwrapAll(); removePop(); }
       }
       if (changes.styleConfig) styleCfg = changes.styleConfig.newValue || null;
+      if (changes.lastSelectionFolder) lastSelectionFolder = typeof changes.lastSelectionFolder.newValue === "string" ? changes.lastSelectionFolder.newValue : "";
       if (changes.words) build(changes.words.newValue || []);
       const styleChanged = oldCfg && cfg && (oldCfg.useObsidianStyle !== cfg.useObsidianStyle
         || oldCfg.color !== cfg.color || oldCfg.style !== cfg.style || oldCfg.opacity !== cfg.opacity);

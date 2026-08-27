@@ -388,7 +388,7 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     border: 1px solid var(--text-accent);
     border-radius: 7px;
 }
-.lexis-popover-title:hover {
+.lexis-popover-title:hover .lexis-popover-title-main {
     box-shadow: inset 0 -1px currentColor;
 }
 .lexis-popover-alias {
