@@ -414,7 +414,7 @@
     pop = document.createElement("div");
     pop.className = "lexis-web-pop";
     pop.dataset.k = key;
-    pop.innerHTML = `<div class="lexis-web-pop-title">${span.textContent}</div><div class="lexis-web-pop-corner"></div><div class="lexis-web-pop-meta"></div><div class="lexis-web-pop-body">加载中…</div>`;
+    pop.innerHTML = `<div class="lexis-web-pop-scroll"><div class="lexis-web-pop-title">${span.textContent}</div><div class="lexis-web-pop-corner"></div><div class="lexis-web-pop-meta"></div><div class="lexis-web-pop-body">加载中…</div></div>`;
     pop.addEventListener("mouseenter", () => clearTimeout(hideTimer));
     pop.addEventListener("mouseleave", scheduleHide);
     shadow.appendChild(pop);

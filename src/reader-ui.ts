@@ -419,13 +419,14 @@ function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr
     const pop = overlayDocumentFor(spanEl).body.createDiv({ cls: "lexis-popover" });
     pop.dataset.lexisKey = key;
     this.applyPopoverAppearance(pop);
-    const title = pop.createDiv({ cls: "lexis-popover-title" });
+    const scroll = pop.createDiv({ cls: "lexis-popover-scroll" });
+    const title = scroll.createDiv({ cls: "lexis-popover-title" });
     const heading = this.cardHeading(entry);
     title.createSpan({ cls: "lexis-popover-title-main", text: heading.title });
     if (heading.subtitle) title.createSpan({ cls: "lexis-popover-alias", text: heading.subtitle });
     title.addEventListener("click", () => { if (entry.inline) void this.openInlineEntry(entry, false); else this.openAndClose(entry.file); });
-    const corner = pop.createDiv({ cls: "lexis-popover-corner" });
-    const meta = pop.createDiv({ cls: "lexis-popover-meta" });
+    const corner = scroll.createDiv({ cls: "lexis-popover-corner" });
+    const meta = scroll.createDiv({ cls: "lexis-popover-meta" });
     if (!entry.inline) {
       pop.addClass("has-corner-actions");
       const archiveBtn = meta.createSpan({ cls: "lexis-popover-archive", text: entry.archived ? `↩ ${this.t("popover.restore")}` : `📦 ${this.t("popover.archive")}` });
@@ -437,7 +438,7 @@ function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr
         this.removePopover();
       });
     }
-    const body = pop.createDiv({ cls: "lexis-popover-body" });
+    const body = scroll.createDiv({ cls: "lexis-popover-body" });
     body.setText(this.t("common.loading"));
     pop.addEventListener("mouseenter", () => window.clearTimeout(this._hideTimer));
     pop.addEventListener("mouseleave", () => this.scheduleHide());

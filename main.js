@@ -3601,7 +3601,8 @@ ${line}---` + data.slice(fm.index + fm[0].length);
       const pop = overlayDocumentFor(spanEl).body.createDiv({ cls: "lexis-popover" });
       pop.dataset.lexisKey = key;
       this.applyPopoverAppearance(pop);
-      const title = pop.createDiv({ cls: "lexis-popover-title" });
+      const scroll = pop.createDiv({ cls: "lexis-popover-scroll" });
+      const title = scroll.createDiv({ cls: "lexis-popover-title" });
       const heading = this.cardHeading(entry);
       title.createSpan({ cls: "lexis-popover-title-main", text: heading.title });
       if (heading.subtitle) title.createSpan({ cls: "lexis-popover-alias", text: heading.subtitle });
@@ -3609,8 +3610,8 @@ ${line}---` + data.slice(fm.index + fm[0].length);
         if (entry.inline) void this.openInlineEntry(entry, false);
         else this.openAndClose(entry.file);
       });
-      const corner = pop.createDiv({ cls: "lexis-popover-corner" });
-      const meta = pop.createDiv({ cls: "lexis-popover-meta" });
+      const corner = scroll.createDiv({ cls: "lexis-popover-corner" });
+      const meta = scroll.createDiv({ cls: "lexis-popover-meta" });
       if (!entry.inline) {
         pop.addClass("has-corner-actions");
         const archiveBtn = meta.createSpan({ cls: "lexis-popover-archive", text: entry.archived ? `\u21A9 ${this.t("popover.restore")}` : `\u{1F4E6} ${this.t("popover.archive")}` });
@@ -3622,7 +3623,7 @@ ${line}---` + data.slice(fm.index + fm[0].length);
           this.removePopover();
         });
       }
-      const body = pop.createDiv({ cls: "lexis-popover-body" });
+      const body = scroll.createDiv({ cls: "lexis-popover-body" });
       body.setText(this.t("common.loading"));
       pop.addEventListener("mouseenter", () => window.clearTimeout(this._hideTimer));
       pop.addEventListener("mouseleave", () => this.scheduleHide());
@@ -4586,8 +4587,9 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
       renderRules();
       const cardSection = this.section(containerEl, t("settings.popover"));
       const preview = cardSection.createDiv({ cls: "lexis-popover lexis-popover-preview" });
-      preview.createDiv({ cls: "lexis-popover-title", text: "Yalda \xB7 \u4EBA\u7269" });
-      preview.createDiv({ cls: "lexis-popover-body", text: t("settings.popoverPreview") });
+      const previewScroll = preview.createDiv({ cls: "lexis-popover-scroll" });
+      previewScroll.createDiv({ cls: "lexis-popover-title", text: "Yalda \xB7 \u4EBA\u7269" });
+      previewScroll.createDiv({ cls: "lexis-popover-body", text: t("settings.popoverPreview") });
       const updateCards = () => {
         this.plugin.applyPopoverAppearance(preview);
         const doc = preview.ownerDocument || document2;

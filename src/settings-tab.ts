@@ -531,8 +531,9 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
 
       const cardSection = this.section(containerEl, t("settings.popover"));
       const preview = cardSection.createDiv({ cls: "lexis-popover lexis-popover-preview" });
-      preview.createDiv({ cls: "lexis-popover-title", text: "Yalda · 人物" });
-      preview.createDiv({ cls: "lexis-popover-body", text: t("settings.popoverPreview") });
+      const previewScroll = preview.createDiv({ cls: "lexis-popover-scroll" });
+      previewScroll.createDiv({ cls: "lexis-popover-title", text: "Yalda · 人物" });
+      previewScroll.createDiv({ cls: "lexis-popover-body", text: t("settings.popoverPreview") });
       const updateCards = () => {
         this.plugin.applyPopoverAppearance(preview);
         const doc = preview.ownerDocument || document;

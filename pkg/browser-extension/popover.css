@@ -20,15 +20,22 @@
   max-height: min(var(--lexis-popover-height, 420px), calc(100vh - 20px));
   min-width: 260px;
   min-height: 160px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: 10px 12px;
+  overflow: hidden;
   border: 1px solid rgba(0, 0, 0, 0.12);
   border-radius: 10px;
   background: #ffffff;
   color: #1f2328;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
   font: var(--lexis-popover-font-size, 14px)/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+.lexis-web-pop-scroll {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 10px 12px 20px;
 }
 
 .lexis-web-resize {
@@ -40,6 +47,7 @@
   cursor: nwse-resize;
   opacity: .42;
   touch-action: none;
+  z-index: 2;
 }
 .lexis-web-resize::after {
   position: absolute;

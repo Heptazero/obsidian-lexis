@@ -101,7 +101,7 @@
       card.style.width = width + "px";
       card.style.height = height + "px";
       card.style.maxHeight = height + "px";
-      card.innerHTML = `<div class="lexis-web-pop-title">${this.escape(meta.key)}</div><div class="lexis-web-pop-corner"></div><div class="lexis-web-pop-meta"></div><div class="lexis-web-pop-body">加载中…</div>`;
+      card.innerHTML = `<div class="lexis-web-pop-scroll"><div class="lexis-web-pop-title">${this.escape(meta.key)}</div><div class="lexis-web-pop-corner"></div><div class="lexis-web-pop-meta"></div><div class="lexis-web-pop-body">加载中…</div></div>`;
       card.addEventListener("mouseenter", () => {
         this.logger(`卡片被 hover: ${this.currentMeta?.key}`);
         this.win.clearTimeout(this.hideTimer);

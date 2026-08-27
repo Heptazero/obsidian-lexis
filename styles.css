@@ -296,17 +296,26 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
 .lexis-popover {
     position: absolute;
     z-index: var(--layer-popover, 50);
+    box-sizing: border-box;
     width: min(var(--lexis-popover-width, 460px), calc(100vw - 20px));
     max-width: calc(100vw - 20px);
     max-height: min(var(--lexis-popover-height, 420px), calc(100vh - 20px));
-    overflow: auto;
-    padding: 10px 14px 12px;
+    overflow: hidden;
     border: 1px solid var(--background-modifier-border);
     border-radius: 10px;
     background: var(--background-primary);
     box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
     font-size: var(--lexis-popover-font-size, 14px);
     line-height: 1.5;
+}
+.lexis-popover-scroll {
+    position: relative;
+    box-sizing: border-box;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: 10px 14px 20px;
 }
 .lexis-popover-preview {
     position: relative;
@@ -326,6 +335,7 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     cursor: nwse-resize;
     opacity: 0.45;
     touch-action: none;
+    z-index: 2;
 }
 .lexis-popover-resize-handle:hover { opacity: 0.85; }
 @media (pointer: coarse) {
