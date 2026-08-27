@@ -31,6 +31,7 @@ Lexis 会高亮已收录的词，悬停显示笔记。支持：
 - 通过 **Lexis for Zotero** 支持 Zotero Reader
 
 划词后可以加入指定词典、收藏出处或设为已有词条的别名。Obsidian 始终是唯一数据源；浏览器与 Zotero 通过带令牌的本机回环桥接访问数据。
+<img width="727" height="465" alt="image" src="https://github.com/user-attachments/assets/3e510943-d126-40f3-b9b4-7a4edd02e51a" />
 
 ### 复习仍未记住的内容
 
