@@ -1,11 +1,16 @@
 // Lexis Web —— 内容脚本:在网页上高亮词库里的词,悬停显示释义
 (() => {
+  const { isDictionaryVisible } = globalThis.LexisWebConfig;
   const HL = "lexis-web-hl";
   const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "INPUT", "CODE", "PRE", "SELECT", "OPTION", "KBD", "SAMP"]);
   const DEFAULT_CFG = { highlight: true, showMemoryCurve: true, color: "#7c5cff", style: "wavy", useObsidianStyle: true, opacity: 100 };
 
   let cfg = null;
+  let allWords = [];
+  let siteDictionaryVisibility = {};
+  const currentSite = location.origin && location.origin !== "null" ? location.origin : `${location.protocol}//${location.host}`;
   let keySet = null;
+  let knownKeys = null;
   let keyTags = null;
   let keyFolder = null;
   let keyColor = null;
@@ -13,6 +18,8 @@
   let keyVisible = null;
   let keyStyle = null;
   let excludedKeys = null;
+  let knownKeyByCompact = null;
+  let matchKeyByCompact = null;
   let regex = null;
   let observer = null;
   let scanTimer = null;
@@ -46,9 +53,49 @@
   }
 
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const ASCII_WORD = /[A-Za-z0-9_]/;
+  const EAST_ASIAN = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+  const HSPACE = /[ \t\u00a0\u3000]/;
+  const isMixedBoundary = (left, right) => (ASCII_WORD.test(left) && EAST_ASIAN.test(right)) || (EAST_ASIAN.test(left) && ASCII_WORD.test(right));
+  function compactMixedSpacing(value) {
+    const chars = [...String(value || "")];
+    let result = "", previous = "";
+    for (let i = 0; i < chars.length;) {
+      if (!HSPACE.test(chars[i])) { result += chars[i]; previous = chars[i]; i++; continue; }
+      let end = i + 1;
+      while (end < chars.length && HSPACE.test(chars[end])) end++;
+      if (!isMixedBoundary(previous, chars[end] || "")) result += chars.slice(i, end).join("");
+      i = end;
+    }
+    return result;
+  }
+  function flexibleMixedSource(value) {
+    const chars = [...String(value || "")];
+    let source = "", previous = "", boundaryAdded = false;
+    for (let i = 0; i < chars.length;) {
+      if (HSPACE.test(chars[i])) {
+        let end = i + 1;
+        while (end < chars.length && HSPACE.test(chars[end])) end++;
+        boundaryAdded = isMixedBoundary(previous, chars[end] || "");
+        source += boundaryAdded ? "[ \\t\\u00a0\\u3000]*" : esc(chars.slice(i, end).join(""));
+        i = end;
+        continue;
+      }
+      if (!boundaryAdded && previous && isMixedBoundary(previous, chars[i])) source += "[ \\t\\u00a0\\u3000]*";
+      source += esc(chars[i]);
+      previous = chars[i]; boundaryAdded = false; i++;
+    }
+    return source;
+  }
   // 词边界(支持中文):仅当词以英文字母/数字/下划线开头或结尾时加 ASCII 边界;中文不加,否则 \b 永不命中
-  const boundedSrc = (w) => (/^[A-Za-z0-9_]/.test(w) ? "(?<![A-Za-z0-9_])" : "") + esc(w) + (/[A-Za-z0-9_]$/.test(w) ? "(?![A-Za-z0-9_])" : "");
+  const boundedSrc = (w) => (/^[A-Za-z0-9_]/.test(w) ? "(?<![A-Za-z0-9_])" : "") + flexibleMixedSource(w) + (/[A-Za-z0-9_]$/.test(w) ? "(?![A-Za-z0-9_])" : "");
   const buildRe = (keys) => (keys.length ? new RegExp(keys.map(boundedSrc).join("|"), "gi") : null);
+  const resolveFrom = (map, value) => {
+    const key = String(value || "").toLowerCase();
+    return (map && (map.get(key) || map.get(compactMixedSpacing(key)))) || key;
+  };
+  const resolveKnownKey = (value) => resolveFrom(knownKeyByCompact, value);
+  const resolveMatchKey = (value) => resolveFrom(matchKeyByCompact, value);
 
   // ---- 句子抽取(按标点切,跟 Obsidian 端「出现过的地方」一致) ----
   const SENT_SEP = /[.!?。!?…\n]/;
@@ -104,15 +151,23 @@
         detailCache.delete((word || "").toLowerCase());
         if (alias) detailCache.delete(alias.toLowerCase());
         toast(r.dup ? "这条已经在出处里了" : r.created ? alias ? `已将「${alias}」归入「${r.word}」` : `已新建单词「${r.word}」` : `已给「${r.word}」加出处`, true);
-        if (r.created && alias) {
-          // 本地即刻高亮别名,不等 sync 来回
-          const ak = alias.toLowerCase();
-          if (!keySet.has(ak)) {
-            keySet.add(ak);
-            const keys = [...keySet].sort((a, b) => b.length - a.length);
-            regex = buildRe(keys);
-            if (cfg && cfg.highlight) { scan(document.body); startObserver(); }
+        if (r.created || alias) {
+          // 先在当前页重建一次，不等同步；旧短词高亮必须先解包并合并文本节点，新长词才能跨原高亮位置命中。
+          const immediateKey = String(alias || r.word || word).toLowerCase();
+          knownKeys.add(immediateKey);
+          const responseFile = String(r.file || "");
+          const slash = responseFile.lastIndexOf("/");
+          const responseFolder = slash > 0 ? responseFile.slice(0, slash) : folder;
+          if (isDictionaryVisible(currentSite, responseFolder, styleCfg?.dicts || [], siteDictionaryVisibility) && !keySet.has(immediateKey)) {
+            keySet.add(immediateKey);
+            knownKeyByCompact.set(immediateKey, immediateKey);
+            matchKeyByCompact.set(immediateKey, immediateKey);
+            const compact = compactMixedSpacing(immediateKey);
+            if (!knownKeyByCompact.has(compact)) knownKeyByCompact.set(compact, immediateKey);
+            if (!matchKeyByCompact.has(compact)) matchKeyByCompact.set(compact, immediateKey);
+            regex = buildRe([...keySet].sort((a, b) => b.length - a.length));
           }
+          if (cfg && cfg.highlight) { unwrapAll(); scan(document.body); startObserver(); }
         }
         if (r.created || alias) { try { await chrome.runtime.sendMessage({ type: "sync" }); } catch (e) {} }
       }
@@ -145,7 +200,9 @@
   }
 
   function build(words) {
+    allWords = Array.isArray(words) ? words : [];
     keySet = new Set();
+    knownKeys = new Set();
     keyTags = new Map();
     keyFolder = new Map();
     keyColor = new Map();
@@ -153,11 +210,17 @@
     keyVisible = new Map();
     keyStyle = new Map();
     excludedKeys = new Set();
+    knownKeyByCompact = new Map();
+    matchKeyByCompact = new Map();
     const exSet = excludeSet();
     const keys = [];
-    for (const x of words || []) {
+    for (const x of allWords) {
       const k = (x.k || "").toLowerCase();
       if (k.length < 2 && !/[^\x00-\x7f]/.test(k)) continue; // 英文单字母跳过,单个汉字保留
+      knownKeys.add(k);
+      knownKeyByCompact.set(k, k);
+      const compact = compactMixedSpacing(k);
+      if (!knownKeyByCompact.has(compact)) knownKeyByCompact.set(compact, k);
       const tags = (x.t || []).map((t) => String(t).toLowerCase());
       keyTags.set(k, tags);
       if (x.f) keyFolder.set(k, x.f);
@@ -166,7 +229,10 @@
       keyVisible.set(k, x.v !== false);
       if (x.s) keyStyle.set(k, x.s);
       if (exSet.size && tags.some((t) => exSet.has(t))) { excludedKeys.add(k); continue; }
+      if (!isDictionaryVisible(currentSite, x.f, styleCfg?.dicts || [], siteDictionaryVisibility)) continue;
       keySet.add(k);
+      matchKeyByCompact.set(k, k);
+      if (!matchKeyByCompact.has(compact)) matchKeyByCompact.set(compact, k);
       keys.push(k);
     }
     keys.sort((a, b) => b.length - a.length);
@@ -256,7 +322,7 @@
     let m, last = 0, found = false;
     const frag = document.createDocumentFragment();
     while ((m = regex.exec(text))) {
-      const key = m[0].toLowerCase();
+      const key = resolveMatchKey(m[0]);
       if (!keySet.has(key)) continue;
       found = true;
       queuePassiveEncounter(key);
@@ -292,10 +358,13 @@
   }
 
   function unwrapAll() {
+    const parents = new Set();
     for (const span of document.querySelectorAll("." + HL)) {
+      if (span.parentNode) parents.add(span.parentNode);
       const tn = document.createTextNode(span.textContent);
       span.parentNode.replaceChild(tn, span);
     }
+    for (const parent of parents) if (parent.isConnected) parent.normalize();
   }
 
   function scheduleScan() {
@@ -773,13 +842,14 @@
     if (selBtn && selBtn.dataset && selBtn.dataset.word === text && text) return;
     if (!isSelectionCandidate(text)) { hideSelBtn(); return; }
     // 选中词已在库中(含别名) → 不弹按钮
-    if (keySet && keySet.has(text.toLowerCase())) { hideSelBtn(); return; }
+    const selectedKey = resolveKnownKey(text);
+    if (keySet && keySet.has(selectedKey)) { hideSelBtn(); return; }
     // 获取选区矩形(排除词分支和正常 pill 分支共用的定位信息)
     let rect;
     try { rect = sel.getRangeAt(0).getBoundingClientRect(); } catch (e) { return; }
     if (!rect || (!rect.width && !rect.height)) return;
     // 选中词被排除高亮 → 弹 [取消排除]
-    if (excludedKeys && excludedKeys.has(text.toLowerCase())) {
+    if (excludedKeys && excludedKeys.has(selectedKey)) {
       hideSelBtn();
       selBtn = document.createElement("button");
       selBtn.className = "lexis-web-selbtn";
@@ -790,11 +860,11 @@
         selBtn.disabled = true; selBtn.textContent = "…";
         // 逐个去掉该词身上命中的全部排除标签
         const exSet = excludeSet();
-        const wordTags = (keyTags && keyTags.get(text.toLowerCase())) || [];
+        const wordTags = (keyTags && keyTags.get(selectedKey)) || [];
         const toRemove = [...new Set(wordTags.filter((t) => exSet.has(t)))];
         let ok = false;
         for (const tag of toRemove) {
-          const r = await chrome.runtime.sendMessage({ type: "tag", payload: { key: text, tag, action: "remove" } });
+          const r = await chrome.runtime.sendMessage({ type: "tag", payload: { key: selectedKey, tag, action: "remove" } });
           if (r && r.ok) ok = true;
         }
         if (ok) await chrome.runtime.sendMessage({ type: "sync" });
@@ -809,6 +879,7 @@
       document.body.appendChild(selBtn);
       return;
     }
+    if (knownKeys && knownKeys.has(selectedKey)) { hideSelBtn(); return; }
     hideSelBtn();
     const sentence = sentenceFromSelection(sel);
     // 目标词典(文件夹)列表;优先沿用上次选择，目标已不存在时才回退到第一个。
@@ -921,11 +992,17 @@
   document.addEventListener("mousedown", (e) => { if (selBtn && !selBtn.contains(e.target)) hideSelBtn(); });
   document.addEventListener("scroll", hideSelBtn, { passive: true });
 
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type !== "lexis-page-context") return;
+    sendResponse({ site: currentSite });
+  });
+
   // ---- 启动 / 配置变化 ----
   async function init() {
-    const { cfg: c, words, styleConfig, lastSelectionFolder: savedFolder, popoverSize: savedPopoverSize } = await chrome.storage.local.get(["cfg", "words", "styleConfig", "lastSelectionFolder", "popoverSize"]);
+    const { cfg: c, words, styleConfig, lastSelectionFolder: savedFolder, popoverSize: savedPopoverSize, siteDictionaryVisibility: savedVisibility } = await chrome.storage.local.get(["cfg", "words", "styleConfig", "lastSelectionFolder", "popoverSize", "siteDictionaryVisibility"]);
     cfg = Object.assign({}, DEFAULT_CFG, c || {});
     styleCfg = styleConfig || null;
+    siteDictionaryVisibility = savedVisibility || {};
     lastSelectionFolder = typeof savedFolder === "string" ? savedFolder : "";
     popoverSize = savedPopoverSize && typeof savedPopoverSize === "object" ? savedPopoverSize : null;
     applyTheme();
@@ -943,14 +1020,16 @@
         if (!cfg.highlight) { unwrapAll(); removePop(); }
       }
       if (changes.styleConfig) styleCfg = changes.styleConfig.newValue || null;
+      if (changes.siteDictionaryVisibility) siteDictionaryVisibility = changes.siteDictionaryVisibility.newValue || {};
       if (changes.lastSelectionFolder) lastSelectionFolder = typeof changes.lastSelectionFolder.newValue === "string" ? changes.lastSelectionFolder.newValue : "";
       if (changes.popoverSize) popoverSize = changes.popoverSize.newValue || null;
       if (changes.words) build(changes.words.newValue || []);
+      else if (changes.styleConfig || changes.siteDictionaryVisibility) build(allWords);
       const styleChanged = oldCfg && cfg && (oldCfg.useObsidianStyle !== cfg.useObsidianStyle
         || oldCfg.color !== cfg.color || oldCfg.style !== cfg.style || oldCfg.opacity !== cfg.opacity);
       if (oldCfg && oldCfg.showMemoryCurve !== cfg.showMemoryCurve) removePop();
       if (cfg && cfg.highlight) {
-        if (changes.words || changes.styleConfig || styleChanged || (changes.cfg && changes.cfg.newValue && changes.cfg.newValue.highlight && !(changes.cfg.oldValue || {}).highlight)) {
+        if (changes.words || changes.styleConfig || changes.siteDictionaryVisibility || styleChanged || (changes.cfg && changes.cfg.newValue && changes.cfg.newValue.highlight && !(changes.cfg.oldValue || {}).highlight)) {
           unwrapAll();
           scan(document.body);
           startObserver();

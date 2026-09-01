@@ -44,6 +44,7 @@ function createDocumentHighlights(): PropertyDescriptorMap {
   declare onMouseOver: (event: MouseEvent) => void;
   declare passiveEncounter: (file: TFile) => void;
   declare wrapMatchesInElement: (element: HTMLElement, rejectSelector: string, styleOptions?: HighlightStyleOptions, excludeKeys?: Set<string> | null) => void;
+  declare resolveMatchKey: (value: string) => string;
 
   // ---------- PDF 高亮(钩 pdf.js 文字层) ----------
   // pdf.js 会把同一行甚至同一个词拆成多个 span。普通 TreeWalker 只能逐文本节点匹配，
@@ -140,7 +141,7 @@ function createDocumentHighlights(): PropertyDescriptorMap {
           if (!match[0].length) regex.lastIndex++;
           continue;
         }
-        const key = match[0].toLowerCase();
+        const key = this.resolveMatchKey(match[0]);
         const entry = this.index.get(key);
         if (!entry) continue;
         const byNode = new Map<Text, PdfSegment>();

@@ -5,10 +5,59 @@ export type HighlightStyle = "wavy" | "underline" | "background";
 export type InlineClassificationMode = "heading" | "file";
 export type EmptyNotePreset = "blank" | "occ";
 export type CardFront = "note" | "cloze";
+export type AnnotationImageLocation = "obsidian" | "custom";
+export type ReviewContentMode = "notes" | "syntax" | "both";
+export type ReviewScopeMode = "vocab" | "folder" | "tag" | "current";
+export type ClozeReviewMode = "separate" | "combined";
+export type ReviewSortKey = "due" | "wordCount" | "modified" | "created" | "frequency" | "random";
+export type ReviewSortDirection = "asc" | "desc";
+
+export interface ReviewCardState {
+  s?: number | null;
+  d?: number | null;
+  due?: string | null;
+  last?: string | null;
+  reps?: number | null;
+  lapses?: number | null;
+  history?: ReviewHistoryEvent[];
+}
+
+export interface ReviewOptions {
+  scope?: ReviewScopeMode;
+  folder?: string;
+  tag?: string;
+  file?: string;
+  content?: ReviewContentMode;
+  clozeMode?: ClozeReviewMode;
+  sortBy?: ReviewSortKey;
+  sortDirection?: ReviewSortDirection;
+}
+
+export interface SyntaxReviewCard {
+  id: string;
+  memberIds: string[];
+  kind: "inline" | "bidirectional" | "block" | "cloze";
+  front: string;
+  back: string;
+  line: number;
+}
+
+export interface ReviewItem {
+  type: "note" | "syntax";
+  file: TFile;
+  card: ReviewCardState;
+  syntax?: SyntaxReviewCard;
+}
+
+export interface ReviewStateSnapshot {
+  note?: ReviewCardState | null;
+  syntax?: Record<string, ReviewCardState | null>;
+}
 
 export interface DictionarySetting {
   folder: string;
   template: string;
+  highlight?: boolean;
   color?: string;
   opacity?: number;
 }
@@ -71,11 +120,18 @@ export interface LexisSettings {
   maxReviewsPerSession: number;
   reviewLog: Record<string, number>;
   reviewHistory: Record<string, ReviewHistoryEvent[]>;
+  syntaxCardStates: Record<string, ReviewCardState>;
   showReviewMetadata: boolean;
+  flashcardInlineTemplate: string;
+  flashcardBidirectionalTemplate: string;
+  flashcardBlockTemplate: string;
+  flashcardClozeTemplate: string;
   newWordTemplate: string;
   emptyNotePreset: EmptyNotePreset;
   occurrenceTemplate: string;
   annotationHeading: string;
+  annotationImageLocation: AnnotationImageLocation;
+  annotationImageFolder: string;
   cardFront: CardFront;
   reviewBottomSpace: number;
   bridgeEnabled: boolean;

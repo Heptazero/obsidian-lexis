@@ -11,6 +11,7 @@ type BridgeResult = { ok: boolean; error?: string; tags?: string[] };
 type TranslationVars = Record<string, string | number | boolean>;
 type StatsSummary = { due: number; fresh: number; total: number };
 type Heading = { title: string; subtitle: string };
+type HighlightSource = { file: ObsidianTFile | null; sentence: string; page?: number };
 interface FsrsDisplayApi { nextInterval(stability: number, retention: number): number; retrievability(elapsedDays: number, stability: number): number }
 interface ReaderUiDependencies {
   buildCurveSVG: (card: CurveCard, dependencies: { requestRetention: number; nextInterval: FsrsDisplayApi["nextInterval"]; retrievability: FsrsDisplayApi["retrievability"]; addDaysStr: (date: string, days: number) => string; daysBetween: (start: string, end: string) => number; todayStr: () => string }) => string | null;
@@ -65,7 +66,8 @@ function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr
   declare getCuratedSourcePaths: (file: ObsidianTFile) => Promise<Set<string>>;
   declare findOccurrences: (word: string) => Promise<Occurrence[]>;
   declare occurrenceLabel: (occurrence: Occurrence) => string;
-  declare addExampleToWord: (wordFile: ObsidianTFile, sentence: string, sourceFile: ObsidianTFile, page?: number) => Promise<boolean>;
+  declare addExampleToWord: (wordFile: ObsidianTFile, sentence: string, sourceFile?: ObsidianTFile | null, page?: number) => Promise<boolean>;
+  declare extractSentence: (content: string, index: number) => string;
   declare t: (key: string, vars?: TranslationVars) => string;
   declare dictFolders: () => string[];
   declare attachPopoverResize: (popover: HTMLElement, target: HTMLElement) => void;
@@ -324,7 +326,33 @@ function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr
     const content = el.createDiv({ cls: "lexis-inline-annotation" });
     await renderLexisMarkdown(this.app, md, content, entry.file.path, comp);
   }
-  renderPopoverControls(meta: HTMLElement, corner: HTMLElement, body: HTMLElement, entry: LexisEntry): void {
+  highlightSource(span: HTMLElement): HighlightSource {
+    const sourceDocument = span.ownerDocument;
+    const frame = sourceDocument.defaultView?.frameElement;
+    const locatedNode = frame || span;
+    let file: ObsidianTFile | null = null;
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      const view = leaf.view as { containerEl?: HTMLElement; file?: ObsidianTFile };
+      if (!file && view.containerEl?.contains(locatedNode)) file = view.file || null;
+    });
+    if (!file) file = this.app.workspace.getActiveFile();
+
+    const pageElement = span.closest<HTMLElement>("[data-page-number]");
+    const pageValue = pageElement?.getAttribute("data-page-number") || "";
+    const page = Number.parseInt(pageValue, 10) || undefined;
+    const textContainer = span.closest<HTMLElement>("p,li,blockquote,td,th,figcaption,h1,h2,h3,h4,h5,h6,.cm-line,.textLayer") || span.parentElement;
+    if (!textContainer) return { file, sentence: "", page };
+    try {
+      const range = sourceDocument.createRange();
+      range.selectNodeContents(textContainer);
+      range.setEndBefore(span);
+      const sentence = this.extractSentence(textContainer.textContent || "", range.toString().length);
+      return { file, sentence, page };
+    } catch {
+      return { file, sentence: (span.textContent || "").trim(), page };
+    }
+  }
+  renderPopoverControls(meta: HTMLElement, corner: HTMLElement, body: HTMLElement, entry: LexisEntry, sourceSpan: HTMLElement): void {
     if (entry.inline) return;
     const baseKey = entry.file?.basename || entry.display;
     const path = entry.file?.path || "";
@@ -349,6 +377,17 @@ function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr
         menu.showAtPosition({ x: ev.clientX, y: ev.clientY });
       });
     }
+    const occurrenceBtn = meta.createEl("button", { cls: "lexis-popover-action", text: this.t("popover.addCurrentOccurrence") });
+    occurrenceBtn.setAttribute("title", this.t("popover.addCurrentOccurrenceTitle"));
+    occurrenceBtn.addEventListener("click", (ev) => { void (async () => {
+      ev.preventDefault(); ev.stopPropagation();
+      const source = this.highlightSource(sourceSpan);
+      occurrenceBtn.disabled = true;
+      if (await this.addExampleToWord(entry.file, source.sentence, source.file, source.page)) {
+        occurrenceBtn.setText("✓");
+        occurrenceBtn.removeAttribute("title");
+      } else occurrenceBtn.disabled = false;
+    })(); });
     const noteBtn = corner.createEl("button", { cls: "lexis-popover-action", text: "✎" });
     noteBtn.setAttribute("title", this.t("popover.addNote"));
     noteBtn.addEventListener("click", (ev) => {
@@ -357,7 +396,22 @@ function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr
       if (existing) { existing.querySelector("input")?.focus(); return; }
       const row = body.createDiv({ cls: "lexis-popover-note-row" });
       const input = row.createEl("input", { attr: { type: "text", placeholder: this.t("popover.notePlaceholder") } });
+      const imageInput = row.createEl("input", { cls: "lexis-popover-note-file", attr: { type: "file", accept: "image/*" } });
+      const imageBtn = row.createEl("button", { cls: "lexis-popover-note-image", attr: { type: "button", title: this.t("popover.addImage") } });
+      obsidian.setIcon(imageBtn, "image-plus");
       input.addEventListener("click", (e) => e.stopPropagation());
+      imageBtn.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); imageInput.click(); });
+      imageInput.addEventListener("click", (e) => e.stopPropagation());
+      imageInput.addEventListener("change", () => { void (async () => {
+        const image = imageInput.files?.[0];
+        if (!image) return;
+        input.disabled = true;
+        imageBtn.disabled = true;
+        const result = await this.bridgeAnnotate({ key: baseKey, note: input.value.trim(), image });
+        new Notice(result.ok ? this.t("notice.noteAdded", { word: entry.display }) : this.t("notice.noteFailed", { error: result.error || this.t("common.failed") }));
+        if (result.ok) this.removePopover();
+        else { input.disabled = false; imageBtn.disabled = false; imageInput.value = ""; }
+      })(); });
       input.addEventListener("keydown", (e) => { void (async () => {
         if (e.key === "Escape") { row.remove(); return; }
         if (e.key !== "Enter") return;
@@ -449,7 +503,7 @@ function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr
     try {
       body.empty();
       const comp = new Component(); comp.load(); this._popoverComp = comp;
-      this.renderPopoverControls(meta, corner, body, entry);
+      this.renderPopoverControls(meta, corner, body, entry, spanEl);
       const contentEl = body.createDiv();
       if (entry.inline) await this.renderInlineEntryInto(contentEl, entry, comp);
       else await this.renderNoteInto(contentEl, entry.file, comp);

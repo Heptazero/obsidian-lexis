@@ -1,4 +1,5 @@
 import type { LexisSettings } from "./types";
+import { LEXIS_BRIDGE_DEFAULT_PORT } from "./constants";
 
 export type DefaultLexisSettings = Omit<LexisSettings, "dicts" | "vocabFolders" | "excludeTags">;
 
@@ -46,15 +47,22 @@ export const DEFAULT_SETTINGS: DefaultLexisSettings = {
   maxReviewsPerSession: 200,
   reviewLog: {},
   reviewHistory: {},
+  syntaxCardStates: {},
   showReviewMetadata: false,
+  flashcardInlineTemplate: "{{question}}::{{answer}}",
+  flashcardBidirectionalTemplate: "{{sideA}}:::{{sideB}}",
+  flashcardBlockTemplate: "{{question}}??\n{{answer}}",
+  flashcardClozeTemplate: "=={{answer}}==",
   newWordTemplate: "template/单词模板.md",
   emptyNotePreset: "blank",
   occurrenceTemplate: "#### 出处\n> {{sentence}}{{sourceSuffix}}",
   annotationHeading: "",
+  annotationImageLocation: "obsidian",
+  annotationImageFolder: "",
   cardFront: "note",
   reviewBottomSpace: 70,
   bridgeEnabled: false,
-  bridgePort: 45945,
+  bridgePort: LEXIS_BRIDGE_DEFAULT_PORT,
   bridgeToken: "",
   selectionPill: true,
   lastSelectionFolder: "",

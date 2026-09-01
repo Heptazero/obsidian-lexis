@@ -30,7 +30,7 @@ interface SettingsRuntime extends Plugin {
   parseTags(text: string): string[];
   applyPopoverAppearance(popover: HTMLElement): void;
   applyReviewMetadataVisibility(): void;
-  openReview(): Promise<void>;
+  openHome(): Promise<void>;
 }
 
 interface SettingsTabDependencies {
@@ -39,7 +39,7 @@ interface SettingsTabDependencies {
   Setting: typeof import("obsidian").Setting;
   Notice: typeof import("obsidian").Notice;
   TFolder: typeof import("obsidian").TFolder;
-  DEFAULT_SETTINGS: Pick<LexisSettings, "occurrenceTemplate">;
+  DEFAULT_SETTINGS: Pick<LexisSettings, "occurrenceTemplate" | "flashcardInlineTemplate" | "flashcardBidirectionalTemplate" | "flashcardBlockTemplate" | "flashcardClozeTemplate">;
   cssColorToHex: (color: string, document: Document) => string;
   addAppearanceButton: typeof import("./settings-controls").addAppearanceButton;
   createReorderController: typeof import("./settings-controls").createReorderController;
@@ -241,6 +241,10 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
             new PathSuggest(this.app, fIn.inputEl, () => folders, (v) => { fIn.setValue(v); void onFolder(v); });
             new PathSuggest(this.app, tIn.inputEl, () => mdFiles, (v) => { tIn.setValue(v); void onTpl(v); });
           }
+          new obsidian.ToggleComponent(row)
+            .setTooltip(t("settings.showDictionaryHighlight"))
+            .setValue(d.highlight !== false)
+            .onChange(async (value) => { d.highlight = value; refresh(); await save(); });
           const globalColor = this.plugin.settings.highlightColor || accentHex;
           addAppearanceButton({
             app: this.app,
@@ -257,7 +261,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
         });
         const addDict = dictsWrap.createEl("button", { text: t("settings.addDictionary") });
         addDict.setCssStyles({ marginTop: "2px" });
-        addDict.addEventListener("click", () => { void (async () => { this.plugin.settings.dicts.push({ folder: "", template: "" }); await save(); renderDicts(); })(); });
+        addDict.addEventListener("click", () => { void (async () => { this.plugin.settings.dicts.push({ folder: "", template: "", highlight: true }); await save(); renderDicts(); })(); });
       };
       renderDicts();
       new Setting(dictSection).setName(t("settings.tagsAsEntries")).setDesc(t("settings.tagsAsEntriesDesc"))
@@ -575,8 +579,49 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       occurrenceSetting.settingEl.addClass("lexis-template-setting");
       const occurrenceTextarea = occurrenceSetting.controlEl.querySelector("textarea");
       if (occurrenceTextarea) occurrenceTextarea.rows = 4;
+      new Setting(addSection).setName(t("settings.annotationHeading")).setDesc(t("settings.annotationHeadingDesc"))
+        .addText((input) => input.setPlaceholder("#### 批注").setValue(this.plugin.settings.annotationHeading).onChange(async (value) => { this.plugin.settings.annotationHeading = value; await save(); }));
+      new Setting(addSection).setName(t("settings.annotationImageLocation")).setDesc(t("settings.annotationImageLocationDesc"))
+        .addDropdown((dropdown) => dropdown
+          .addOption("obsidian", t("settings.annotationImageObsidian"))
+          .addOption("custom", t("settings.annotationImageCustom"))
+          .setValue(this.plugin.settings.annotationImageLocation || "obsidian")
+          .onChange(async (value) => {
+            this.plugin.settings.annotationImageLocation = value === "custom" ? "custom" : "obsidian";
+            await save();
+            this.update();
+          }));
+      if (this.plugin.settings.annotationImageLocation === "custom") {
+        new Setting(addSection).setName(t("settings.annotationImageFolder")).setDesc(t("settings.annotationImageFolderDesc"))
+          .addText((input) => {
+            const apply = async (value: string) => { this.plugin.settings.annotationImageFolder = value.trim(); await save(); };
+            input.setPlaceholder("Attachments/lexis").setValue(this.plugin.settings.annotationImageFolder || "").onChange(apply);
+            if (hasSuggest) new PathSuggest(this.app, input.inputEl, () => folders, (value) => { input.setValue(value); void apply(value); });
+          });
+      }
 
       const fsrsSection = this.section(containerEl, t("settings.review"));
+      const syntaxTemplates: Array<[keyof Pick<LexisSettings, "flashcardInlineTemplate" | "flashcardBidirectionalTemplate" | "flashcardBlockTemplate" | "flashcardClozeTemplate">, string, string]> = [
+        ["flashcardInlineTemplate", "settings.flashcardInline", "{{question}}::{{answer}}"],
+        ["flashcardBidirectionalTemplate", "settings.flashcardBidirectional", "{{sideA}}:::{{sideB}}"],
+        ["flashcardBlockTemplate", "settings.flashcardBlock", "{{question}}??\n{{answer}}"],
+        ["flashcardClozeTemplate", "settings.flashcardCloze", "=={{answer}}=="],
+      ];
+      for (const [field, label, placeholder] of syntaxTemplates) {
+        const setting = new Setting(fsrsSection).setName(t(label)).setDesc(t("settings.flashcardTemplateDesc"));
+        const saveTemplate = async (value: string) => { this.plugin.settings[field] = value; await save(); };
+        if (field === "flashcardBlockTemplate") {
+          setting.addTextArea((input) => input.setPlaceholder(placeholder).setValue(this.plugin.settings[field]).onChange(saveTemplate));
+          const textarea = setting.controlEl.querySelector("textarea");
+          if (textarea) textarea.rows = 2;
+        } else setting.addText((input) => input.setPlaceholder(placeholder).setValue(this.plugin.settings[field]).onChange(saveTemplate));
+        setting.addExtraButton((button) => button.setIcon("reset").setTooltip(t("settings.resetTemplate")).onClick(async () => {
+          const value = DEFAULT_SETTINGS[field];
+          this.plugin.settings[field] = value;
+          await save();
+          this.update();
+        }));
+      }
       new Setting(fsrsSection).setName(t("settings.retention")).setDesc(t("settings.retentionDesc"))
         .addSlider((s) => s.setLimits(0.8, 0.97, 0.01).setValue(this.plugin.settings.requestRetention).onChange(async (v) => { this.plugin.settings.requestRetention = v; await save(); }));
       new Setting(fsrsSection).setName(t("settings.newLimit")).addSlider((s) => s.setLimits(0, 100, 5).setValue(this.plugin.settings.newPerDay).onChange(async (v) => { this.plugin.settings.newPerDay = v; await save(); }));
@@ -591,7 +636,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
         }));
       new Setting(fsrsSection).setName(t("settings.ratingOffset")).setDesc(t("settings.ratingOffsetDesc"))
         .addSlider((s) => s.setLimits(0, 200, 5).setValue(this.plugin.settings.reviewBottomSpace).onChange(async (v) => { this.plugin.settings.reviewBottomSpace = v; await save(); }));
-      new Setting(fsrsSection).setName(t("home.start")).addButton((b) => b.setButtonText(t("settings.openReview")).setCta().onClick(() => this.plugin.openReview()));
+      new Setting(fsrsSection).setName(t("home.start")).addButton((b) => b.setButtonText(t("settings.openReview")).setCta().onClick(() => this.plugin.openHome()));
       new Setting(fsrsSection).setName(t("settings.hoverFeedback")).setDesc(t("settings.hoverFeedbackDesc"))
         .addToggle((t) => t.setValue(this.plugin.settings.hoverFeedback).onChange(async (v) => { this.plugin.settings.hoverFeedback = v; await save(); }));
       new Setting(fsrsSection).setName(t("settings.feedbackDays")).setDesc(t("settings.feedbackDaysDesc"))
@@ -600,8 +645,6 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
         .addSlider((s) => s.setLimits(14, 365, 1).setValue(this.plugin.settings.retireCandidateDays).onChange(async (v) => { this.plugin.settings.retireCandidateDays = v; await save(); }));
 
       const bridgeSection = this.section(containerEl, t("settings.bridge"), { desc: t("settings.bridgeDesc") });
-      new Setting(bridgeSection).setName(t("settings.annotationHeading")).setDesc(t("settings.annotationHeadingDesc"))
-        .addText((t) => t.setPlaceholder("#### 批注").setValue(this.plugin.settings.annotationHeading).onChange(async (v) => { this.plugin.settings.annotationHeading = v; await save(); }));
       new Setting(bridgeSection).setName(t("settings.enableBridge"))
         .addToggle((t) => t.setValue(this.plugin.settings.bridgeEnabled).onChange(async (v) => {
           this.plugin.settings.bridgeEnabled = v;

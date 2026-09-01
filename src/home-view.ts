@@ -1,7 +1,7 @@
 import { ItemView, Setting, TFile, type WorkspaceLeaf } from "obsidian";
 import { LEXIS_HOME_VIEW } from "./constants";
 import type { TranslationVars } from "./i18n";
-import type { LexisSettings } from "./types";
+import type { ClozeReviewMode, LexisSettings, ReviewContentMode, ReviewOptions, ReviewScopeMode, ReviewSortDirection, ReviewSortKey } from "./types";
 
 export interface RetireCandidate {
   file: TFile;
@@ -21,7 +21,9 @@ interface HomeViewHost {
   computeStats(): { due: number; fresh: number; total: number };
   renderHeatmap(element: HTMLElement): void;
   dictFolders(): string[];
-  openReview(options: { folder?: string; order?: "due" | "frequency" | "random" }): Promise<void>;
+  collectReviewFolders(): string[];
+  collectReviewTags(): string[];
+  openReview(options: ReviewOptions): Promise<void>;
   saveSettings(): Promise<void>;
   buildRetireCandidates(): Promise<RetireCandidate[]>;
   setRetired(file: TFile, retired: boolean): Promise<void>;
@@ -31,6 +33,7 @@ interface HomeViewHost {
 
 export class LexisHomeView extends ItemView {
   private retireRenderTimer: number | undefined;
+  sourceFilePath = "";
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: HomeViewHost) {
     super(leaf);
@@ -54,34 +57,117 @@ export class LexisHomeView extends ItemView {
     this.plugin.renderHeatmap(container.createDiv({ cls: "lexis-hm-wrap" }));
 
     container.createEl("h4", { text: this.plugin.t("home.start") });
-    const folders = this.plugin.dictFolders();
+    const folders = this.plugin.collectReviewFolders();
+    const tags = this.plugin.collectReviewTags();
+    const activeFile = this.app.workspace.getActiveFile();
+    const rememberedFile = this.sourceFilePath ? this.app.vault.getAbstractFileByPath(this.sourceFilePath) : null;
+    const currentFile = activeFile || (rememberedFile instanceof TFile ? rememberedFile : null);
+    let selectedScope: ReviewScopeMode = "vocab";
     let selectedFolder = "";
-    let selectedOrder: "due" | "frequency" | "random" = "due";
-    new Setting(container).setName(this.plugin.t("home.reviewFolder")).addDropdown((dropdown) => {
-      dropdown.addOption("", this.plugin.t("common.all"));
-      for (const folder of folders) dropdown.addOption(folder, folder);
-      dropdown.setValue(selectedFolder);
-      dropdown.onChange((value) => { selectedFolder = value; });
-    });
-    new Setting(container).setName(this.plugin.t("home.order")).addDropdown((dropdown) => {
-      dropdown
-        .addOption("due", this.plugin.t("home.dueFirst"))
-        .addOption("frequency", this.plugin.t("home.frequency"))
-        .addOption("random", this.plugin.t("home.random"))
-        .setValue(selectedOrder);
-      dropdown.onChange((value) => {
-        if (value === "due" || value === "frequency" || value === "random") selectedOrder = value;
+    let selectedTag = "";
+    let selectedContent: ReviewContentMode = "notes";
+    let selectedClozeMode: ClozeReviewMode = "separate";
+    let selectedSort: ReviewSortKey = "due";
+    let selectedDirection: ReviewSortDirection = "asc";
+    const controls = container.createDiv({ cls: "lexis-review-controls" });
+    let renderControls: () => void;
+    const rerenderControls = () => {
+      const scrollTop = container.scrollTop;
+      renderControls();
+      container.scrollTop = scrollTop;
+      container.ownerDocument.defaultView?.requestAnimationFrame(() => { container.scrollTop = scrollTop; });
+    };
+    const addSegments = <T extends string>(setting: Setting, options: Array<[T, string]>, value: T, select: (next: T) => void) => {
+      const group = setting.controlEl.createDiv({ cls: "lexis-segments" });
+      for (const [key, label] of options) {
+        const button = group.createEl("button", { cls: `lexis-segment${key === value ? " is-active" : ""}`, text: label, attr: { type: "button" } });
+        button.addEventListener("click", () => select(key));
+      }
+    };
+    renderControls = () => {
+      controls.empty();
+      new Setting(controls).setName(this.plugin.t("home.reviewScope")).addDropdown((dropdown) => dropdown
+        .addOption("vocab", this.plugin.t("home.scopeVocab"))
+        .addOption("folder", this.plugin.t("home.scopeFolder"))
+        .addOption("tag", this.plugin.t("home.scopeTag"))
+        .addOption("current", this.plugin.t("home.scopeCurrent"))
+        .setValue(selectedScope)
+        .onChange((value) => {
+          if (["vocab", "folder", "tag", "current"].includes(value)) selectedScope = value as ReviewScopeMode;
+          rerenderControls();
+        }));
+      if (selectedScope === "folder") {
+        new Setting(controls).setName(this.plugin.t("home.reviewFolder")).addDropdown((dropdown) => {
+          dropdown.addOption("", this.plugin.t("home.scopeAllFiles"));
+          for (const folder of folders) dropdown.addOption(folder, folder);
+          dropdown.setValue(selectedFolder).onChange((value) => { selectedFolder = value; });
+        });
+      }
+      if (selectedScope === "tag") {
+        new Setting(controls).setName(this.plugin.t("home.reviewTag")).addDropdown((dropdown) => {
+          dropdown.addOption("", this.plugin.t("home.chooseTag"));
+          for (const tag of tags) dropdown.addOption(tag, `#${tag}`);
+          dropdown.setValue(selectedTag).onChange((value) => { selectedTag = value; });
+        });
+      }
+      if (selectedScope === "current") {
+        new Setting(controls).setName(this.plugin.t("home.currentNote")).setDesc(currentFile?.path || this.plugin.t("home.noCurrentNote"));
+      }
+      const contentSetting = new Setting(controls).setName(this.plugin.t("home.reviewContent"));
+      addSegments(contentSetting, [
+        ["notes", this.plugin.t("home.contentNotes")],
+        ["syntax", this.plugin.t("home.contentSyntax")],
+        ["both", this.plugin.t("home.contentBoth")],
+      ], selectedContent, (value) => { selectedContent = value; rerenderControls(); });
+      if (selectedContent !== "notes") {
+        const clozeSetting = new Setting(controls).setName(this.plugin.t("home.clozeMode"));
+        addSegments(clozeSetting, [
+          ["separate", this.plugin.t("home.clozeSeparate")],
+          ["combined", this.plugin.t("home.clozeCombined")],
+        ], selectedClozeMode, (value) => { selectedClozeMode = value; rerenderControls(); });
+      }
+      new Setting(controls).setName(this.plugin.t("home.sortBy")).addDropdown((dropdown) => {
+        dropdown
+          .addOption("due", this.plugin.t("home.sortDue"))
+          .addOption("wordCount", this.plugin.t("home.sortWordCount"))
+          .addOption("modified", this.plugin.t("home.sortModified"))
+          .addOption("created", this.plugin.t("home.sortCreated"))
+          .addOption("frequency", this.plugin.t("home.frequency"))
+          .addOption("random", this.plugin.t("home.random"))
+          .setValue(selectedSort);
+        dropdown.onChange((value) => {
+          if (["due", "wordCount", "modified", "created", "frequency", "random"].includes(value)) selectedSort = value as ReviewSortKey;
+          rerenderControls();
+        });
       });
-    });
-    new Setting(container)
-      .addButton((button) => button
-        .setButtonText(`▶ ${this.plugin.t("home.start")}`)
-        .setCta()
-        .onClick(() => this.plugin.openReview({ folder: selectedFolder, order: selectedOrder })))
-      .addExtraButton((button) => button
-        .setIcon("refresh-cw")
-        .setTooltip(this.plugin.t("common.refresh"))
-        .onClick(() => this.render()));
+      if (selectedSort !== "random") {
+        const directionSetting = new Setting(controls).setName(this.plugin.t("home.sortDirection"));
+        addSegments(directionSetting, [
+          ["asc", this.plugin.t("home.ascending")],
+          ["desc", this.plugin.t("home.descending")],
+        ], selectedDirection, (value) => { selectedDirection = value; rerenderControls(); });
+      }
+      new Setting(controls)
+        .addButton((button) => button
+          .setButtonText(this.plugin.t("home.start"))
+          .setCta()
+          .setDisabled((selectedScope === "current" && !currentFile) || (selectedScope === "tag" && !selectedTag))
+          .onClick(() => this.plugin.openReview({
+            scope: selectedScope,
+            folder: selectedFolder,
+            tag: selectedTag,
+            file: currentFile?.path,
+            content: selectedContent,
+            clozeMode: selectedClozeMode,
+            sortBy: selectedSort,
+            sortDirection: selectedDirection,
+          })))
+        .addExtraButton((button) => button
+          .setIcon("refresh-cw")
+          .setTooltip(this.plugin.t("common.refresh"))
+          .onClick(() => this.render()));
+    };
+    renderControls();
 
     void this.renderRetireCandidates(container);
   }

@@ -21,6 +21,12 @@
     .ok { color: #2ea043; } .err { color: #e5534b; }
     .meta { margin-top: 6px; font-size: 12px; opacity: 0.75; }
     .toggle { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; }
+    .section-title { margin: 0 0 3px; font-weight: 600; }
+    .site { margin-bottom: 6px; font-size: 11px; opacity: 0.65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dictionary-list { display: grid; gap: 2px; }
+    .dictionary-row { display: flex; align-items: center; gap: 8px; min-height: 26px; }
+    .dictionary-row span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dictionary-empty { font-size: 11px; opacity: 0.6; }
     hr { border: none; border-top: 1px solid rgba(128,128,128,.25); margin: 12px 0; }
     .hint { font-size: 11px; opacity: 0.6; margin-top: 6px; line-height: 1.4; }
   </style>
@@ -29,8 +35,8 @@
   <h1>Lexis Web</h1>
 
   <div class="row"><label>主机</label><input type="text" id="host" placeholder="127.0.0.1"></div>
-  <div class="row"><label>端口</label><input type="number" id="port" placeholder="45945"></div>
-  <div class="row"><label>令牌</label><input type="text" id="token" placeholder="从 Lexis 设置复制"></div>
+  <div class="row"><label for="port">端口</label><input type="number" id="port" min="1024" max="65535" inputmode="numeric" placeholder="12345"></div>
+  <div class="row"><label for="token">令牌</label><input type="text" id="token" autocomplete="off" spellcheck="false" placeholder="从 Lexis 设置复制"></div>
 
   <div class="btns">
     <button id="test">测试</button>
@@ -53,6 +59,15 @@
   </div>
   <div class="hint">修改 Obsidian 样式后，重新同步词库。</div>
 
+  <hr>
+
+  <section id="dictionarySection">
+    <div class="section-title">当前网站词典</div>
+    <div class="site" id="currentSite"></div>
+    <div class="dictionary-list" id="dictionaries"></div>
+  </section>
+
+  <script src="config.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

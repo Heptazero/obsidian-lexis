@@ -1,6 +1,7 @@
 "use strict";
 
 import type { App } from "obsidian";
+import { LEXIS_BRIDGE_DEFAULT_PORT } from "./constants";
 import type { LexisSettings } from "./types";
 
 interface HttpRequest {
@@ -76,7 +77,7 @@ function createBridgeServer({ Notice, Platform }: BridgeServerDeps) {
       let http: HttpModule | null = null;
       try { http = (window as DesktopWindow).require?.("http") ?? null; } catch { /* Desktop require may be unavailable during shutdown. */ }
       if (!http) { new Notice(this.plugin.t("notice.desktopBridge")); return; }
-      const port = Number(this.plugin.settings.bridgePort) || 45945;
+      const port = Number(this.plugin.settings.bridgePort) || LEXIS_BRIDGE_DEFAULT_PORT;
       const server = http.createServer((req, res) => {
         this.handle(req, res).catch((err) => {
           try { res.writeHead(500); res.end(err instanceof Error ? err.message : "Internal error"); } catch { /* The socket may already be closed. */ }

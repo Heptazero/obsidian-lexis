@@ -13,6 +13,8 @@ index.update([
   { key: "能量差", word: "能量差", tags: [], file: "10_atom/能量差.md" },
   { key: "cat", word: "cat", tags: ["hide"], file: "01-word/cat.md" },
   { key: "state-of-the-art", word: "state-of-the-art", tags: [], file: "01-word/state-of-the-art.md" },
+  { key: "QL分解", word: "QL分解", tags: [], file: "10_atom/QL分解.md" },
+  { key: "矩阵SVD", word: "矩阵SVD", tags: [], file: "10_atom/矩阵SVD.md" },
 ], {
   excludeTags: ["hide"],
   highlightColor: "#7c5cff",
@@ -29,6 +31,9 @@ assert.equal(index.isExcluded("cat"), true);
 assert.equal(index.regex().exec("the energy gap changed")[0].toLowerCase(), "energy gap");
 assert.equal(index.regex().exec("这是能量差模型")[0], "能量差");
 assert.equal(index.regex().exec("a state-of-the-art result")[0], "state-of-the-art");
+assert.equal(index.regex().exec("使用 QL 分解处理")[0], "QL 分解");
+assert.equal(index.regex().exec("计算矩阵 SVD")[0], "矩阵 SVD");
+assert.equal(index.get("QL 分解").key, "ql分解");
 assert.deepEqual(JSON.parse(JSON.stringify(index.appearance("energy gap"))), {
   visible: true,
   color: "#ff8800",

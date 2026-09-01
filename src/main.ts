@@ -27,11 +27,15 @@ import { createReaderUi } from "./reader-ui";
 import { addAppearanceButton, createReorderController, moveItem } from "./settings-controls";
 import { createTemplateProvider } from "./template-provider";
 import { createSettingsTab } from "./settings-tab";
+import { createReviewState } from "./review-state";
+import { createReviewQueue } from "./review-queue";
 import { WorkspaceDocuments } from "./workspace-documents";
 import { LexisRestoreModal } from "./restore-modal";
+import { saveAnnotationImage, vaultImageDataUrl } from "./annotation-images";
 import {
   addDaysString as addDaysStr,
   boundedSource,
+  compactMixedScriptSpacing,
   cssColorToHex,
   daysBetween,
   escapeHtml as escHtml,
@@ -42,7 +46,7 @@ import {
   todayString as todayStr,
 } from "./shared-utils";
 import type { Occurrence, OccurrenceSearch, PdfJsRuntime } from "./occurrence-search";
-import type { HighlightStyle, InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats, ReviewHistoryEvent, TagRule } from "./types";
+import type { HighlightStyle, InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats, ReviewCardState, ReviewHistoryEvent, ReviewItem, ReviewOptions, ReviewStateSnapshot, TagRule } from "./types";
 
 const LexisReviewView = createReviewView({
   reviewViewType: LEXIS_REVIEW_VIEW,
@@ -58,8 +62,6 @@ type Schedule = { s: number; d: number; due: string; reps: number; lapses: numbe
 type Lifecycle = { archived: boolean; retired: boolean; pinned: boolean };
 type Relation = { path: string; basename: string };
 type RelationBag = Record<string, Relation[]>;
-type ReviewOptions = { folder?: string; tag?: string; order?: "due" | "frequency" | "random" };
-type ReviewItem = { file: TFile; card: ReviewCard };
 type Encounter = { hoverCount: number; encounterCount: number; lastEncounter: string };
 type BridgeRuntime = { running: boolean; generateToken(): string; start(): void; stop(): void; restart(): void };
 type AddSelectionOptions = { openExisting?: boolean };
@@ -83,6 +85,8 @@ class LexisPlugin extends Plugin {
   declare liveAvailable: boolean;
   declare statusBarEl: HTMLElement | null;
   declare _pattern: string | null;
+  declare _indexKeysByCompact: Map<string, string>;
+  declare _matchKeysByCompact: Map<string, string>;
   declare _rebuildTimer: number | null;
   declare _popover: HTMLElement | null;
   declare _popoverComp: Component | null;
@@ -120,6 +124,7 @@ class LexisPlugin extends Plugin {
   declare scheduleRebuild: () => void;
   declare isInlineSourceFile: (file: TFile | null | undefined) => boolean;
   declare rebuildIndex: (notify: boolean) => Promise<LexisStats>;
+  declare resolveIndexKey: (value: string) => string;
   declare renderNoteInto: (el: HTMLElement, file: TFile, component: Component) => Promise<void>;
   declare insertOccurrence: (data: string, vars: Record<string, unknown>) => string;
   declare normalizeFolder: (folder: string) => string;
@@ -142,6 +147,16 @@ class LexisPlugin extends Plugin {
   declare bridgeAnnotate: (payload: Record<string, unknown>) => Promise<unknown>;
   declare bridgeMoveWord: (payload: Record<string, unknown>) => Promise<unknown>;
   declare bridgeEncounter: (payload: Record<string, unknown>) => Promise<unknown>;
+  declare readSyntaxCardState: (id: string) => ReviewCardState;
+  declare snapshotReviewItem: (item: ReviewItem) => ReviewStateSnapshot;
+  declare applyReviewItemSchedule: (item: ReviewItem, schedule: Schedule) => Promise<void>;
+  declare restoreReviewItem: (item: ReviewItem, snapshot: ReviewStateSnapshot) => Promise<void>;
+  declare logReviewItem: (item: ReviewItem, schedule: Schedule, grade: number, retentionBefore: number) => Promise<void>;
+  declare undoReviewItemLog: (item: ReviewItem) => Promise<void>;
+  declare collectReviewFolders: () => string[];
+  declare collectReviewTags: () => string[];
+  declare buildQueue: (options?: ReviewOptions) => Promise<ReviewItem[]>;
+  declare migrateSyntaxCardPath: (file: TFile, oldPath: string) => Promise<void>;
 
   async onload() {
     await this.loadSettings();
@@ -159,6 +174,8 @@ class LexisPlugin extends Plugin {
     this.vocabPaths = new Set();
     this.stats = { words: 0, aliases: 0, inlineEntries: 0, due: 0 };
     this._pattern = null;
+    this._indexKeysByCompact = new Map();
+    this._matchKeysByCompact = new Map();
     this._rebuildTimer = null;
     this._popover = null;
     this._popoverComp = null;
@@ -196,7 +213,7 @@ class LexisPlugin extends Plugin {
     }
 
     this.addCommand({ id: "rebuild-index", name: this.t("command.rebuild"), callback: () => this.rebuildIndex(true) });
-    this.addCommand({ id: "open-review", name: this.t("command.review"), callback: () => this.openReview() });
+    this.addCommand({ id: "open-review", name: this.t("command.review"), callback: () => this.openHome() });
     this.addCommand({ id: "add-selected-word", name: this.t("command.addSelection"), callback: () => this.addSelectedWordCommand() });
     this.addCommand({ id: "open-home", name: this.t("command.home"), callback: () => this.openHome() });
     this.addCommand({
@@ -211,7 +228,7 @@ class LexisPlugin extends Plugin {
       },
     });
     this.addRibbonIcon("graduation-cap", this.t("ribbon.home"), () => this.openHome());
-    this.addRibbonIcon("brain", this.t("ribbon.review"), () => this.openReview());
+    this.addRibbonIcon("brain", this.t("ribbon.review"), () => this.openHome());
 
     // ---------- 生命周期命令(归档/恢复/常驻),只对当前打开的词条笔记生效 ----------
     this.addCommand({
@@ -316,7 +333,9 @@ class LexisPlugin extends Plugin {
     });
     this.registerEvent(this.app.vault.on("create", (f) => { if (f instanceof TFile) this.maybeRebuild(f); }));
     this.registerEvent(this.app.vault.on("delete", (f) => { if (f instanceof TFile) this.maybeRebuild(f); }));
-    this.registerEvent(this.app.vault.on("rename", (f, old) => { if (f instanceof TFile) this.maybeRebuild(f, old); }));
+    this.registerEvent(this.app.vault.on("rename", (f, old) => {
+      if (f instanceof TFile) { this.maybeRebuild(f, old); void this.migrateSyntaxCardPath(f, old); }
+    }));
     this.registerEvent(this.app.vault.on("modify", (file) => {
       this._occCache.clear();
       if (file instanceof TFile && file.extension === "pdf") this.occurrenceSearch.invalidatePdf(file.path);
@@ -396,6 +415,7 @@ class LexisPlugin extends Plugin {
     if (!this.settings.inlineCategoryOrderByParent || typeof this.settings.inlineCategoryOrderByParent !== "object" || Array.isArray(this.settings.inlineCategoryOrderByParent)) this.settings.inlineCategoryOrderByParent = {};
     if (!this.settings.reviewLog) this.settings.reviewLog = {};
     if (!this.settings.reviewHistory || typeof this.settings.reviewHistory !== "object" || Array.isArray(this.settings.reviewHistory)) this.settings.reviewHistory = {};
+    if (!this.settings.syntaxCardStates || typeof this.settings.syntaxCardStates !== "object" || Array.isArray(this.settings.syntaxCardStates)) this.settings.syntaxCardStates = {};
     // 单值 → 多值迁移(收录文件夹 / 网页排除标签)。旧键不在 DEFAULT_SETTINGS,故能区分"未迁移"。
     if (this.settings.vocabFolders == null) this.settings.vocabFolders = this.settings.vocabFolder != null ? this.settings.vocabFolder : "01-word";
     if (this.settings.excludeTags == null) this.settings.excludeTags = this.settings.excludeTag || "";
@@ -765,36 +785,6 @@ class LexisPlugin extends Plugin {
     const interval = FSRS.nextInterval(S, R);
     return { s: S, d: D, reps, lapses, interval, due: addDaysStr(today, interval) };
   }
-  async applySchedule(file: TFile, sched: Schedule): Promise<void> {
-    await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
-      fm["lexis-s"] = round2(sched.s);
-      fm["lexis-d"] = round2(sched.d);
-      fm["lexis-due"] = sched.due;
-      fm["lexis-last"] = todayStr();
-      fm["lexis-reps"] = sched.reps;
-      fm["lexis-lapses"] = sched.lapses;
-    });
-  }
-  async logReview(file: TFile, sched: Schedule, grade: number, retentionBefore: number): Promise<void> {
-    const t = todayStr();
-    this.settings.reviewLog[t] = (this.settings.reviewLog[t] || 0) + 1;
-    if (file?.path) {
-      const history = Array.isArray(this.settings.reviewHistory[file.path]) ? this.settings.reviewHistory[file.path] : [];
-      history.push({ date: t, s: round2(sched.s), grade, retention: Math.round(Math.max(0, Math.min(1, retentionBefore)) * 100) });
-      this.settings.reviewHistory[file.path] = history.slice(-64);
-    }
-    await this.saveSettings();
-  }
-  async undoReviewLog(file: TFile): Promise<void> {
-    const t = todayStr();
-    if (this.settings.reviewLog[t]) {
-      this.settings.reviewLog[t]--;
-      if (this.settings.reviewLog[t] <= 0) delete this.settings.reviewLog[t];
-    }
-    const history = file?.path && this.settings.reviewHistory[file.path];
-    if (Array.isArray(history) && history.length) history.pop();
-    await this.saveSettings();
-  }
   async getFirstExample(file: TFile): Promise<string> {
     try {
       const raw = await this.app.vault.cachedRead(file);
@@ -826,23 +816,6 @@ class LexisPlugin extends Plugin {
       else if (!fm["lexis-due"] || String(fm["lexis-due"]).slice(0, 10) <= today) due++;
     }
     return { total, due, fresh };
-  }
-  buildQueue(options: ReviewOptions = {}): ReviewItem[] {
-    options = options || {};
-    const today = todayStr();
-    let files = this.app.vault.getMarkdownFiles().filter((f) => { if (!this.inVocabFolder(f.path)) return false; const lc = this.readLifecycle(f); return !lc.archived && !lc.retired; });
-    if (options.folder) {
-      const folder = this.normalizeFolder(options.folder);
-      files = files.filter((f) => this.inScope(f.path, [folder]));
-    }
-    if (options.tag) { const tl = options.tag.toLowerCase(); files = files.filter((f) => this.getTags(f).has(tl)); }
-    const due = [], fresh = [];
-    for (const f of files) { const card = this.readCard(f); if (card.s == null || isNaN(Number(card.s))) fresh.push({ file: f, card }); else if (!card.due || String(card.due).slice(0, 10) <= today) due.push({ file: f, card }); }
-    let queue;
-    if (options.order === "frequency") { queue = due.concat(fresh).sort((a, b) => this.freqVal(a.file) - this.freqVal(b.file)); }
-    else if (options.order === "random") { queue = due.concat(fresh); for (let i = queue.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [queue[i], queue[j]] = [queue[j], queue[i]]; } }
-    else { due.sort((a, b) => String(a.card.due || "").localeCompare(String(b.card.due || ""))); queue = due.concat(fresh.slice(0, this.settings.newPerDay || 20)); }
-    return queue.slice(0, this.settings.maxReviewsPerSession || 200);
   }
   // ---------- 淘汰法庭(阶段 3) ----------
   // 硬条件筛子,不做加权评分:全部满足才入列,判决权在用户(淘汰/留下/已掌握三个按钮,见 LexisHomeView)。
@@ -876,7 +849,7 @@ class LexisPlugin extends Plugin {
     let leaf = this.app.workspace.getLeavesOfType(LEXIS_REVIEW_VIEW)[0];
     if (!leaf) { leaf = this.app.workspace.getLeaf(true); await leaf.setViewState({ type: LEXIS_REVIEW_VIEW, active: true }); }
     await this.app.workspace.revealLeaf(leaf);
-    if (leaf.view instanceof LexisReviewView) { leaf.view.options = options || {}; leaf.view.refresh(); }
+    if (leaf.view instanceof LexisReviewView) { leaf.view.options = options || {}; await leaf.view.refresh(); }
   }
   saveReviewSession(leaf: obsidian.WorkspaceLeaf, state: unknown): void { if (leaf && state) this._reviewSessions.set(leaf, state); }
   takeReviewSession(leaf: obsidian.WorkspaceLeaf): unknown {
@@ -886,10 +859,14 @@ class LexisPlugin extends Plugin {
     return state;
   }
   async openHome(): Promise<void> {
+    const sourceFile = this.app.workspace.getActiveFile();
     let leaf = this.app.workspace.getLeavesOfType(LEXIS_HOME_VIEW)[0];
     if (!leaf) { leaf = this.app.workspace.getRightLeaf(false); await leaf.setViewState({ type: LEXIS_HOME_VIEW, active: true }); }
     await this.app.workspace.revealLeaf(leaf);
-    if (leaf.view instanceof LexisHomeView) leaf.view.render();
+    if (leaf.view instanceof LexisHomeView) {
+      if (sourceFile) leaf.view.sourceFilePath = sourceFile.path;
+      leaf.view.render();
+    }
   }
   // ---------- 划词添加 ----------
   sanitizeName(name: string): string { return (name || "").replace(/[\\/:*?"<>|#^[\]]/g, "").replace(/\s+/g, " ").trim(); }
@@ -946,7 +923,7 @@ class LexisPlugin extends Plugin {
     let existing: TFile | null = target instanceof TFile ? target : null;
     // 路径不同名也可能已经是某词条的标题或别名(比如刚被"设为别名"并入了别的文件)——按索引兜底查,别重复建
     if (!existing) {
-      const hit = this.index.get(clean.toLowerCase());
+      const hit = this.index.get(this.resolveIndexKey(clean));
       if (hit && hit.file instanceof TFile) existing = hit.file;
     }
     const srcFile = (view && view.file) || this.app.workspace.getActiveFile();
@@ -995,11 +972,16 @@ Object.defineProperties(LexisPlugin.prototype, createBridgeApi({
   renderLexisMarkdown,
   finishRenderMath,
   escHtml,
+  saveAnnotationImage,
+  vaultImageDataUrl,
 }));
+Object.defineProperties(LexisPlugin.prototype, createReviewState({ todayStr, round2 }));
+Object.defineProperties(LexisPlugin.prototype, createReviewQueue({ todayStr }));
 Object.defineProperties(LexisPlugin.prototype, createHighlightEngine({
   FSRS,
   Notice,
   boundedSource,
+  compactMixedScriptSpacing,
   todayStr,
 }));
 Object.defineProperties(LexisPlugin.prototype, createDocumentHighlights());

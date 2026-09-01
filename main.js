@@ -35,7 +35,7 @@ __export(main_exports, {
 });
 module.exports = __toCommonJS(main_exports);
 var obsidian4 = __toESM(require("obsidian"));
-var import_obsidian6 = require("obsidian");
+var import_obsidian7 = require("obsidian");
 
 // src/alias-picker.ts
 var import_obsidian = require("obsidian");
@@ -69,6 +69,7 @@ var LexisAliasPicker = class extends import_obsidian.FuzzySuggestModal {
 // src/constants.ts
 var LEXIS_REVIEW_VIEW = "lexis-review-view";
 var LEXIS_HOME_VIEW = "lexis-home-view";
+var LEXIS_BRIDGE_DEFAULT_PORT = 12345;
 
 // src/default-settings.ts
 var DEFAULT_SETTINGS = {
@@ -115,15 +116,22 @@ var DEFAULT_SETTINGS = {
   maxReviewsPerSession: 200,
   reviewLog: {},
   reviewHistory: {},
+  syntaxCardStates: {},
   showReviewMetadata: false,
+  flashcardInlineTemplate: "{{question}}::{{answer}}",
+  flashcardBidirectionalTemplate: "{{sideA}}:::{{sideB}}",
+  flashcardBlockTemplate: "{{question}}??\n{{answer}}",
+  flashcardClozeTemplate: "=={{answer}}==",
   newWordTemplate: "template/\u5355\u8BCD\u6A21\u677F.md",
   emptyNotePreset: "blank",
   occurrenceTemplate: "#### \u51FA\u5904\n> {{sentence}}{{sourceSuffix}}",
   annotationHeading: "",
+  annotationImageLocation: "obsidian",
+  annotationImageFolder: "",
   cardFront: "note",
   reviewBottomSpace: 70,
   bridgeEnabled: false,
-  bridgePort: 45945,
+  bridgePort: LEXIS_BRIDGE_DEFAULT_PORT,
   bridgeToken: "",
   selectionPill: true,
   lastSelectionFolder: "",
@@ -171,6 +179,7 @@ var LexisHomeView = class extends import_obsidian2.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.plugin = plugin;
+    this.sourceFilePath = "";
   }
   getViewType() {
     return LEXIS_HOME_VIEW;
@@ -196,24 +205,110 @@ var LexisHomeView = class extends import_obsidian2.ItemView {
     stats.createDiv({ cls: "lexis-stat", text: `\u{1F4DA} ${this.plugin.t("home.total", { count: current.total })}` });
     this.plugin.renderHeatmap(container.createDiv({ cls: "lexis-hm-wrap" }));
     container.createEl("h4", { text: this.plugin.t("home.start") });
-    const folders = this.plugin.dictFolders();
+    const folders = this.plugin.collectReviewFolders();
+    const tags = this.plugin.collectReviewTags();
+    const activeFile = this.app.workspace.getActiveFile();
+    const rememberedFile = this.sourceFilePath ? this.app.vault.getAbstractFileByPath(this.sourceFilePath) : null;
+    const currentFile = activeFile || (rememberedFile instanceof import_obsidian2.TFile ? rememberedFile : null);
+    let selectedScope = "vocab";
     let selectedFolder = "";
-    let selectedOrder = "due";
-    new import_obsidian2.Setting(container).setName(this.plugin.t("home.reviewFolder")).addDropdown((dropdown) => {
-      dropdown.addOption("", this.plugin.t("common.all"));
-      for (const folder of folders) dropdown.addOption(folder, folder);
-      dropdown.setValue(selectedFolder);
-      dropdown.onChange((value) => {
-        selectedFolder = value;
+    let selectedTag = "";
+    let selectedContent = "notes";
+    let selectedClozeMode = "separate";
+    let selectedSort = "due";
+    let selectedDirection = "asc";
+    const controls = container.createDiv({ cls: "lexis-review-controls" });
+    let renderControls;
+    const rerenderControls = () => {
+      const scrollTop = container.scrollTop;
+      renderControls();
+      container.scrollTop = scrollTop;
+      container.ownerDocument.defaultView?.requestAnimationFrame(() => {
+        container.scrollTop = scrollTop;
       });
-    });
-    new import_obsidian2.Setting(container).setName(this.plugin.t("home.order")).addDropdown((dropdown) => {
-      dropdown.addOption("due", this.plugin.t("home.dueFirst")).addOption("frequency", this.plugin.t("home.frequency")).addOption("random", this.plugin.t("home.random")).setValue(selectedOrder);
-      dropdown.onChange((value) => {
-        if (value === "due" || value === "frequency" || value === "random") selectedOrder = value;
+    };
+    const addSegments = (setting, options, value, select) => {
+      const group = setting.controlEl.createDiv({ cls: "lexis-segments" });
+      for (const [key, label] of options) {
+        const button = group.createEl("button", { cls: `lexis-segment${key === value ? " is-active" : ""}`, text: label, attr: { type: "button" } });
+        button.addEventListener("click", () => select(key));
+      }
+    };
+    renderControls = () => {
+      controls.empty();
+      new import_obsidian2.Setting(controls).setName(this.plugin.t("home.reviewScope")).addDropdown((dropdown) => dropdown.addOption("vocab", this.plugin.t("home.scopeVocab")).addOption("folder", this.plugin.t("home.scopeFolder")).addOption("tag", this.plugin.t("home.scopeTag")).addOption("current", this.plugin.t("home.scopeCurrent")).setValue(selectedScope).onChange((value) => {
+        if (["vocab", "folder", "tag", "current"].includes(value)) selectedScope = value;
+        rerenderControls();
+      }));
+      if (selectedScope === "folder") {
+        new import_obsidian2.Setting(controls).setName(this.plugin.t("home.reviewFolder")).addDropdown((dropdown) => {
+          dropdown.addOption("", this.plugin.t("home.scopeAllFiles"));
+          for (const folder of folders) dropdown.addOption(folder, folder);
+          dropdown.setValue(selectedFolder).onChange((value) => {
+            selectedFolder = value;
+          });
+        });
+      }
+      if (selectedScope === "tag") {
+        new import_obsidian2.Setting(controls).setName(this.plugin.t("home.reviewTag")).addDropdown((dropdown) => {
+          dropdown.addOption("", this.plugin.t("home.chooseTag"));
+          for (const tag of tags) dropdown.addOption(tag, `#${tag}`);
+          dropdown.setValue(selectedTag).onChange((value) => {
+            selectedTag = value;
+          });
+        });
+      }
+      if (selectedScope === "current") {
+        new import_obsidian2.Setting(controls).setName(this.plugin.t("home.currentNote")).setDesc(currentFile?.path || this.plugin.t("home.noCurrentNote"));
+      }
+      const contentSetting = new import_obsidian2.Setting(controls).setName(this.plugin.t("home.reviewContent"));
+      addSegments(contentSetting, [
+        ["notes", this.plugin.t("home.contentNotes")],
+        ["syntax", this.plugin.t("home.contentSyntax")],
+        ["both", this.plugin.t("home.contentBoth")]
+      ], selectedContent, (value) => {
+        selectedContent = value;
+        rerenderControls();
       });
-    });
-    new import_obsidian2.Setting(container).addButton((button) => button.setButtonText(`\u25B6 ${this.plugin.t("home.start")}`).setCta().onClick(() => this.plugin.openReview({ folder: selectedFolder, order: selectedOrder }))).addExtraButton((button) => button.setIcon("refresh-cw").setTooltip(this.plugin.t("common.refresh")).onClick(() => this.render()));
+      if (selectedContent !== "notes") {
+        const clozeSetting = new import_obsidian2.Setting(controls).setName(this.plugin.t("home.clozeMode"));
+        addSegments(clozeSetting, [
+          ["separate", this.plugin.t("home.clozeSeparate")],
+          ["combined", this.plugin.t("home.clozeCombined")]
+        ], selectedClozeMode, (value) => {
+          selectedClozeMode = value;
+          rerenderControls();
+        });
+      }
+      new import_obsidian2.Setting(controls).setName(this.plugin.t("home.sortBy")).addDropdown((dropdown) => {
+        dropdown.addOption("due", this.plugin.t("home.sortDue")).addOption("wordCount", this.plugin.t("home.sortWordCount")).addOption("modified", this.plugin.t("home.sortModified")).addOption("created", this.plugin.t("home.sortCreated")).addOption("frequency", this.plugin.t("home.frequency")).addOption("random", this.plugin.t("home.random")).setValue(selectedSort);
+        dropdown.onChange((value) => {
+          if (["due", "wordCount", "modified", "created", "frequency", "random"].includes(value)) selectedSort = value;
+          rerenderControls();
+        });
+      });
+      if (selectedSort !== "random") {
+        const directionSetting = new import_obsidian2.Setting(controls).setName(this.plugin.t("home.sortDirection"));
+        addSegments(directionSetting, [
+          ["asc", this.plugin.t("home.ascending")],
+          ["desc", this.plugin.t("home.descending")]
+        ], selectedDirection, (value) => {
+          selectedDirection = value;
+          rerenderControls();
+        });
+      }
+      new import_obsidian2.Setting(controls).addButton((button) => button.setButtonText(this.plugin.t("home.start")).setCta().setDisabled(selectedScope === "current" && !currentFile || selectedScope === "tag" && !selectedTag).onClick(() => this.plugin.openReview({
+        scope: selectedScope,
+        folder: selectedFolder,
+        tag: selectedTag,
+        file: currentFile?.path,
+        content: selectedContent,
+        clozeMode: selectedClozeMode,
+        sortBy: selectedSort,
+        sortDirection: selectedDirection
+      }))).addExtraButton((button) => button.setIcon("refresh-cw").setTooltip(this.plugin.t("common.refresh")).onClick(() => this.render()));
+    };
+    renderControls();
     void this.renderRetireCandidates(container);
   }
   async renderRetireCandidates(container) {
@@ -412,10 +507,33 @@ var MESSAGES = {
   "home.total": { zh: "\u603B\u8BA1 {count}", en: "Total {count}" },
   "home.start": { zh: "\u5F00\u59CB\u590D\u4E60", en: "Start review" },
   "home.collection": { zh: "\u96C6\u5408", en: "Collection" },
+  "home.reviewScope": { zh: "\u8303\u56F4", en: "Scope" },
+  "home.scopeVocab": { zh: "Lexis \u8BCD\u5178", en: "Lexis dictionaries" },
+  "home.scopeFolder": { zh: "\u6587\u4EF6\u5939", en: "Folder" },
+  "home.scopeTag": { zh: "\u6807\u7B7E", en: "Tag" },
+  "home.scopeCurrent": { zh: "\u5F53\u524D\u7B14\u8BB0", en: "Current note" },
+  "home.scopeAllFiles": { zh: "\u6574\u4E2A\u4ED3\u5E93", en: "Whole vault" },
   "home.reviewFolder": { zh: "\u590D\u4E60\u6587\u4EF6\u5939", en: "Review folder" },
-  "home.order": { zh: "\u987A\u5E8F", en: "Order" },
-  "home.dueFirst": { zh: "\u5230\u671F\u4F18\u5148", en: "Due first" },
-  "home.frequency": { zh: "\u8BCD\u9891\uFF08\u9AD8\u9891\u5148\uFF09", en: "Frequency (high first)" },
+  "home.reviewTag": { zh: "\u590D\u4E60\u6807\u7B7E", en: "Review tag" },
+  "home.chooseTag": { zh: "\u9009\u62E9\u6807\u7B7E", en: "Choose a tag" },
+  "home.currentNote": { zh: "\u5F53\u524D\u7B14\u8BB0", en: "Current note" },
+  "home.noCurrentNote": { zh: "\u6CA1\u6709\u6253\u5F00 Markdown \u7B14\u8BB0", en: "No Markdown note is open" },
+  "home.reviewContent": { zh: "\u5185\u5BB9", en: "Content" },
+  "home.contentNotes": { zh: "\u7B14\u8BB0", en: "Notes" },
+  "home.contentSyntax": { zh: "\u8BED\u6CD5\u5361", en: "Syntax cards" },
+  "home.contentBoth": { zh: "\u4E24\u8005", en: "Both" },
+  "home.clozeMode": { zh: "\u591A\u4E2A\u6316\u7A7A", en: "Multiple clozes" },
+  "home.clozeSeparate": { zh: "\u9010\u4E2A", en: "Separate" },
+  "home.clozeCombined": { zh: "\u5408\u5E76", en: "Combined" },
+  "home.sortBy": { zh: "\u6392\u5E8F\u4F9D\u636E", en: "Sort by" },
+  "home.sortDirection": { zh: "\u6392\u5E8F\u65B9\u5411", en: "Direction" },
+  "home.sortDue": { zh: "\u5230\u671F\u65E5", en: "Due date" },
+  "home.sortWordCount": { zh: "\u5B57\u6570", en: "Word count" },
+  "home.sortModified": { zh: "\u4FEE\u6539\u65F6\u95F4", en: "Modified time" },
+  "home.sortCreated": { zh: "\u521B\u5EFA\u65F6\u95F4", en: "Created time" },
+  "home.ascending": { zh: "\u5347\u5E8F", en: "Ascending" },
+  "home.descending": { zh: "\u964D\u5E8F", en: "Descending" },
+  "home.frequency": { zh: "\u8BCD\u9891", en: "Frequency" },
   "home.random": { zh: "\u968F\u673A", en: "Random" },
   "home.open": { zh: "\u6253\u5F00\u4E3B\u9875", en: "Open home" },
   "home.openTitle": { zh: "\u70B9\u51FB\u6253\u5F00 Lexis \u4E3B\u9875", en: "Open Lexis home" },
@@ -434,9 +552,12 @@ var MESSAGES = {
   "home.heatmapCaption": { zh: "\u8FD1 {weeks} \u5468 \xB7 \u5171 {count} \u6B21\u590D\u4E60", en: "Last {weeks} weeks \xB7 {count} reviews" },
   "home.heatmapDay": { zh: "{date}\uFF1A{count} \u6B21", en: "{date}: {count} reviews" },
   "popover.addOccurrence": { zh: "\u6536\u85CF\u5230\u51FA\u5904", en: "Save as occurrence" },
+  "popover.addCurrentOccurrence": { zh: "+ \u51FA\u5904", en: "+ Source" },
+  "popover.addCurrentOccurrenceTitle": { zh: "\u628A\u5F53\u524D\u53E5\u5B50\u6536\u85CF\u5230\u51FA\u5904", en: "Save the current sentence as a source" },
   "popover.occurrences": { zh: "\u51FA\u73B0\u8FC7\u7684\u5730\u65B9 ({count})", en: "Occurrences ({count})" },
   "popover.noOccurrences": { zh: "\u6CA1\u6709\u672A\u6536\u85CF\u7684\u65B0\u51FA\u5904", en: "No new unsaved occurrences" },
   "popover.addNote": { zh: "\u6DFB\u52A0\u6279\u6CE8", en: "Add note" },
+  "popover.addImage": { zh: "\u6DFB\u52A0\u56FE\u7247", en: "Add image" },
   "popover.notePlaceholder": { zh: "\u5199\u6279\u6CE8\uFF0C\u56DE\u8F66\u4FDD\u5B58\uFF0CEsc \u53D6\u6D88", en: "Write a note; Enter to save, Esc to cancel" },
   "popover.deleteEntry": { zh: "\u4ECE\u8BCD\u5E93\u4E2D\u5220\u9664", en: "Delete from dictionary" },
   "popover.deleteConfirm": { zh: "\u5220\u9664\u300C{word}\u300D\uFF1F", en: "Delete \u201C{word}\u201D?" },
@@ -470,6 +591,7 @@ var MESSAGES = {
   "settings.followGlobal": { zh: "\u8DDF\u968F\u5168\u5C40\u989C\u8272", en: "Use global color" },
   "settings.dictionaryColor": { zh: "\u8BCD\u5178\u989C\u8272", en: "Dictionary color" },
   "settings.dictionaryAppearance": { zh: "\u8BCD\u5178\u9AD8\u4EAE\u5916\u89C2", en: "Dictionary highlight appearance" },
+  "settings.showDictionaryHighlight": { zh: "\u663E\u793A\u8FD9\u4E2A\u8BCD\u5178\u7684\u9AD8\u4EAE", en: "Show highlights for this dictionary" },
   "settings.resetGlobal": { zh: "\u6062\u590D\u5168\u5C40\u989C\u8272", en: "Reset to global color" },
   "settings.deleteDictionary": { zh: "\u5220\u9664\u8FD9\u4E2A\u8BCD\u5178", en: "Delete this dictionary" },
   "settings.addDictionary": { zh: "+ \u6DFB\u52A0\u8BCD\u5178", en: "+ Add dictionary" },
@@ -514,7 +636,7 @@ var MESSAGES = {
   "settings.resetTheme": { zh: "\u6062\u590D\u4E3B\u9898\u8272", en: "Reset to theme color" },
   "settings.opacity": { zh: "\u900F\u660E\u5EA6", en: "Opacity" },
   "settings.fade": { zh: "\u6309\u8BB0\u5FC6\u5F3A\u5EA6\u6E10\u9690", en: "Fade with memory strength" },
-  "settings.fadeDesc": { zh: "\u8BB0\u5FC6\u8D8A\u7A33\uFF0C\u9AD8\u4EAE\u8D8A\u6DE1\u3002", en: "Stronger memories receive fainter highlights." },
+  "settings.fadeDesc": { zh: "\u6700\u7EC8\u900F\u660E\u5EA6 = \u57FA\u7840\u900F\u660E\u5EA6 \xD7 [1 - S/(S+20) \xD7 (1-\u6E10\u9690\u4E0B\u9650)]\u3002S \u4E3A FSRS \u7A33\u5B9A\u5EA6\uFF1B\u65B0\u8BCD\u4FDD\u6301\u57FA\u7840\u900F\u660E\u5EA6\u3002", en: "Final opacity = base opacity \xD7 [1 - S/(S+20) \xD7 (1-fade floor)]. S is FSRS stability; new entries keep the base opacity." },
   "settings.fadeFloor": { zh: "\u6700\u4F4E\u900F\u660E\u5EA6", en: "Minimum opacity" },
   "settings.tagColors": { zh: "\u6309\u6807\u7B7E\u7740\u8272", en: "Color by tag" },
   "settings.tagPlaceholder": { zh: "\u6807\u7B7E", en: "Tag" },
@@ -545,6 +667,12 @@ var MESSAGES = {
   "settings.occurrenceTemplate": { zh: "\u81EA\u52A8\u51FA\u5904\u683C\u5F0F", en: "Automatic source format" },
   "settings.occurrenceTemplateDesc": { zh: "\u9996\u884C\u53EF\u5199 Markdown \u6807\u9898\uFF0C\u5176\u4F59\u5185\u5BB9\u6309\u6BCF\u6761\u51FA\u5904\u91CD\u590D\u3002\u652F\u6301 {{word}}\u3001{{sentence}}\u3001{{source}}\u3001{{sourceSuffix}}\u3001{{date}}\uFF1B\u7559\u7A7A\u4E0D\u5199\u51FA\u5904\u3002", en: "The first line may be a Markdown heading; the remaining lines repeat for each source. Supports {{word}}, {{sentence}}, {{source}}, {{sourceSuffix}}, and {{date}}. Leave blank to omit sources." },
   "settings.review": { zh: "\u590D\u4E60 (FSRS)", en: "Review (FSRS)" },
+  "settings.flashcardInline": { zh: "\u884C\u5185\u95EE\u7B54\u8BED\u6CD5", en: "Inline Q&A syntax" },
+  "settings.flashcardBidirectional": { zh: "\u53CC\u5411\u95EE\u7B54\u8BED\u6CD5", en: "Bidirectional Q&A syntax" },
+  "settings.flashcardBlock": { zh: "\u5757\u7EA7\u95EE\u7B54\u8BED\u6CD5", en: "Block Q&A syntax" },
+  "settings.flashcardCloze": { zh: "\u884C\u5185\u6316\u7A7A\u8BED\u6CD5", en: "Inline cloze syntax" },
+  "settings.flashcardTemplateDesc": { zh: "\u4FDD\u7559\u53D8\u91CF\uFF1B\u7559\u7A7A\u5173\u95ED\u3002", en: "Keep the variables; leave blank to disable." },
+  "settings.resetTemplate": { zh: "\u6062\u590D\u9ED8\u8BA4\u8BED\u6CD5", en: "Reset syntax" },
   "settings.retention": { zh: "\u76EE\u6807\u8BB0\u5FC6\u4FDD\u7559\u7387", en: "Desired retention" },
   "settings.retentionDesc": { zh: "\u8D8A\u9AD8\uFF0C\u590D\u4E60\u8D8A\u9891\u7E41\u3002", en: "Higher values schedule more reviews." },
   "settings.newLimit": { zh: "\u6BCF\u5929\u65B0\u8BCD\u4E0A\u9650", en: "New entries per day" },
@@ -572,6 +700,12 @@ var MESSAGES = {
   "settings.removeExcludedTag": { zh: "\u79FB\u9664 #{tag}", en: "Remove #{tag}" },
   "settings.annotationHeading": { zh: "\u6279\u6CE8\u5C0F\u8282\u6807\u9898", en: "Annotation heading" },
   "settings.annotationHeadingDesc": { zh: "\u652F\u6301\u201C\u6279\u6CE8\u201D\u6216\u201C## \u5F15\u7528\u201D\uFF1B\u7559\u7A7A\u4E3A\u201C#### \u6279\u6CE8\u201D\u3002", en: "Use plain text or a Markdown heading; blank uses \u201C#### \u6279\u6CE8\u201D." },
+  "settings.annotationImageLocation": { zh: "\u6279\u6CE8\u56FE\u7247\u4F4D\u7F6E", en: "Annotation image location" },
+  "settings.annotationImageLocationDesc": { zh: "\u8DDF\u968F Obsidian\uFF0C\u6216\u5355\u72EC\u6307\u5B9A\u6587\u4EF6\u5939\u3002", en: "Follow Obsidian or use a dedicated folder." },
+  "settings.annotationImageObsidian": { zh: "\u8DDF\u968F Obsidian", en: "Follow Obsidian" },
+  "settings.annotationImageCustom": { zh: "\u81EA\u5B9A\u4E49\u6587\u4EF6\u5939", en: "Custom folder" },
+  "settings.annotationImageFolder": { zh: "\u6279\u6CE8\u56FE\u7247\u6587\u4EF6\u5939", en: "Annotation image folder" },
+  "settings.annotationImageFolderDesc": { zh: "\u4EC5\u5728\u9009\u62E9\u81EA\u5B9A\u4E49\u4F4D\u7F6E\u65F6\u4F7F\u7528\u3002", en: "Used only for the custom location." },
   "settings.enableBridge": { zh: "\u542F\u7528\u672C\u673A\u6865\u63A5", en: "Enable local bridge" },
   "settings.port": { zh: "\u7AEF\u53E3", en: "Port" },
   "settings.portDesc": { zh: "\u4FEE\u6539\u540E\u70B9\u53F3\u4FA7\u91CD\u542F\u3002", en: "Restart the bridge after changing it." },
@@ -699,7 +833,7 @@ var createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown: renderL
     this.registerDomEvent(window, "resize", () => this.updateMobileRateBarOffset());
     const saved = this.plugin.takeReviewSession(this.leaf);
     if (!saved) {
-      this.refresh();
+      await this.refresh();
       return;
     }
     this.queue = saved.queue;
@@ -715,8 +849,10 @@ var createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown: renderL
     if (this._frontComp) this._frontComp.unload();
     this.closeImagePreview();
   }
-  refresh() {
-    this.queue = this.plugin.buildQueue(this.options);
+  async refresh() {
+    this.contentEl.empty();
+    this.contentEl.createDiv({ cls: "lexis-rv-loading", text: this.plugin.t("common.loading") });
+    this.queue = await this.plugin.buildQueue(this.options);
     this.pos = 0;
     this.reviewed = 0;
     this.revealed = false;
@@ -730,6 +866,10 @@ var createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown: renderL
     if (this.pos >= this.queue.length) {
       this.renderDone(c);
       return;
+    }
+    if (this._frontComp) {
+      this._frontComp.unload();
+      this._frontComp = null;
     }
     this.revealed = false;
     const item = this.currentItem = this.queue[this.pos];
@@ -745,12 +885,24 @@ var createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown: renderL
     const sb = topbtns.createEl("button", { cls: "lexis-rv-undo", text: this.plugin.t("review.skip") });
     sb.addEventListener("click", () => this.skip());
     const card = c.createDiv({ cls: "lexis-rv-card" });
-    const wordEl = card.createDiv({ cls: "lexis-rv-word", text: item.file.basename });
-    wordEl.setAttribute("title", this.plugin.t("review.openSource"));
-    wordEl.addEventListener("click", () => {
-      void this.openSource(item.file);
-    });
-    if (this.plugin.settings.cardFront === "cloze") void this.applyClozeFront(wordEl, item);
+    let wordEl;
+    if (item.type === "syntax" && item.syntax) {
+      const source = card.createEl("button", { cls: "lexis-rv-source", text: `${item.file.basename} \xB7 L${item.syntax.line + 1}`, attr: { type: "button" } });
+      source.setAttribute("title", this.plugin.t("review.openSource"));
+      source.addEventListener("click", () => {
+        void this.openSource(item);
+      });
+      wordEl = card.createDiv({ cls: "lexis-rv-word is-syntax" });
+      void this.renderSyntaxFront(wordEl, item);
+    } else {
+      wordEl = card.createDiv({ cls: "lexis-rv-word" });
+      wordEl.setText(item.file.basename);
+      wordEl.setAttribute("title", this.plugin.t("review.openSource"));
+      wordEl.addEventListener("click", () => {
+        void this.openSource(item);
+      });
+      if (this.plugin.settings.cardFront === "cloze") void this.applyClozeFront(wordEl, item);
+    }
     const tagsSet = this.plugin.getTags(item.file);
     if (tagsSet.size) {
       const tw = card.createDiv({ cls: "lexis-rv-tags" });
@@ -758,7 +910,7 @@ var createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown: renderL
         const pill = tw.createSpan({ cls: "lexis-tag", text: "#" + t });
         pill.setAttribute("title", this.plugin.t("review.onlyTag", { tag: t }));
         pill.addEventListener("click", () => {
-          void this.plugin.openReview({ ...this.options, tag: t });
+          void this.plugin.openReview({ ...this.options, scope: "tag", tag: t });
         });
       }
     }
@@ -795,12 +947,18 @@ var createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown: renderL
       if (this._comp) this._comp.unload();
       this._comp = new import_obsidian3.Component();
       this._comp.load();
-      await this.plugin.renderNoteInto(this.backEl, this.currentItem.file, this._comp, true);
-      const openOcc = () => this.backEl.querySelectorAll("details.lexis-occ-details").forEach((details) => {
-        details.open = true;
-      });
-      openOcc();
-      window.setTimeout(openOcc, 60);
+      const item = this.currentItem;
+      if (item.type === "syntax" && item.syntax) {
+        this.backEl.empty();
+        await renderLexisMarkdown2(this.app, item.syntax.back, this.backEl, item.file.path, this._comp);
+      } else {
+        await this.plugin.renderNoteInto(this.backEl, item.file, this._comp, true);
+        const openOcc = () => this.backEl.querySelectorAll("details.lexis-occ-details").forEach((details) => {
+          details.open = true;
+        });
+        openOcc();
+        window.setTimeout(openOcc, 60);
+      }
       this.installAnswerInteractions();
     } catch (err) {
       this.backEl.setText(this.plugin.t("review.renderFailed", { error: errorMessage(err) }));
@@ -819,15 +977,17 @@ var createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown: renderL
     }
     const item = this.currentItem;
     try {
-      const prev = { s: item.card.s, d: item.card.d, due: item.card.due, last: item.card.last, reps: item.card.reps, lapses: item.card.lapses };
-      const wasNew = item.card.s == null || isNaN(Number(item.card.s));
+      const snapshot = this.plugin.snapshotReviewItem(item);
+      const previousCard = { ...item.card };
       const retentionBefore = this.plugin.cardRetrievability(item.card);
       const sched = this.plugin.scheduleCard(item.card, g);
-      await this.plugin.applySchedule(item.file, sched);
-      await this.plugin.logReview(item.file, sched, g, retentionBefore);
-      this.undoStack.push({ item, prev, wasNew, pos: this.pos, requeued: g === 1 });
+      await this.plugin.applyReviewItemSchedule(item, sched);
+      await this.plugin.logReviewItem(item, sched, g, retentionBefore);
+      this.undoStack.push({ item, snapshot, previousCard, pos: this.pos, requeued: g === 1 });
       this.reviewed++;
-      if (g === 1) this.queue.push({ file: item.file, card: { s: sched.s, d: sched.d, due: sched.due, last: todayStr(), reps: sched.reps, lapses: sched.lapses } });
+      const updated = { s: sched.s, d: sched.d, due: sched.due, last: todayStr(), reps: sched.reps, lapses: sched.lapses };
+      item.card = updated;
+      if (g === 1) this.queue.push({ ...item, card: { ...updated } });
       this.pos++;
       this.render();
     } catch (err) {
@@ -842,24 +1002,9 @@ var createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown: renderL
       return;
     }
     try {
-      await this.plugin.app.fileManager.processFrontMatter(u.item.file, (fm) => {
-        if (u.wasNew) {
-          delete fm["lexis-s"];
-          delete fm["lexis-d"];
-          delete fm["lexis-due"];
-          delete fm["lexis-last"];
-          delete fm["lexis-reps"];
-          delete fm["lexis-lapses"];
-        } else {
-          fm["lexis-s"] = u.prev.s;
-          fm["lexis-d"] = u.prev.d;
-          fm["lexis-due"] = u.prev.due;
-          fm["lexis-last"] = u.prev.last;
-          fm["lexis-reps"] = u.prev.reps;
-          fm["lexis-lapses"] = u.prev.lapses;
-        }
-      });
-      await this.plugin.undoReviewLog(u.item.file);
+      await this.plugin.restoreReviewItem(u.item, u.snapshot);
+      await this.plugin.undoReviewItemLog(u.item);
+      u.item.card = { ...u.previousCard };
       if (u.requeued && this.queue.length) this.queue.pop();
       this.pos = u.pos;
       this.reviewed = Math.max(0, this.reviewed - 1);
@@ -868,7 +1013,7 @@ var createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown: renderL
       new import_obsidian3.Notice(this.plugin.t("review.undoFailed", { error: errorMessage(err) }));
     }
   }
-  async openSource(file) {
+  async openSource(item) {
     this.plugin.saveReviewSession(this.leaf, {
       queue: this.queue,
       pos: this.pos,
@@ -877,8 +1022,13 @@ var createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown: renderL
       undoStack: this.undoStack,
       options: this.options
     });
-    await this.leaf.openFile(file, { active: true });
+    await this.leaf.openFile(item.file, { active: true });
     await this.app.workspace.revealLeaf(this.leaf);
+    if (item.syntax && this.leaf.view instanceof import_obsidian3.MarkdownView) {
+      const position = { line: item.syntax.line, ch: 0 };
+      this.leaf.view.editor.setCursor(position);
+      this.leaf.view.editor.scrollIntoView({ from: position, to: position }, true);
+    }
   }
   onKey(e) {
     if (this.app.workspace.getMostRecentLeaf() !== this.leaf) return;
@@ -922,6 +1072,12 @@ var createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown: renderL
     this._frontComp.load();
     const cloze = this.plugin.buildCloze(ex, item.file.basename);
     await renderLexisMarkdown2(this.app, cloze, wordEl, item.file.path, this._frontComp);
+  }
+  async renderSyntaxFront(wordEl, item) {
+    if (!item.syntax || this.currentItem !== item) return;
+    this._frontComp = new import_obsidian3.Component();
+    this._frontComp.load();
+    await renderLexisMarkdown2(this.app, item.syntax.front, wordEl, item.file.path, this._frontComp);
   }
   installAnswerInteractions() {
     this.backEl.querySelectorAll("img").forEach((img) => {
@@ -970,7 +1126,7 @@ var createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown: renderL
     const b = d.createEl("button", { cls: "mod-cta", text: this.plugin.t("review.checkAgain") });
     b.onclick = () => {
       void this.plugin.rebuildIndex(false);
-      this.refresh();
+      void this.refresh();
     };
     this.plugin.renderHeatmap(d.createDiv({ cls: "lexis-hm-wrap" }));
     c.setCssStyles({ paddingBottom: (this.plugin.settings.reviewBottomSpace || 70) + "px" });
@@ -1134,7 +1290,7 @@ function createBridgeServer({ Notice: Notice4, Platform: Platform2 }) {
         new Notice4(this.plugin.t("notice.desktopBridge"));
         return;
       }
-      const port = Number(this.plugin.settings.bridgePort) || 45945;
+      const port = Number(this.plugin.settings.bridgePort) || LEXIS_BRIDGE_DEFAULT_PORT;
       const server = http.createServer((req, res) => {
         this.handle(req, res).catch((err) => {
           try {
@@ -1227,7 +1383,7 @@ function errorMessage2(error) {
 function textValue(value) {
   return typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? String(value) : "";
 }
-function createBridgeApi({ DEFAULT_SETTINGS: DEFAULT_SETTINGS2, TFile: TFile3, Component: Component4, todayStr, escapeRe: escapeRe2, renderLexisMarkdown: renderLexisMarkdown2, finishRenderMath: finishRenderMath2, escHtml }) {
+function createBridgeApi({ DEFAULT_SETTINGS: DEFAULT_SETTINGS2, TFile: TFile4, Component: Component4, todayStr, escapeRe: escapeRe2, renderLexisMarkdown: renderLexisMarkdown2, finishRenderMath: finishRenderMath2, escHtml, saveAnnotationImage: saveAnnotationImage2, vaultImageDataUrl: vaultImageDataUrl2 }) {
   class BridgeApi {
     // ---------- 词典桥接动作（由 Obsidian 卡片与外部阅读端共同调用） ----------
     // 网页划词/加出处:词不在库→新建,在库→加出处。来源是网址链接 [标题](url),不是 [[内链]]
@@ -1247,9 +1403,9 @@ function createBridgeApi({ DEFAULT_SETTINGS: DEFAULT_SETTINGS2, TFile: TFile3, C
       const folder = reqFolder && this.dictFolders().includes(reqFolder) ? reqFolder : this.primaryVocabFolder();
       const targetPath = (folder ? folder + "/" : "") + name + ".md";
       let existing = this.app.vault.getAbstractFileByPath(targetPath);
-      if (!(existing instanceof TFile3)) {
-        const hit = this.index.get(word.toLowerCase());
-        if (hit && hit.file instanceof TFile3) existing = hit.file;
+      if (!(existing instanceof TFile4)) {
+        const hit = this.index.get(this.resolveIndexKey(word));
+        if (hit && hit.file instanceof TFile4) existing = hit.file;
       }
       const injectAlias = (data) => {
         const re = /^---\r?\n([\s\S]*?)\r?\n---/;
@@ -1274,7 +1430,7 @@ aliases:
 ${line}---` + data.slice(fm.index + fm[0].length);
       };
       try {
-        if (existing instanceof TFile3) {
+        if (existing instanceof TFile4) {
           if (alias) {
             if (this.app.vault.process) await this.app.vault.process(existing, injectAlias);
             else await this.app.vault.modify(existing, injectAlias(await this.app.vault.cachedRead(existing)));
@@ -1316,7 +1472,7 @@ ${line}---` + data.slice(fm.index + fm[0].length);
       }
     }
     async bridgeDeleteWord(key) {
-      const k = textValue(key).toLowerCase();
+      const k = this.resolveIndexKey(textValue(key));
       const e = this.index.get(k);
       if (!e || !e.file) return { ok: false, error: "not-found" };
       if (e.inline) return { ok: false, error: "inline-readonly" };
@@ -1329,7 +1485,7 @@ ${line}---` + data.slice(fm.index + fm[0].length);
       }
     }
     async bridgeTagWord(payload) {
-      const key = textValue(payload.key).toLowerCase();
+      const key = this.resolveIndexKey(textValue(payload.key));
       const tag = textValue(payload.tag).toLowerCase().replace(/^#/, "");
       const action = textValue(payload.action) || "add";
       if (!tag) return { ok: false, error: "empty-tag" };
@@ -1464,17 +1620,19 @@ ${line}`);
     annotationHeadingText() {
       return this.annotationHeadingLine().replace(/^#{1,6}[ \t]*/, "").trim() || "\u6279\u6CE8";
     }
-    // 网页悬浮卡批注:纯文字写进已有词笔记的批注小节(词笔记里它自然落在出处等段附近)
+    // 批注写进词条笔记；Obsidian 卡片还可同时把图片保存为仓库附件并插入引用。
     async bridgeAnnotate(payload) {
       const text = textValue(payload.note ?? payload.text).trim().replace(/\r?\n+/g, " ");
-      if (!text) return { ok: false, error: "empty-note" };
-      const key = textValue(payload.key ?? payload.word).trim().toLowerCase();
+      const image = typeof File !== "undefined" && payload.image instanceof File && payload.image.type.startsWith("image/") ? payload.image : null;
+      if (!text && !image) return { ok: false, error: "empty-note" };
+      const key = this.resolveIndexKey(textValue(payload.key ?? payload.word).trim());
       const e = this.index.get(key);
       if (!e || !e.file) return { ok: false, error: "not-found" };
       if (e.inline) return { ok: false, error: "inline-readonly" };
-      const line = `> ${text}`;
       try {
-        const apply = (data) => this.insertUnderHeading(data, this.annotationHeadingLine(), line, ["\u6279\u6CE8"]);
+        const imageFile = image ? await saveAnnotationImage2(this.app, this.settings, e.file, image) : null;
+        const content = [text ? `> ${text}` : "", imageFile ? `![[${imageFile.path}]]` : ""].filter(Boolean).join("\n\n");
+        const apply = (data) => this.insertUnderHeading(data, this.annotationHeadingLine(), content, ["\u6279\u6CE8"]);
         if (this.app.vault.process) await this.app.vault.process(e.file, apply);
         else await this.app.vault.modify(e.file, apply(await this.app.vault.cachedRead(e.file)));
         this._occCache.clear();
@@ -1502,7 +1660,7 @@ ${line}`);
     // 把已有词移动到另一个词典文件夹。默认只移动文件(正文/批注/出处全保留);
     // 但若该词笔记是空骨架且目标词典有自己的模板,则顺手重套模板——并把批注小节内容迁移过去。
     async bridgeMoveWord(payload) {
-      const key = textValue(payload.key ?? payload.word).trim().toLowerCase();
+      const key = this.resolveIndexKey(textValue(payload.key ?? payload.word).trim());
       const folder = this.normalizeFolder(textValue(payload.folder));
       const e = this.index.get(key);
       if (!e || !e.file) return { ok: false, error: "not-found" };
@@ -1530,7 +1688,7 @@ ${line}`);
           let nc = (oldFm ? oldFm.replace(/\s*$/, "\n") : "") + (oldFm ? "\n" : "") + tplBody;
           if (annot) nc = this.insertUnderHeading(nc, this.annotationHeadingLine(), annot, ["\u6279\u6CE8"]);
           const fileNow = this.app.vault.getAbstractFileByPath(target);
-          if (fileNow instanceof TFile3) {
+          if (fileNow instanceof TFile4) {
             if (this.app.vault.process) await this.app.vault.process(fileNow, () => nc);
             else await this.app.vault.modify(fileNow, nc);
             reTemplated = true;
@@ -1548,8 +1706,8 @@ ${line}`);
       const keys = Array.isArray(payload.keys) ? payload.keys : [];
       let recorded = 0;
       for (const k of keys) {
-        const e = this.index.get(textValue(k).toLowerCase());
-        if (e && !e.inline && e.file instanceof TFile3) {
+        const e = this.index.get(this.resolveIndexKey(textValue(k)));
+        if (e && !e.inline && e.file instanceof TFile4) {
           this.passiveEncounter(e.file);
           recorded++;
         }
@@ -1560,7 +1718,7 @@ ${line}`);
       const words = [];
       for (const [key, e] of this.index) {
         if (e.archived || e.retired) continue;
-        words.push({ key, word: e.display, alias: !!e.isAlias, inline: !!e.inline, tags: [...e.tags || []], file: e.file && e.file.path, color: this.colorForEntry(e), opacity: this.highlightAlphaForEntry(e), visible: this.highlightVisibleForEntry(e), wstyle: this.styleKindForEntry(e) });
+        words.push({ key, word: e.display, alias: !!e.isAlias, inline: !!e.inline, tags: [...e.tags || []], file: e.file && e.file.path, color: this.colorForEntry(e), opacity: this.highlightAlphaForEntry(e), visible: this.highlightVisibleForEntry(e, false), wstyle: this.styleKindForEntry(e) });
       }
       return {
         ok: true,
@@ -1603,7 +1761,7 @@ ${line}`);
       return style?.sheet ? Array.from(style.sheet.cssRules, (rule) => rule.cssText).join("\n") : "";
     }
     async bridgeWordDetail(key) {
-      const k = textValue(key).toLowerCase();
+      const k = this.resolveIndexKey(textValue(key));
       const e = this.index.get(k);
       if (!e) return { ok: false, error: "not-found" };
       if (e.inline) {
@@ -1667,13 +1825,13 @@ ${line}`);
       comp.load();
       try {
         await this.renderInlineEntryInto(div, entry, comp);
-        this.bridgePostProcess(div);
+        await this.bridgePostProcess(div, entry.file.path);
         return div.innerHTML;
       } finally {
         comp.unload();
       }
     }
-    bridgePostProcess(div) {
+    async bridgePostProcess(div, sourcePath) {
       const vault = encodeURIComponent(this.app.vault.getName());
       div.querySelectorAll("a.internal-link").forEach((a) => {
         const lp = a.getAttribute("data-href") || a.getAttribute("href") || a.textContent || "";
@@ -1681,10 +1839,24 @@ ${line}`);
         a.removeAttribute("data-href");
         a.classList.add("lexis-web-ilink");
       });
-      div.querySelectorAll("img").forEach((img) => {
-        if (!/^https?:/i.test(img.getAttribute("src") || "")) img.remove();
+      for (const img of div.querySelectorAll("img")) {
+        const src = img.getAttribute("src") || "";
+        if (/^(?:https?:|data:)/i.test(src)) continue;
+        const embed = img.closest(".internal-embed");
+        const linkPath = embed?.getAttribute("src") || embed?.getAttribute("data-href") || img.getAttribute("alt") || "";
+        try {
+          const dataUrl = await vaultImageDataUrl2(this.app, linkPath, sourcePath);
+          if (dataUrl) img.setAttribute("src", dataUrl);
+          else img.remove();
+        } catch {
+          img.remove();
+        }
+      }
+      div.querySelectorAll(".internal-embed").forEach((embed) => {
+        if (embed.querySelector("img")) embed.replaceWith(...Array.from(embed.childNodes));
+        else embed.remove();
       });
-      div.querySelectorAll(".internal-embed, iframe").forEach((x) => x.remove());
+      div.querySelectorAll("iframe").forEach((frame) => frame.remove());
     }
     // 整篇笔记渲成 HTML,且 ```lexis 块在原位渲染(保持文档顺序),供浏览器扩展悬浮卡用
     async bridgeFullHtml(file, display) {
@@ -1756,7 +1928,7 @@ ${line}`);
         await finishRenderMath2();
       } catch {
       }
-      this.bridgePostProcess(div);
+      await this.bridgePostProcess(div, file.path);
       const out = div.innerHTML;
       comp.unload();
       return out;
@@ -1777,7 +1949,7 @@ ${line}`);
         const map = /* @__PURE__ */ new Map();
         for (const s in resolved) if (this.inVocabFolder(s) && resolved[s] && resolved[s][file.path]) {
           const sf = this.app.vault.getAbstractFileByPath(s);
-          if (sf instanceof TFile3) map.set(s, sf.basename);
+          if (sf instanceof TFile4) map.set(s, sf.basename);
         }
         let h = `<div class="lexis-web-sec">\u{1F331} \u6D3E\u751F\u8BCD (${map.size})</div>`;
         if (!map.size) return h + `<div class="lexis-web-occ lexis-web-dim">(\u8FD8\u6CA1\u6709\u5355\u8BCD\u94FE\u5230\u8FD9\u4E2A\u8BCD\u6839)</div>`;
@@ -1856,7 +2028,7 @@ ${line}`);
 var import_view = require("@codemirror/view");
 var import_state = require("@codemirror/state");
 var obsidian = __toESM(require("obsidian"));
-function createHighlightEngine({ Notice: Notice4, boundedSource: boundedSource2, todayStr }) {
+function createHighlightEngine({ Notice: Notice4, boundedSource: boundedSource2, compactMixedScriptSpacing: compactMixedScriptSpacing2, todayStr }) {
   class HighlightEngine {
     // ---------- 索引 ----------
     normalizeFolder(p) {
@@ -2096,11 +2268,31 @@ function createHighlightEngine({ Notice: Notice4, boundedSource: boundedSource2,
         return !(e && e.retired);
       });
       keys.sort((a, b) => b.length - a.length);
+      this._indexKeysByCompact = /* @__PURE__ */ new Map();
+      for (const key of this.index.keys()) {
+        this._indexKeysByCompact.set(key, key);
+        const compact = compactMixedScriptSpacing2(key);
+        if (!this._indexKeysByCompact.has(compact)) this._indexKeysByCompact.set(compact, key);
+      }
+      this._matchKeysByCompact = /* @__PURE__ */ new Map();
+      for (const key of keys) {
+        this._matchKeysByCompact.set(key, key);
+        const compact = compactMixedScriptSpacing2(key);
+        if (!this._matchKeysByCompact.has(compact)) this._matchKeysByCompact.set(compact, key);
+      }
       if (!keys.length) {
         this._pattern = null;
         return;
       }
       this._pattern = keys.map(boundedSource2).join("|");
+    }
+    resolveIndexKey(value) {
+      const key = String(value || "").toLowerCase();
+      return this._indexKeysByCompact.get(key) || this._indexKeysByCompact.get(compactMixedScriptSpacing2(key)) || key;
+    }
+    resolveMatchKey(value) {
+      const key = String(value || "").toLowerCase();
+      return this._matchKeysByCompact.get(key) || this._matchKeysByCompact.get(compactMixedScriptSpacing2(key)) || key;
     }
     updateStatusBar() {
       if (!this.statusBarEl) return;
@@ -2153,7 +2345,8 @@ function createHighlightEngine({ Notice: Notice4, boundedSource: boundedSource2,
       const opacity = Number(opacities[key]);
       return isNaN(opacity) ? null : Math.max(0.1, Math.min(1, opacity));
     }
-    highlightVisibleForEntry(entry) {
+    highlightVisibleForEntry(entry, includeDictionary = true) {
+      if (includeDictionary && this.dictSettingForFile(entry?.file)?.highlight === false) return false;
       if (!entry?.inline) return true;
       const fileMode = this.inlineClassificationMode() === "file";
       const parents = fileMode ? this.settings.inlineFileHighlight || {} : this.settings.inlineCategoryHighlight || {};
@@ -2315,7 +2508,7 @@ function createHighlightEngine({ Notice: Notice4, boundedSource: boundedSource2,
         let m;
         while (m = regex.exec(text)) {
           if (m.index > last) frag.appendChild(doc.createTextNode(text.slice(last, m.index)));
-          const key = m[0].toLowerCase();
+          const key = this.resolveMatchKey(m[0]);
           if (excludeKeys && excludeKeys.has(key)) {
             frag.appendChild(doc.createTextNode(m[0]));
             last = m.index + m[0].length;
@@ -2360,7 +2553,7 @@ function createHighlightEngine({ Notice: Notice4, boundedSource: boundedSource2,
             regex.lastIndex = 0;
             let match;
             while (match = regex.exec(text)) {
-              const key = match[0].toLowerCase();
+              const key = this.resolveMatchKey(match[0]);
               if (selfKeys?.has(key)) {
                 if (match[0].length === 0) regex.lastIndex++;
                 continue;
@@ -2503,7 +2696,7 @@ function createDocumentHighlights() {
             if (!match[0].length) regex.lastIndex++;
             continue;
           }
-          const key = match[0].toLowerCase();
+          const key = this.resolveMatchKey(match[0]);
           const entry = this.index.get(key);
           if (!entry) continue;
           const byNode = /* @__PURE__ */ new Map();
@@ -3074,7 +3267,7 @@ function createReaderInteractions({ openAliasPicker }) {
         rect = { left: rect.left + frameRect.left, right: rect.right + frameRect.left, top: rect.top + frameRect.top, bottom: rect.bottom + frameRect.top, width: rect.width, height: rect.height };
       }
       this.removeSelPill();
-      const known = this.index.has(text.toLowerCase());
+      const known = this.index.has(this.resolveIndexKey(text));
       const pill = overlayDoc.body.createDiv({ cls: "lexis-sel-pill" });
       pill.addEventListener("mousedown", (ev) => ev.preventDefault());
       if (known) {
@@ -3177,7 +3370,7 @@ function confirmAction(app, title, message) {
     new ConfirmModal(app).open();
   });
 }
-function createReaderUi({ buildCurveSVG: buildCurveSVG2, FSRS: FSRS2, addDaysStr, daysBetween: daysBetween2, todayStr, fmtDate, TFile: TFile3, Notice: Notice4, boundedSource: boundedSource2, escapeRe: escapeRe2, Component: Component4, renderLexisMarkdown: renderLexisMarkdown2, openRestoreModal }) {
+function createReaderUi({ buildCurveSVG: buildCurveSVG2, FSRS: FSRS2, addDaysStr, daysBetween: daysBetween2, todayStr, fmtDate, TFile: TFile4, Notice: Notice4, boundedSource: boundedSource2, escapeRe: escapeRe2, Component: Component4, renderLexisMarkdown: renderLexisMarkdown2, openRestoreModal }) {
   class ReaderUi {
     // 遗忘曲线 SVG(FSRS 衰减)
     buildCurveSVG(card) {
@@ -3193,7 +3386,7 @@ function createReaderUi({ buildCurveSVG: buildCurveSVG2, FSRS: FSRS2, addDaysStr
     // 笔记内 ```lexis 代码块:曲线 + 相关词 + 出现过的地方
     async renderLexisBlock(el, ctx, src) {
       const file = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
-      if (!(file instanceof TFile3)) {
+      if (!(file instanceof TFile4)) {
         el.setText("Lexis:\u65E0\u6CD5\u8BC6\u522B\u5F53\u524D\u7B14\u8BB0");
         return;
       }
@@ -3261,7 +3454,7 @@ function createReaderUi({ buildCurveSVG: buildCurveSVG2, FSRS: FSRS2, addDaysStr
     }
     // 把 alias 写进某词条文件的 frontmatter aliases(已存在则跳过,幂等)
     async addAliasToFile(file, alias) {
-      if (!(file instanceof TFile3) || !alias) return;
+      if (!(file instanceof TFile4) || !alias) return;
       const inject = (data) => {
         const re = /^---\r?\n([\s\S]*?)\r?\n---/;
         const fm = re.exec(data);
@@ -3288,7 +3481,7 @@ ${line}---` + data.slice(fm.index + fm[0].length);
     // 把当前选中的词并入目标词条(标题或别名解析到的同一个文件)的 aliases
     async attachAlias(aliasText, file) {
       aliasText = (aliasText || "").trim();
-      if (!aliasText || !(file instanceof TFile3)) return;
+      if (!aliasText || !(file instanceof TFile4)) return;
       if (aliasText.toLowerCase() === file.basename.toLowerCase()) {
         new Notice4(this.t("notice.aliasSelf", { word: aliasText }));
         return;
@@ -3473,7 +3666,32 @@ ${line}---` + data.slice(fm.index + fm[0].length);
       const content = el.createDiv({ cls: "lexis-inline-annotation" });
       await renderLexisMarkdown2(this.app, md, content, entry.file.path, comp);
     }
-    renderPopoverControls(meta, corner, body, entry) {
+    highlightSource(span) {
+      const sourceDocument = span.ownerDocument;
+      const frame = sourceDocument.defaultView?.frameElement;
+      const locatedNode = frame || span;
+      let file = null;
+      this.app.workspace.iterateAllLeaves((leaf) => {
+        const view = leaf.view;
+        if (!file && view.containerEl?.contains(locatedNode)) file = view.file || null;
+      });
+      if (!file) file = this.app.workspace.getActiveFile();
+      const pageElement = span.closest("[data-page-number]");
+      const pageValue = pageElement?.getAttribute("data-page-number") || "";
+      const page = Number.parseInt(pageValue, 10) || void 0;
+      const textContainer = span.closest("p,li,blockquote,td,th,figcaption,h1,h2,h3,h4,h5,h6,.cm-line,.textLayer") || span.parentElement;
+      if (!textContainer) return { file, sentence: "", page };
+      try {
+        const range = sourceDocument.createRange();
+        range.selectNodeContents(textContainer);
+        range.setEndBefore(span);
+        const sentence = this.extractSentence(textContainer.textContent || "", range.toString().length);
+        return { file, sentence, page };
+      } catch {
+        return { file, sentence: (span.textContent || "").trim(), page };
+      }
+    }
+    renderPopoverControls(meta, corner, body, entry, sourceSpan) {
       if (entry.inline) return;
       const baseKey = entry.file?.basename || entry.display;
       const path = entry.file?.path || "";
@@ -3499,6 +3717,20 @@ ${line}---` + data.slice(fm.index + fm[0].length);
           menu.showAtPosition({ x: ev.clientX, y: ev.clientY });
         });
       }
+      const occurrenceBtn = meta.createEl("button", { cls: "lexis-popover-action", text: this.t("popover.addCurrentOccurrence") });
+      occurrenceBtn.setAttribute("title", this.t("popover.addCurrentOccurrenceTitle"));
+      occurrenceBtn.addEventListener("click", (ev) => {
+        void (async () => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const source = this.highlightSource(sourceSpan);
+          occurrenceBtn.disabled = true;
+          if (await this.addExampleToWord(entry.file, source.sentence, source.file, source.page)) {
+            occurrenceBtn.setText("\u2713");
+            occurrenceBtn.removeAttribute("title");
+          } else occurrenceBtn.disabled = false;
+        })();
+      });
       const noteBtn = corner.createEl("button", { cls: "lexis-popover-action", text: "\u270E" });
       noteBtn.setAttribute("title", this.t("popover.addNote"));
       noteBtn.addEventListener("click", (ev) => {
@@ -3511,7 +3743,32 @@ ${line}---` + data.slice(fm.index + fm[0].length);
         }
         const row = body.createDiv({ cls: "lexis-popover-note-row" });
         const input = row.createEl("input", { attr: { type: "text", placeholder: this.t("popover.notePlaceholder") } });
+        const imageInput = row.createEl("input", { cls: "lexis-popover-note-file", attr: { type: "file", accept: "image/*" } });
+        const imageBtn = row.createEl("button", { cls: "lexis-popover-note-image", attr: { type: "button", title: this.t("popover.addImage") } });
+        obsidian3.setIcon(imageBtn, "image-plus");
         input.addEventListener("click", (e) => e.stopPropagation());
+        imageBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          imageInput.click();
+        });
+        imageInput.addEventListener("click", (e) => e.stopPropagation());
+        imageInput.addEventListener("change", () => {
+          void (async () => {
+            const image = imageInput.files?.[0];
+            if (!image) return;
+            input.disabled = true;
+            imageBtn.disabled = true;
+            const result = await this.bridgeAnnotate({ key: baseKey, note: input.value.trim(), image });
+            new Notice4(result.ok ? this.t("notice.noteAdded", { word: entry.display }) : this.t("notice.noteFailed", { error: result.error || this.t("common.failed") }));
+            if (result.ok) this.removePopover();
+            else {
+              input.disabled = false;
+              imageBtn.disabled = false;
+              imageInput.value = "";
+            }
+          })();
+        });
         input.addEventListener("keydown", (e) => {
           void (async () => {
             if (e.key === "Escape") {
@@ -3636,7 +3893,7 @@ ${line}---` + data.slice(fm.index + fm[0].length);
         const comp = new Component4();
         comp.load();
         this._popoverComp = comp;
-        this.renderPopoverControls(meta, corner, body, entry);
+        this.renderPopoverControls(meta, corner, body, entry, spanEl);
         const contentEl = body.createDiv();
         if (entry.inline) await this.renderInlineEntryInto(contentEl, entry, comp);
         else await this.renderNoteInto(contentEl, entry.file, comp);
@@ -3730,7 +3987,7 @@ function moveItem(items, from, to) {
   next.splice(to, 0, item);
   return next;
 }
-function createReorderController({ container, onMove, setIcon, label = "Reorder", longPressMs = 260 }) {
+function createReorderController({ container, onMove, setIcon: setIcon2, label = "Reorder", longPressMs = 260 }) {
   let from = -1;
   let active = false;
   let timer = 0;
@@ -3848,7 +4105,7 @@ function createReorderController({ container, onMove, setIcon, label = "Reorder"
         cls: "lexis-drag-handle clickable-icon",
         attr: { type: "button", "aria-label": label, title: label }
       });
-      if (setIcon) setIcon(handle, "grip-vertical");
+      if (setIcon2) setIcon2(handle, "grip-vertical");
       else handle.setText("\u22EE\u22EE");
       handle.addEventListener("click", (event) => {
         event.preventDefault();
@@ -3929,7 +4186,7 @@ function addAppearanceButton({ app, obsidian: obsidian5, parent, title, state, o
 }
 
 // src/template-provider.ts
-function createTemplateProvider({ app, TFile: TFile3, getSettings, normalizeFolder, readTemplatePath }) {
+function createTemplateProvider({ app, TFile: TFile4, getSettings, normalizeFolder, readTemplatePath }) {
   const lexisPathFor = (folder) => {
     const settings = getSettings();
     const normalized = normalizeFolder(folder);
@@ -3955,7 +4212,7 @@ function createTemplateProvider({ app, TFile: TFile3, getSettings, normalizeFold
     const match = templaterTemplateFor(folder);
     if (!match) return app.vault.create(path, transform(fallbackContent));
     const templateFile = app.vault.getAbstractFileByPath(match.path);
-    if (!(templateFile instanceof TFile3)) return app.vault.create(path, transform(fallbackContent));
+    if (!(templateFile instanceof TFile4)) return app.vault.create(path, transform(fallbackContent));
     const file = await app.vault.create(path, "");
     await match.plugin.templater.write_template_to_file(templateFile, file);
     if (app.vault.process) await app.vault.process(file, transform);
@@ -4150,6 +4407,11 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
               void onTpl(v);
             });
           }
+          new obsidian5.ToggleComponent(row).setTooltip(t("settings.showDictionaryHighlight")).setValue(d.highlight !== false).onChange(async (value) => {
+            d.highlight = value;
+            refresh();
+            await save();
+          });
           const globalColor = this.plugin.settings.highlightColor || accentHex;
           addAppearanceButton2({
             app: this.app,
@@ -4183,7 +4445,7 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
         addDict.setCssStyles({ marginTop: "2px" });
         addDict.addEventListener("click", () => {
           void (async () => {
-            this.plugin.settings.dicts.push({ folder: "", template: "" });
+            this.plugin.settings.dicts.push({ folder: "", template: "", highlight: true });
             await save();
             renderDicts();
           })();
@@ -4652,7 +4914,53 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
       occurrenceSetting.settingEl.addClass("lexis-template-setting");
       const occurrenceTextarea = occurrenceSetting.controlEl.querySelector("textarea");
       if (occurrenceTextarea) occurrenceTextarea.rows = 4;
+      new Setting3(addSection).setName(t("settings.annotationHeading")).setDesc(t("settings.annotationHeadingDesc")).addText((input) => input.setPlaceholder("#### \u6279\u6CE8").setValue(this.plugin.settings.annotationHeading).onChange(async (value) => {
+        this.plugin.settings.annotationHeading = value;
+        await save();
+      }));
+      new Setting3(addSection).setName(t("settings.annotationImageLocation")).setDesc(t("settings.annotationImageLocationDesc")).addDropdown((dropdown) => dropdown.addOption("obsidian", t("settings.annotationImageObsidian")).addOption("custom", t("settings.annotationImageCustom")).setValue(this.plugin.settings.annotationImageLocation || "obsidian").onChange(async (value) => {
+        this.plugin.settings.annotationImageLocation = value === "custom" ? "custom" : "obsidian";
+        await save();
+        this.update();
+      }));
+      if (this.plugin.settings.annotationImageLocation === "custom") {
+        new Setting3(addSection).setName(t("settings.annotationImageFolder")).setDesc(t("settings.annotationImageFolderDesc")).addText((input) => {
+          const apply = async (value) => {
+            this.plugin.settings.annotationImageFolder = value.trim();
+            await save();
+          };
+          input.setPlaceholder("Attachments/lexis").setValue(this.plugin.settings.annotationImageFolder || "").onChange(apply);
+          if (hasSuggest) new PathSuggest(this.app, input.inputEl, () => folders, (value) => {
+            input.setValue(value);
+            void apply(value);
+          });
+        });
+      }
       const fsrsSection = this.section(containerEl, t("settings.review"));
+      const syntaxTemplates2 = [
+        ["flashcardInlineTemplate", "settings.flashcardInline", "{{question}}::{{answer}}"],
+        ["flashcardBidirectionalTemplate", "settings.flashcardBidirectional", "{{sideA}}:::{{sideB}}"],
+        ["flashcardBlockTemplate", "settings.flashcardBlock", "{{question}}??\n{{answer}}"],
+        ["flashcardClozeTemplate", "settings.flashcardCloze", "=={{answer}}=="]
+      ];
+      for (const [field, label, placeholder] of syntaxTemplates2) {
+        const setting = new Setting3(fsrsSection).setName(t(label)).setDesc(t("settings.flashcardTemplateDesc"));
+        const saveTemplate = async (value) => {
+          this.plugin.settings[field] = value;
+          await save();
+        };
+        if (field === "flashcardBlockTemplate") {
+          setting.addTextArea((input) => input.setPlaceholder(placeholder).setValue(this.plugin.settings[field]).onChange(saveTemplate));
+          const textarea = setting.controlEl.querySelector("textarea");
+          if (textarea) textarea.rows = 2;
+        } else setting.addText((input) => input.setPlaceholder(placeholder).setValue(this.plugin.settings[field]).onChange(saveTemplate));
+        setting.addExtraButton((button) => button.setIcon("reset").setTooltip(t("settings.resetTemplate")).onClick(async () => {
+          const value = DEFAULT_SETTINGS2[field];
+          this.plugin.settings[field] = value;
+          await save();
+          this.update();
+        }));
+      }
       new Setting3(fsrsSection).setName(t("settings.retention")).setDesc(t("settings.retentionDesc")).addSlider((s) => s.setLimits(0.8, 0.97, 0.01).setValue(this.plugin.settings.requestRetention).onChange(async (v) => {
         this.plugin.settings.requestRetention = v;
         await save();
@@ -4678,7 +4986,7 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
         this.plugin.settings.reviewBottomSpace = v;
         await save();
       }));
-      new Setting3(fsrsSection).setName(t("home.start")).addButton((b) => b.setButtonText(t("settings.openReview")).setCta().onClick(() => this.plugin.openReview()));
+      new Setting3(fsrsSection).setName(t("home.start")).addButton((b) => b.setButtonText(t("settings.openReview")).setCta().onClick(() => this.plugin.openHome()));
       new Setting3(fsrsSection).setName(t("settings.hoverFeedback")).setDesc(t("settings.hoverFeedbackDesc")).addToggle((t2) => t2.setValue(this.plugin.settings.hoverFeedback).onChange(async (v) => {
         this.plugin.settings.hoverFeedback = v;
         await save();
@@ -4692,10 +5000,6 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
         await save();
       }));
       const bridgeSection = this.section(containerEl, t("settings.bridge"), { desc: t("settings.bridgeDesc") });
-      new Setting3(bridgeSection).setName(t("settings.annotationHeading")).setDesc(t("settings.annotationHeadingDesc")).addText((t2) => t2.setPlaceholder("#### \u6279\u6CE8").setValue(this.plugin.settings.annotationHeading).onChange(async (v) => {
-        this.plugin.settings.annotationHeading = v;
-        await save();
-      }));
       new Setting3(bridgeSection).setName(t("settings.enableBridge")).addToggle((t2) => t2.setValue(this.plugin.settings.bridgeEnabled).onChange(async (v) => {
         this.plugin.settings.bridgeEnabled = v;
         if (v && !this.plugin.settings.bridgeToken) this.plugin.settings.bridgeToken = this.plugin.bridge.generateToken();
@@ -4741,6 +5045,443 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
     }
   };
 };
+
+// src/review-state.ts
+var cloneState = (state) => state ? { ...state } : null;
+function createReviewState({ todayStr, round2: round22 }) {
+  class ReviewState {
+    readSyntaxCardState(id) {
+      const state = this.settings.syntaxCardStates?.[id] || {};
+      return {
+        ...state,
+        history: Array.isArray(this.settings.reviewHistory?.[`syntax:${id}`]) ? this.settings.reviewHistory[`syntax:${id}`] : []
+      };
+    }
+    snapshotReviewItem(item) {
+      if (item.type === "note") return { note: cloneState(item.card) };
+      const syntax = {};
+      for (const id of item.syntax?.memberIds || []) syntax[id] = cloneState(this.settings.syntaxCardStates?.[id]);
+      return { syntax };
+    }
+    async applyReviewItemSchedule(item, schedule) {
+      const state = {
+        s: round22(schedule.s),
+        d: round22(schedule.d),
+        due: schedule.due,
+        last: todayStr(),
+        reps: schedule.reps,
+        lapses: schedule.lapses
+      };
+      if (item.type === "note") {
+        await this.app.fileManager.processFrontMatter(item.file, (frontmatter) => {
+          frontmatter["lexis-s"] = state.s;
+          frontmatter["lexis-d"] = state.d;
+          frontmatter["lexis-due"] = state.due;
+          frontmatter["lexis-last"] = state.last;
+          frontmatter["lexis-reps"] = state.reps;
+          frontmatter["lexis-lapses"] = state.lapses;
+        });
+        return;
+      }
+      for (const id of item.syntax?.memberIds || []) this.settings.syntaxCardStates[id] = { ...state };
+      await this.saveSettings();
+    }
+    async restoreReviewItem(item, snapshot) {
+      if (item.type === "note") {
+        const previous = snapshot.note;
+        await this.app.fileManager.processFrontMatter(item.file, (frontmatter) => {
+          if (previous?.s == null || Number.isNaN(Number(previous.s))) {
+            delete frontmatter["lexis-s"];
+            delete frontmatter["lexis-d"];
+            delete frontmatter["lexis-due"];
+            delete frontmatter["lexis-last"];
+            delete frontmatter["lexis-reps"];
+            delete frontmatter["lexis-lapses"];
+            return;
+          }
+          frontmatter["lexis-s"] = previous.s;
+          frontmatter["lexis-d"] = previous.d;
+          frontmatter["lexis-due"] = previous.due;
+          frontmatter["lexis-last"] = previous.last;
+          frontmatter["lexis-reps"] = previous.reps;
+          frontmatter["lexis-lapses"] = previous.lapses;
+        });
+        return;
+      }
+      for (const [id, state] of Object.entries(snapshot.syntax || {})) {
+        if (state) this.settings.syntaxCardStates[id] = { ...state };
+        else delete this.settings.syntaxCardStates[id];
+      }
+      await this.saveSettings();
+    }
+    async logReviewItem(item, schedule, grade, retentionBefore) {
+      const today = todayStr();
+      this.settings.reviewLog[today] = (this.settings.reviewLog[today] || 0) + 1;
+      const keys = item.type === "note" ? [item.file.path] : (item.syntax?.memberIds || []).map((id) => `syntax:${id}`);
+      for (const key of keys) {
+        const history = Array.isArray(this.settings.reviewHistory[key]) ? this.settings.reviewHistory[key] : [];
+        history.push({ date: today, s: round22(schedule.s), grade, retention: Math.round(Math.max(0, Math.min(1, retentionBefore)) * 100) });
+        this.settings.reviewHistory[key] = history.slice(-64);
+      }
+      await this.saveSettings();
+    }
+    async undoReviewItemLog(item) {
+      const today = todayStr();
+      if (this.settings.reviewLog[today]) {
+        this.settings.reviewLog[today]--;
+        if (this.settings.reviewLog[today] <= 0) delete this.settings.reviewLog[today];
+      }
+      const keys = item.type === "note" ? [item.file.path] : (item.syntax?.memberIds || []).map((id) => `syntax:${id}`);
+      for (const key of keys) {
+        const history = this.settings.reviewHistory[key];
+        if (Array.isArray(history) && history.length) history.pop();
+      }
+      await this.saveSettings();
+    }
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(ReviewState.prototype);
+  delete descriptors.constructor;
+  return descriptors;
+}
+
+// src/flashcard-syntax.ts
+var PLACEHOLDERS = {
+  question: "{{question}}",
+  answer: "{{answer}}",
+  sideA: "{{sideA}}",
+  sideB: "{{sideB}}"
+};
+var hashText = (value) => {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+};
+var stableId = (filePath, kind, front, back, occurrence = 0) => `syntax-${hashText([filePath, kind, front.trim(), back.trim(), occurrence].join(""))}`;
+var betweenVariables = (template, left, right) => {
+  const leftIndex = template.indexOf(left);
+  const rightIndex = template.indexOf(right, leftIndex + left.length);
+  if (leftIndex < 0 || rightIndex < 0 || rightIndex < leftIndex) return "";
+  return template.slice(leftIndex + left.length, rightIndex);
+};
+var maskExcludedLines = (markdown) => {
+  const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
+  let fence = "";
+  let frontmatter = lines[0]?.trim() === "---";
+  let comment = false;
+  return lines.map((line, index) => {
+    const trimmed = line.trim();
+    if (frontmatter) {
+      if (index > 0 && trimmed === "---") frontmatter = false;
+      return "";
+    }
+    if (fence) {
+      if (trimmed.startsWith(fence)) fence = "";
+      return "";
+    }
+    const fenceMatch = /^(```+|~~~+)/.exec(trimmed);
+    if (fenceMatch) {
+      fence = fenceMatch[1][0].repeat(fenceMatch[1].length);
+      return "";
+    }
+    if (comment) {
+      if (line.includes("-->")) comment = false;
+      return "";
+    }
+    const commentStart = line.indexOf("<!--");
+    if (commentStart >= 0) {
+      if (!line.slice(commentStart + 4).includes("-->")) comment = true;
+      return line.slice(0, commentStart);
+    }
+    return line;
+  });
+};
+var addCard = (cards, counts, filePath, kind, front, back, line, groupSource = "", combinedFront) => {
+  const base = [kind, front.trim(), back.trim()].join("");
+  const occurrence = counts.get(base) || 0;
+  counts.set(base, occurrence + 1);
+  const id = stableId(filePath, kind, front, back, occurrence);
+  cards.push({
+    id,
+    groupId: `group-${hashText([filePath, kind, groupSource || base, line].join(""))}`,
+    kind,
+    front: front.trim(),
+    back: back.trim(),
+    combinedFront: combinedFront?.trim(),
+    line
+  });
+};
+function parseSyntaxCards(markdown, filePath, templates) {
+  const rawLines = markdown.replace(/\r\n?/g, "\n").split("\n");
+  const lines = maskExcludedLines(markdown);
+  const cards = [];
+  const counts = /* @__PURE__ */ new Map();
+  const consumed = /* @__PURE__ */ new Set();
+  const blockBetween = betweenVariables(templates.block || "", PLACEHOLDERS.question, PLACEHOLDERS.answer);
+  const blockMarker = blockBetween.trim();
+  const markerOnOwnLine = /^\s*\n[\s\S]*\n\s*$/.test(blockBetween);
+  if (blockMarker) {
+    for (let index = 0; index < lines.length; index++) {
+      const line = lines[index];
+      let question = "";
+      let answerStart = index + 1;
+      let questionStart = index;
+      if (markerOnOwnLine && line.trim() === blockMarker) {
+        let start = index - 1;
+        while (start >= 0 && lines[start].trim()) start--;
+        questionStart = start + 1;
+        question = rawLines.slice(questionStart, index).join("\n").trim();
+      } else if (!markerOnOwnLine && line.trimEnd().endsWith(blockMarker)) {
+        question = line.trimEnd().slice(0, -blockMarker.length).trim();
+      } else continue;
+      let answerEnd = answerStart;
+      while (answerEnd < rawLines.length && rawLines[answerEnd].trim()) answerEnd++;
+      const answer = rawLines.slice(answerStart, answerEnd).join("\n").trim();
+      if (!question || !answer) continue;
+      for (let used = questionStart; used < answerEnd; used++) consumed.add(used);
+      addCard(cards, counts, filePath, "block", question, answer, questionStart, `${question}
+${answer}`);
+      index = Math.max(index, answerEnd - 1);
+    }
+  }
+  const bidirectionalDelimiter = betweenVariables(templates.bidirectional || "", PLACEHOLDERS.sideA, PLACEHOLDERS.sideB).trim();
+  const inlineDelimiter = betweenVariables(templates.inline || "", PLACEHOLDERS.question, PLACEHOLDERS.answer).trim();
+  for (let index = 0; index < lines.length; index++) {
+    if (consumed.has(index) || !lines[index].trim()) continue;
+    const line = lines[index];
+    if (bidirectionalDelimiter && line.includes(bidirectionalDelimiter)) {
+      const at = line.indexOf(bidirectionalDelimiter);
+      const sideA = line.slice(0, at).trim();
+      const sideB = line.slice(at + bidirectionalDelimiter.length).trim();
+      if (sideA && sideB) {
+        const group = `${sideA}${bidirectionalDelimiter}${sideB}`;
+        addCard(cards, counts, filePath, "bidirectional", sideA, sideB, index, group);
+        addCard(cards, counts, filePath, "bidirectional", sideB, sideA, index, group);
+        consumed.add(index);
+      }
+      continue;
+    }
+    if (inlineDelimiter && line.includes(inlineDelimiter)) {
+      const at = line.indexOf(inlineDelimiter);
+      const question = line.slice(0, at).trim();
+      const answer = line.slice(at + inlineDelimiter.length).trim();
+      if (question && answer) {
+        addCard(cards, counts, filePath, "inline", question, answer, index);
+        consumed.add(index);
+      }
+    }
+  }
+  const clozeTemplate = templates.cloze || "";
+  const answerAt = clozeTemplate.indexOf(PLACEHOLDERS.answer);
+  const clozeOpen = answerAt >= 0 ? clozeTemplate.slice(0, answerAt) : "";
+  const clozeClose = answerAt >= 0 ? clozeTemplate.slice(answerAt + PLACEHOLDERS.answer.length) : "";
+  if (clozeOpen && clozeClose) {
+    for (let index = 0; index < lines.length; index++) {
+      if (!lines[index].trim()) continue;
+      const source = lines[index];
+      const ranges = [];
+      let cursor = 0;
+      while (cursor < source.length) {
+        const start = source.indexOf(clozeOpen, cursor);
+        if (start < 0) break;
+        const contentStart = start + clozeOpen.length;
+        const close = source.indexOf(clozeClose, contentStart);
+        if (close < 0) break;
+        const answer = source.slice(contentStart, close).trim();
+        if (answer) ranges.push({ start, end: close + clozeClose.length, answer });
+        cursor = close + clozeClose.length;
+      }
+      if (!ranges.length) continue;
+      const combinedFront = ranges.reduceRight((value, range) => value.slice(0, range.start) + "[\u2026]" + value.slice(range.end), source);
+      ranges.forEach((range) => {
+        const front = source.slice(0, range.start) + "[\u2026]" + source.slice(range.end);
+        addCard(cards, counts, filePath, "cloze", front, source, index, source, combinedFront);
+      });
+    }
+  }
+  return cards;
+}
+
+// src/review-queue.ts
+var isFresh = (card) => card.s == null || Number.isNaN(Number(card.s));
+var syntaxTemplates = (settings) => ({
+  inline: settings.flashcardInlineTemplate,
+  bidirectional: settings.flashcardBidirectionalTemplate,
+  block: settings.flashcardBlockTemplate,
+  cloze: settings.flashcardClozeTemplate
+});
+var representativeState = (states) => {
+  if (!states.length || states.some(isFresh)) return {};
+  return [...states].sort((left, right) => String(left.due || "").localeCompare(String(right.due || "")))[0];
+};
+var stripFrontmatter = (markdown) => markdown.replace(/^---\s*\n[\s\S]*?\n---(?:\n|$)/, "");
+var countNoteWords = (markdown) => {
+  const content = stripFrontmatter(markdown);
+  const cjkPattern = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu;
+  const cjkCount = content.match(cjkPattern)?.length || 0;
+  const otherWords = content.replace(cjkPattern, " ").match(/[\p{L}\p{N}]+(?:['’_-][\p{L}\p{N}]+)*/gu)?.length || 0;
+  return cjkCount + otherWords;
+};
+function createReviewQueue({ todayStr }) {
+  class ReviewQueue {
+    collectReviewFolders() {
+      const folders = /* @__PURE__ */ new Set();
+      for (const file of this.app.vault.getMarkdownFiles()) {
+        let path = file.path;
+        for (let slash = path.lastIndexOf("/"); slash > 0; slash = path.lastIndexOf("/")) {
+          path = path.slice(0, slash);
+          folders.add(path);
+        }
+      }
+      return [...folders].sort((left, right) => left.localeCompare(right));
+    }
+    collectReviewTags() {
+      const tags = /* @__PURE__ */ new Set();
+      for (const file of this.app.vault.getMarkdownFiles()) for (const tag of this.getTags(file)) tags.add(tag);
+      return [...tags].sort((left, right) => left.localeCompare(right));
+    }
+    reviewScopeFiles(options) {
+      const scope = options.scope || "vocab";
+      let files = this.app.vault.getMarkdownFiles();
+      if (scope === "vocab") files = files.filter((file) => this.inVocabFolder(file.path));
+      if (scope === "folder") {
+        const folder = this.normalizeFolder(options.folder || "");
+        if (folder) files = files.filter((file) => this.inScope(file.path, [folder]));
+      }
+      if (scope === "tag") {
+        const tag = String(options.tag || "").toLowerCase().replace(/^#/, "");
+        files = tag ? files.filter((file) => this.getTags(file).has(tag)) : [];
+      }
+      if (scope === "current") files = files.filter((file) => file.path === options.file);
+      return files.filter((file) => {
+        const lifecycle = this.readLifecycle(file);
+        return !lifecycle.archived && !lifecycle.retired;
+      });
+    }
+    syntaxItems(file, cards, clozeMode) {
+      const result = [];
+      const combinedGroups = /* @__PURE__ */ new Map();
+      for (const syntax of cards) {
+        if (syntax.kind === "cloze" && clozeMode === "combined") {
+          const group = combinedGroups.get(syntax.groupId) || [];
+          group.push(syntax);
+          combinedGroups.set(syntax.groupId, group);
+          continue;
+        }
+        result.push({
+          type: "syntax",
+          file,
+          card: this.readSyntaxCardState(syntax.id),
+          syntax: { id: syntax.id, memberIds: [syntax.id], kind: syntax.kind, front: syntax.front, back: syntax.back, line: syntax.line }
+        });
+      }
+      for (const group of combinedGroups.values()) {
+        const first = group[0];
+        const memberIds = group.map((card) => card.id);
+        result.push({
+          type: "syntax",
+          file,
+          card: representativeState(memberIds.map((id) => this.readSyntaxCardState(id))),
+          syntax: { id: first.groupId, memberIds, kind: "cloze", front: first.combinedFront || first.front, back: first.back, line: first.line }
+        });
+      }
+      return result;
+    }
+    async migrateSyntaxCardPath(file, oldPath) {
+      if (file.extension !== "md" || !oldPath.toLowerCase().endsWith(".md")) return;
+      let markdown = "";
+      try {
+        markdown = await this.app.vault.cachedRead(file);
+      } catch {
+        return;
+      }
+      const templates = syntaxTemplates(this.settings);
+      const previous = parseSyntaxCards(markdown, oldPath, templates);
+      const current = parseSyntaxCards(markdown, file.path, templates);
+      let changed = false;
+      for (let index = 0; index < Math.min(previous.length, current.length); index++) {
+        const before = previous[index], after = current[index];
+        if (before.kind !== after.kind || before.front !== after.front || before.back !== after.back) continue;
+        const state = this.settings.syntaxCardStates[before.id];
+        if (state && !this.settings.syntaxCardStates[after.id]) {
+          this.settings.syntaxCardStates[after.id] = state;
+          delete this.settings.syntaxCardStates[before.id];
+          changed = true;
+        }
+        const history = this.settings.reviewHistory[`syntax:${before.id}`];
+        if (history && !this.settings.reviewHistory[`syntax:${after.id}`]) {
+          this.settings.reviewHistory[`syntax:${after.id}`] = history;
+          delete this.settings.reviewHistory[`syntax:${before.id}`];
+          changed = true;
+        }
+      }
+      if (changed) await this.saveSettings();
+    }
+    async buildQueue(options = {}) {
+      const resolved = options || {};
+      const content = resolved.content || "notes";
+      const sortBy = resolved.sortBy || "due";
+      const direction = resolved.sortDirection === "desc" ? -1 : 1;
+      const files = this.reviewScopeFiles(resolved);
+      const markdownByPath = /* @__PURE__ */ new Map();
+      if (content !== "notes" || sortBy === "wordCount") {
+        await Promise.all(files.map(async (file) => {
+          try {
+            markdownByPath.set(file.path, await this.app.vault.cachedRead(file));
+          } catch {
+            markdownByPath.set(file.path, "");
+          }
+        }));
+      }
+      const candidates = [];
+      if (content === "notes" || content === "both") {
+        for (const file of files) candidates.push({ type: "note", file, card: this.readCard(file) });
+      }
+      if (content === "syntax" || content === "both") {
+        const templates = syntaxTemplates(this.settings);
+        const parsed = files.map((file) => this.syntaxItems(file, parseSyntaxCards(markdownByPath.get(file.path) || "", file.path, templates), resolved.clozeMode || "separate"));
+        for (const items of parsed) candidates.push(...items);
+      }
+      const today = todayStr();
+      const due = candidates.filter((item) => !isFresh(item.card) && (!item.card.due || String(item.card.due).slice(0, 10) <= today));
+      const fresh = candidates.filter((item) => isFresh(item.card));
+      let queue = due.concat(fresh);
+      if (sortBy === "random") {
+        for (let index = queue.length - 1; index > 0; index--) {
+          const target = Math.floor(Math.random() * (index + 1));
+          [queue[index], queue[target]] = [queue[target], queue[index]];
+        }
+      } else {
+        const metric = (item, key2) => {
+          if (key2 === "due") return item.card.due ? String(item.card.due).slice(0, 10) : null;
+          if (key2 === "wordCount") return countNoteWords(markdownByPath.get(item.file.path) || "");
+          if (key2 === "modified") return item.file.stat.mtime;
+          if (key2 === "created") return item.file.stat.ctime;
+          const frequency = this.freqVal(item.file);
+          return Number.isFinite(frequency) ? frequency : null;
+        };
+        const key = sortBy;
+        queue.sort((left, right) => {
+          const leftValue = metric(left, key), rightValue = metric(right, key);
+          if (leftValue == null && rightValue == null) return left.file.path.localeCompare(right.file.path);
+          if (leftValue == null) return 1;
+          if (rightValue == null) return -1;
+          const compared = typeof leftValue === "number" && typeof rightValue === "number" ? leftValue - rightValue : String(leftValue).localeCompare(String(rightValue));
+          return compared ? compared * direction : left.file.path.localeCompare(right.file.path);
+        });
+      }
+      const newLimit = Math.max(0, this.settings.newPerDay ?? 20);
+      let admittedFresh = 0;
+      queue = queue.filter((item) => !isFresh(item.card) || admittedFresh++ < newLimit);
+      return queue.slice(0, this.settings.maxReviewsPerSession || 200);
+    }
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(ReviewQueue.prototype);
+  delete descriptors.constructor;
+  return descriptors;
+}
 
 // src/workspace-documents.ts
 var WorkspaceDocuments = class {
@@ -4841,19 +5582,138 @@ var LexisRestoreModal = class extends import_obsidian4.Modal {
   }
 };
 
-// src/shared-utils.ts
+// src/annotation-images.ts
 var import_obsidian5 = require("obsidian");
+var IMAGE_MIME = {
+  avif: "image/avif",
+  bmp: "image/bmp",
+  gif: "image/gif",
+  heic: "image/heic",
+  heif: "image/heif",
+  jpeg: "image/jpeg",
+  jpg: "image/jpeg",
+  png: "image/png",
+  svg: "image/svg+xml",
+  webp: "image/webp"
+};
+function attachmentName(file) {
+  const clean = file.name.replace(/[\\/:*?"<>|#[\]]/g, "-").trim();
+  if (/\.[a-z0-9]+$/i.test(clean)) return clean;
+  const extension = Object.entries(IMAGE_MIME).find(([, mime]) => mime === file.type)?.[0] || "png";
+  return `${clean || "image"}.${extension}`;
+}
+async function ensureFolder(app, folder) {
+  let current = "";
+  for (const part of (0, import_obsidian5.normalizePath)(folder).split("/").filter(Boolean)) {
+    current = current ? `${current}/${part}` : part;
+    if (!app.vault.getAbstractFileByPath(current)) await app.vault.createFolder(current);
+  }
+}
+function uniquePath(app, folder, filename) {
+  const dot = filename.lastIndexOf(".");
+  const stem = dot > 0 ? filename.slice(0, dot) : filename;
+  const extension = dot > 0 ? filename.slice(dot) : "";
+  let path = (0, import_obsidian5.normalizePath)(`${folder}/${filename}`);
+  for (let index = 2; app.vault.getAbstractFileByPath(path); index++) {
+    path = (0, import_obsidian5.normalizePath)(`${folder}/${stem} ${index}${extension}`);
+  }
+  return path;
+}
+async function saveAnnotationImage(app, settings, wordFile, image) {
+  const filename = attachmentName(image);
+  let path;
+  if (settings.annotationImageLocation === "custom") {
+    const folder = (0, import_obsidian5.normalizePath)(settings.annotationImageFolder || "");
+    if (!folder) throw new Error("Custom annotation image folder is empty");
+    await ensureFolder(app, folder);
+    path = uniquePath(app, folder, filename);
+  } else {
+    path = await app.fileManager.getAvailablePathForAttachment(filename, wordFile.path);
+  }
+  return app.vault.createBinary(path, await image.arrayBuffer());
+}
+async function vaultImageDataUrl(app, linkPath, sourcePath) {
+  const target = String(linkPath || "").split("|")[0].trim();
+  if (!target) return null;
+  const file = app.metadataCache.getFirstLinkpathDest(target, sourcePath);
+  if (!(file instanceof import_obsidian5.TFile)) return null;
+  const mime = IMAGE_MIME[file.extension.toLowerCase()];
+  if (!mime) return null;
+  const bytes = await app.vault.readBinary(file);
+  const view = new Uint8Array(bytes);
+  let binary = "";
+  for (let offset = 0; offset < view.length; offset += 32768) {
+    binary += String.fromCharCode(...view.subarray(offset, offset + 32768));
+  }
+  return `data:${mime};base64,${btoa(binary)}`;
+}
+
+// src/shared-utils.ts
+var import_obsidian6 = require("obsidian");
+
+// src/match-text.ts
+var ASCII_WORD = /[A-Za-z0-9_]/;
+var EAST_ASIAN = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+var HORIZONTAL_SPACE = /[ \t\u00a0\u3000]/;
+var OPTIONAL_MIXED_SPACE = "[ \\t\\u00a0\\u3000]*";
 var escapeRe = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+var isMixedScriptBoundary = (left, right) => ASCII_WORD.test(left) && EAST_ASIAN.test(right) || EAST_ASIAN.test(left) && ASCII_WORD.test(right);
+function compactMixedScriptSpacing(value) {
+  const characters = [...String(value || "")];
+  let result = "";
+  let previous = "";
+  for (let index = 0; index < characters.length; ) {
+    const character = characters[index];
+    if (!HORIZONTAL_SPACE.test(character)) {
+      result += character;
+      previous = character;
+      index++;
+      continue;
+    }
+    let end = index + 1;
+    while (end < characters.length && HORIZONTAL_SPACE.test(characters[end])) end++;
+    const next = characters[end] || "";
+    if (!isMixedScriptBoundary(previous, next)) result += characters.slice(index, end).join("");
+    index = end;
+  }
+  return result;
+}
+function flexibleMixedScriptSource(value) {
+  const characters = [...String(value || "")];
+  let source = "";
+  let previous = "";
+  let boundaryAlreadyAdded = false;
+  for (let index = 0; index < characters.length; ) {
+    const character = characters[index];
+    if (HORIZONTAL_SPACE.test(character)) {
+      let end = index + 1;
+      while (end < characters.length && HORIZONTAL_SPACE.test(characters[end])) end++;
+      const next = characters[end] || "";
+      boundaryAlreadyAdded = isMixedScriptBoundary(previous, next);
+      source += boundaryAlreadyAdded ? OPTIONAL_MIXED_SPACE : escapeRe(characters.slice(index, end).join(""));
+      index = end;
+      continue;
+    }
+    if (!boundaryAlreadyAdded && previous && isMixedScriptBoundary(previous, character)) source += OPTIONAL_MIXED_SPACE;
+    source += escapeRe(character);
+    previous = character;
+    boundaryAlreadyAdded = false;
+    index++;
+  }
+  return source;
+}
 var boundedSource = (word) => {
   const leftBoundary = /^[A-Za-z0-9_]/.test(word) ? "\\b" : "";
   const rightBoundary = /[A-Za-z0-9_]$/.test(word) ? "\\b" : "";
-  return leftBoundary + escapeRe(word) + rightBoundary;
+  return leftBoundary + flexibleMixedScriptSource(word) + rightBoundary;
 };
+
+// src/shared-utils.ts
 var escapeHtml = (value) => String(value == null ? "" : value).replace(
   /[&<>"]/g,
   (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[character] || character
 );
-var renderLexisMarkdown = (app, markdown, element, sourcePath, component) => import_obsidian5.MarkdownRenderer.render(app, String(markdown == null ? "" : markdown).replace(/\u00a0/g, " "), element, sourcePath, component);
+var renderLexisMarkdown = (app, markdown, element, sourcePath, component) => import_obsidian6.MarkdownRenderer.render(app, String(markdown == null ? "" : markdown).replace(/\u00a0/g, " "), element, sourcePath, component);
 var round2 = (value) => Math.round(value * 100) / 100;
 function cssColorToHex(color, document2) {
   if (!color) return "#888888";
@@ -4891,15 +5751,15 @@ var LexisReviewView = createReviewView({
   todayStr: todayString,
   renderLexisMarkdown
 });
-var LexisBridge = createBridgeServer({ Notice: import_obsidian6.Notice, Platform: import_obsidian6.Platform });
+var LexisBridge = createBridgeServer({ Notice: import_obsidian7.Notice, Platform: import_obsidian7.Platform });
 var errorMessage4 = (error) => error instanceof Error ? error.message : typeof error === "string" ? error : "Unknown error";
-var LexisPlugin = class extends import_obsidian6.Plugin {
+var LexisPlugin = class extends import_obsidian7.Plugin {
   async onload() {
     await this.loadSettings();
     this.i18n = createI18n(() => this.settings.language);
     this.templateProvider = createTemplateProvider({
       app: this.app,
-      TFile: import_obsidian6.TFile,
+      TFile: import_obsidian7.TFile,
       getSettings: () => this.settings,
       normalizeFolder: (folder) => this.normalizeFolder(folder),
       readTemplatePath: (path) => this.readTemplatePath(path)
@@ -4909,6 +5769,8 @@ var LexisPlugin = class extends import_obsidian6.Plugin {
     this.vocabPaths = /* @__PURE__ */ new Set();
     this.stats = { words: 0, aliases: 0, inlineEntries: 0, due: 0 };
     this._pattern = null;
+    this._indexKeysByCompact = /* @__PURE__ */ new Map();
+    this._matchKeysByCompact = /* @__PURE__ */ new Map();
     this._rebuildTimer = null;
     this._popover = null;
     this._popoverComp = null;
@@ -4934,7 +5796,7 @@ var LexisPlugin = class extends import_obsidian6.Plugin {
     this._reviewSessions = /* @__PURE__ */ new WeakMap();
     await this.loadEncounters();
     this.registerEvent(this.app.workspace.on("file-open", (file) => {
-      if (file instanceof import_obsidian6.TFile && this.inVocabFolder(file.path)) this.recordEncounter(file, "open");
+      if (file instanceof import_obsidian7.TFile && this.inVocabFolder(file.path)) this.recordEncounter(file, "open");
       window.requestAnimationFrame(() => this.syncActivePageHighlightState());
     }));
     this.statusBarEl = this.addStatusBarItem();
@@ -4944,7 +5806,7 @@ var LexisPlugin = class extends import_obsidian6.Plugin {
       this.registerDomEvent(this.statusBarEl, "click", () => this.rebuildIndex(true));
     }
     this.addCommand({ id: "rebuild-index", name: this.t("command.rebuild"), callback: () => this.rebuildIndex(true) });
-    this.addCommand({ id: "open-review", name: this.t("command.review"), callback: () => this.openReview() });
+    this.addCommand({ id: "open-review", name: this.t("command.review"), callback: () => this.openHome() });
     this.addCommand({ id: "add-selected-word", name: this.t("command.addSelection"), callback: () => this.addSelectedWordCommand() });
     this.addCommand({ id: "open-home", name: this.t("command.home"), callback: () => this.openHome() });
     this.addCommand({
@@ -4959,7 +5821,7 @@ var LexisPlugin = class extends import_obsidian6.Plugin {
       }
     });
     this.addRibbonIcon("graduation-cap", this.t("ribbon.home"), () => this.openHome());
-    this.addRibbonIcon("brain", this.t("ribbon.review"), () => this.openReview());
+    this.addRibbonIcon("brain", this.t("ribbon.review"), () => this.openHome());
     this.addCommand({
       id: "archive-word",
       name: this.t("command.archive"),
@@ -4967,7 +5829,7 @@ var LexisPlugin = class extends import_obsidian6.Plugin {
         const file = this.app.workspace.getActiveFile();
         if (!file || !this.inVocabFolder(file.path) || this.readLifecycle(file).archived) return false;
         if (checking) return true;
-        void this.setArchived(file, true).then(() => new import_obsidian6.Notice(this.t("notice.archived", { word: file.basename })));
+        void this.setArchived(file, true).then(() => new import_obsidian7.Notice(this.t("notice.archived", { word: file.basename })));
         return true;
       }
     });
@@ -4990,7 +5852,7 @@ var LexisPlugin = class extends import_obsidian6.Plugin {
         if (!file || !this.inVocabFolder(file.path)) return false;
         if (checking) return true;
         const pinned = this.readLifecycle(file).pinned;
-        void this.setPinned(file, !pinned).then(() => new import_obsidian6.Notice(this.t(!pinned ? "notice.pinned" : "notice.unpinned", { word: file.basename })));
+        void this.setPinned(file, !pinned).then(() => new import_obsidian7.Notice(this.t(!pinned ? "notice.pinned" : "notice.unpinned", { word: file.basename })));
         return true;
       }
     });
@@ -5000,25 +5862,25 @@ var LexisPlugin = class extends import_obsidian6.Plugin {
       callback: async () => {
         const files = this.app.vault.getMarkdownFiles().filter((f) => this.inVocabFolder(f.path) && this.getTags(f).has("\u719F\u6089") && !this.readLifecycle(f).archived && !this.readLifecycle(f).retired);
         if (!files.length) {
-          new import_obsidian6.Notice(this.t("notice.noFamiliar"));
+          new import_obsidian7.Notice(this.t("notice.noFamiliar"));
           return;
         }
         for (const f of files) await this.app.fileManager.processFrontMatter(f, (fm) => {
           fm["lexis-status"] = "archived";
         });
         await this.rebuildIndex(false);
-        new import_obsidian6.Notice(this.t("notice.migrated", { count: files.length }));
+        new import_obsidian7.Notice(this.t("notice.migrated", { count: files.length }));
       }
     });
     this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => {
-      if (!(file instanceof import_obsidian6.TFile) || !this.inVocabFolder(file.path)) return;
+      if (!(file instanceof import_obsidian7.TFile) || !this.inVocabFolder(file.path)) return;
       const { archived, pinned } = this.readLifecycle(file);
       menu.addItem((it) => it.setTitle(this.t(archived ? "menu.restore" : "menu.archive")).setIcon(archived ? "archive-restore" : "archive").onClick(() => {
         if (archived) new LexisRestoreModal(this.app, this, file).open();
-        else void this.setArchived(file, true).then(() => new import_obsidian6.Notice(this.t("notice.archived", { word: file.basename })));
+        else void this.setArchived(file, true).then(() => new import_obsidian7.Notice(this.t("notice.archived", { word: file.basename })));
       }));
       menu.addItem((it) => it.setTitle(this.t(pinned ? "menu.unpin" : "menu.pin")).setIcon(pinned ? "pin-off" : "pin").onClick(() => {
-        void this.setPinned(file, !pinned).then(() => new import_obsidian6.Notice(this.t(!pinned ? "notice.pinned" : "notice.unpinned", { word: file.basename })));
+        void this.setPinned(file, !pinned).then(() => new import_obsidian7.Notice(this.t(!pinned ? "notice.pinned" : "notice.unpinned", { word: file.basename })));
       }));
     }));
     this.registerView(LEXIS_REVIEW_VIEW, (leaf) => new LexisReviewView(leaf, this));
@@ -5062,18 +5924,21 @@ var LexisPlugin = class extends import_obsidian6.Plugin {
       this.syncActivePageHighlightState();
     });
     this.registerEvent(this.app.vault.on("create", (f) => {
-      if (f instanceof import_obsidian6.TFile) this.maybeRebuild(f);
+      if (f instanceof import_obsidian7.TFile) this.maybeRebuild(f);
     }));
     this.registerEvent(this.app.vault.on("delete", (f) => {
-      if (f instanceof import_obsidian6.TFile) this.maybeRebuild(f);
+      if (f instanceof import_obsidian7.TFile) this.maybeRebuild(f);
     }));
     this.registerEvent(this.app.vault.on("rename", (f, old) => {
-      if (f instanceof import_obsidian6.TFile) this.maybeRebuild(f, old);
+      if (f instanceof import_obsidian7.TFile) {
+        this.maybeRebuild(f, old);
+        void this.migrateSyntaxCardPath(f, old);
+      }
     }));
     this.registerEvent(this.app.vault.on("modify", (file) => {
       this._occCache.clear();
-      if (file instanceof import_obsidian6.TFile && file.extension === "pdf") this.occurrenceSearch.invalidatePdf(file.path);
-      if (file instanceof import_obsidian6.TFile && this.isInlineSourceFile(file) || this.inlineSourcePaths?.has(file.path)) this.scheduleRebuild();
+      if (file instanceof import_obsidian7.TFile && file.extension === "pdf") this.occurrenceSearch.invalidatePdf(file.path);
+      if (file instanceof import_obsidian7.TFile && this.isInlineSourceFile(file) || this.inlineSourcePaths?.has(file.path)) this.scheduleRebuild();
     }));
     this.registerEvent(this.app.metadataCache.on("changed", (file) => {
       if (this.vocabPaths.has(file.path) || this.isVocabFile(file) || this.isInlineSourceFile(file) || this.inlineSourcePaths?.has(file?.path)) this.scheduleRebuild();
@@ -5141,6 +6006,7 @@ var LexisPlugin = class extends import_obsidian6.Plugin {
     if (!this.settings.inlineCategoryOrderByParent || typeof this.settings.inlineCategoryOrderByParent !== "object" || Array.isArray(this.settings.inlineCategoryOrderByParent)) this.settings.inlineCategoryOrderByParent = {};
     if (!this.settings.reviewLog) this.settings.reviewLog = {};
     if (!this.settings.reviewHistory || typeof this.settings.reviewHistory !== "object" || Array.isArray(this.settings.reviewHistory)) this.settings.reviewHistory = {};
+    if (!this.settings.syntaxCardStates || typeof this.settings.syntaxCardStates !== "object" || Array.isArray(this.settings.syntaxCardStates)) this.settings.syntaxCardStates = {};
     if (this.settings.vocabFolders == null) this.settings.vocabFolders = this.settings.vocabFolder != null ? this.settings.vocabFolder : "01-word";
     if (this.settings.excludeTags == null) this.settings.excludeTags = this.settings.excludeTag || "";
     if (this.settings.vocabTags == null) this.settings.vocabTags = "";
@@ -5284,7 +6150,7 @@ var LexisPlugin = class extends import_obsidian6.Plugin {
     for (const dest in out) {
       if (this.inVocabFolder(dest) && dest !== file.path) set.add(dest);
     }
-    return [...set].map((p) => this.app.vault.getAbstractFileByPath(p)).filter((file2) => file2 instanceof import_obsidian6.TFile);
+    return [...set].map((p) => this.app.vault.getAbstractFileByPath(p)).filter((file2) => file2 instanceof import_obsidian7.TFile);
   }
   parseSectionLinks(raw, known) {
     const clean = raw.replace(/```[\s\S]*?```/g, "").replace(/^---\n[\s\S]*?\n---/, "");
@@ -5322,7 +6188,7 @@ var LexisPlugin = class extends import_obsidian6.Plugin {
     for (const src in resolved) {
       if (!this.inVocabFolder(src) || src === file.path || !resolved[src][file.path]) continue;
       const srcFile = this.app.vault.getAbstractFileByPath(src);
-      if (!(srcFile instanceof import_obsidian6.TFile)) continue;
+      if (!(srcFile instanceof import_obsidian7.TFile)) continue;
       try {
         const raw = await this.app.vault.cachedRead(srcFile);
         let matched = false;
@@ -5350,7 +6216,7 @@ var LexisPlugin = class extends import_obsidian6.Plugin {
     for (const src in resolved) {
       if (this.inVocabFolder(src) && resolved[src] && resolved[src][file.path]) {
         const sf = this.app.vault.getAbstractFileByPath(src);
-        if (sf instanceof import_obsidian6.TFile) map.set(src, sf.basename);
+        if (sf instanceof import_obsidian7.TFile) map.set(src, sf.basename);
       }
     }
     if (!map.size) return;
@@ -5363,7 +6229,7 @@ var LexisPlugin = class extends import_obsidian6.Plugin {
     a.addEventListener("click", (e) => {
       e.preventDefault();
       const f = this.app.vault.getAbstractFileByPath(path);
-      if (f instanceof import_obsidian6.TFile) {
+      if (f instanceof import_obsidian7.TFile) {
         void this.app.workspace.getLeaf(false).openFile(f);
         this.removePopover();
       }
@@ -5424,7 +6290,7 @@ var LexisPlugin = class extends import_obsidian6.Plugin {
     if (sourceFile) {
       const curated = await this.getCuratedSourcePaths(wordFile);
       if (curated.has(sourceFile.basename.toLowerCase())) {
-        new import_obsidian6.Notice(this.t("notice.occurrenceExists"));
+        new import_obsidian7.Notice(this.t("notice.occurrenceExists"));
         return true;
       }
     }
@@ -5442,10 +6308,10 @@ var LexisPlugin = class extends import_obsidian6.Plugin {
         await this.app.vault.modify(wordFile, apply(d));
       }
       this.recordEncounter(wordFile, "add");
-      new import_obsidian6.Notice(this.t("notice.occurrenceSaved"));
+      new import_obsidian7.Notice(this.t("notice.occurrenceSaved"));
       return true;
     } catch (err) {
-      new import_obsidian6.Notice(this.t("notice.occurrenceFailed", { error: errorMessage4(err) }));
+      new import_obsidian7.Notice(this.t("notice.occurrenceFailed", { error: errorMessage4(err) }));
       return false;
     }
   }
@@ -5499,7 +6365,7 @@ var LexisPlugin = class extends import_obsidian6.Plugin {
   // key 用词条文件的标题(不是命中它的具体别名/拼法)——别名和标题指向同一个文件,相遇次数要合并,不能按 key 分裂计数
   // 短时间内反复触发同一类相遇(比如鼠标在同一个词上晃出晃入,连续弹好几次悬浮卡)只算一次,靠 (词+类型) 的冷却时间去重
   recordEncounter(file, type) {
-    if (!(file instanceof import_obsidian6.TFile)) return;
+    if (!(file instanceof import_obsidian7.TFile)) return;
     const k = file.basename.toLowerCase();
     const now = Date.now();
     const dedupKey = k + ":" + type;
@@ -5520,7 +6386,7 @@ var LexisPlugin = class extends import_obsidian6.Plugin {
   // 只证明"出现过",不证明"注意到了"。按「词+当天」去重,不是每次重渲染(滚动/切标签页/实时预览重算)都记一次。
   // 这个检查要挂在高亮渲染的热路径上(每个匹配到的 span 都会过一遍),所以只用一次 Set.has,不做更重的事。
   passiveEncounter(file) {
-    if (!(file instanceof import_obsidian6.TFile)) return;
+    if (!(file instanceof import_obsidian7.TFile)) return;
     const dayKey = file.path + "|" + todayString();
     if (this._passiveSeenToday.has(dayKey)) return;
     this._passiveSeenToday.add(dayKey);
@@ -5536,7 +6402,7 @@ var LexisPlugin = class extends import_obsidian6.Plugin {
   // 悬停 = 一次失败的提取(没想起来才要查)。这个词的到期日如果还很远,说明"排期偏晚了",拉近一点提醒尽快复习——
   // 只挪 lexis-due,绝不碰 stability/difficulty,也不伪造一次复习评分(FSRS 内部状态只能由真实复习事件驱动)。
   async hoverFeedback(file) {
-    if (!this.settings.hoverFeedback || !(file instanceof import_obsidian6.TFile)) return;
+    if (!this.settings.hoverFeedback || !(file instanceof import_obsidian7.TFile)) return;
     if (this.readLifecycle(file).archived) return;
     const fm = this.app.metadataCache.getFileCache(file)?.frontmatter || {};
     if (fm["lexis-s"] == null || !fm["lexis-due"]) return;
@@ -5590,36 +6456,6 @@ var LexisPlugin = class extends import_obsidian6.Plugin {
     const interval = FSRS.nextInterval(S, R);
     return { s: S, d: D, reps, lapses, interval, due: addDaysString(today, interval) };
   }
-  async applySchedule(file, sched) {
-    await this.app.fileManager.processFrontMatter(file, (fm) => {
-      fm["lexis-s"] = round2(sched.s);
-      fm["lexis-d"] = round2(sched.d);
-      fm["lexis-due"] = sched.due;
-      fm["lexis-last"] = todayString();
-      fm["lexis-reps"] = sched.reps;
-      fm["lexis-lapses"] = sched.lapses;
-    });
-  }
-  async logReview(file, sched, grade, retentionBefore) {
-    const t = todayString();
-    this.settings.reviewLog[t] = (this.settings.reviewLog[t] || 0) + 1;
-    if (file?.path) {
-      const history = Array.isArray(this.settings.reviewHistory[file.path]) ? this.settings.reviewHistory[file.path] : [];
-      history.push({ date: t, s: round2(sched.s), grade, retention: Math.round(Math.max(0, Math.min(1, retentionBefore)) * 100) });
-      this.settings.reviewHistory[file.path] = history.slice(-64);
-    }
-    await this.saveSettings();
-  }
-  async undoReviewLog(file) {
-    const t = todayString();
-    if (this.settings.reviewLog[t]) {
-      this.settings.reviewLog[t]--;
-      if (this.settings.reviewLog[t] <= 0) delete this.settings.reviewLog[t];
-    }
-    const history = file?.path && this.settings.reviewHistory[file.path];
-    if (Array.isArray(history) && history.length) history.pop();
-    await this.saveSettings();
-  }
   async getFirstExample(file) {
     try {
       const raw = await this.app.vault.cachedRead(file);
@@ -5669,43 +6505,6 @@ var LexisPlugin = class extends import_obsidian6.Plugin {
     }
     return { total, due, fresh };
   }
-  buildQueue(options = {}) {
-    options = options || {};
-    const today = todayString();
-    let files = this.app.vault.getMarkdownFiles().filter((f) => {
-      if (!this.inVocabFolder(f.path)) return false;
-      const lc = this.readLifecycle(f);
-      return !lc.archived && !lc.retired;
-    });
-    if (options.folder) {
-      const folder = this.normalizeFolder(options.folder);
-      files = files.filter((f) => this.inScope(f.path, [folder]));
-    }
-    if (options.tag) {
-      const tl = options.tag.toLowerCase();
-      files = files.filter((f) => this.getTags(f).has(tl));
-    }
-    const due = [], fresh = [];
-    for (const f of files) {
-      const card = this.readCard(f);
-      if (card.s == null || isNaN(Number(card.s))) fresh.push({ file: f, card });
-      else if (!card.due || String(card.due).slice(0, 10) <= today) due.push({ file: f, card });
-    }
-    let queue;
-    if (options.order === "frequency") {
-      queue = due.concat(fresh).sort((a, b) => this.freqVal(a.file) - this.freqVal(b.file));
-    } else if (options.order === "random") {
-      queue = due.concat(fresh);
-      for (let i = queue.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [queue[i], queue[j]] = [queue[j], queue[i]];
-      }
-    } else {
-      due.sort((a, b) => String(a.card.due || "").localeCompare(String(b.card.due || "")));
-      queue = due.concat(fresh.slice(0, this.settings.newPerDay || 20));
-    }
-    return queue.slice(0, this.settings.maxReviewsPerSession || 200);
-  }
   // ---------- 淘汰法庭(阶段 3) ----------
   // 硬条件筛子,不做加权评分:全部满足才入列,判决权在用户(淘汰/留下/已掌握三个按钮,见 LexisHomeView)。
   async buildRetireCandidates() {
@@ -5750,7 +6549,7 @@ var LexisPlugin = class extends import_obsidian6.Plugin {
     await this.app.workspace.revealLeaf(leaf);
     if (leaf.view instanceof LexisReviewView) {
       leaf.view.options = options || {};
-      leaf.view.refresh();
+      await leaf.view.refresh();
     }
   }
   saveReviewSession(leaf, state) {
@@ -5763,13 +6562,17 @@ var LexisPlugin = class extends import_obsidian6.Plugin {
     return state;
   }
   async openHome() {
+    const sourceFile = this.app.workspace.getActiveFile();
     let leaf = this.app.workspace.getLeavesOfType(LEXIS_HOME_VIEW)[0];
     if (!leaf) {
       leaf = this.app.workspace.getRightLeaf(false);
       await leaf.setViewState({ type: LEXIS_HOME_VIEW, active: true });
     }
     await this.app.workspace.revealLeaf(leaf);
-    if (leaf.view instanceof LexisHomeView) leaf.view.render();
+    if (leaf.view instanceof LexisHomeView) {
+      if (sourceFile) leaf.view.sourceFilePath = sourceFile.path;
+      leaf.view.render();
+    }
   }
   // ---------- 划词添加 ----------
   sanitizeName(name) {
@@ -5788,7 +6591,7 @@ var LexisPlugin = class extends import_obsidian6.Plugin {
     p = (p || "").trim();
     if (!p) return null;
     const f = this.app.vault.getAbstractFileByPath(p);
-    if (f instanceof import_obsidian6.TFile) {
+    if (f instanceof import_obsidian7.TFile) {
       try {
         return await this.app.vault.read(f);
       } catch {
@@ -5849,7 +6652,7 @@ var LexisPlugin = class extends import_obsidian6.Plugin {
       word = (sel ? sel.toString() : "").trim();
     }
     if (!word) {
-      new import_obsidian6.Notice(this.t("notice.selectWord"));
+      new import_obsidian7.Notice(this.t("notice.selectWord"));
       return;
     }
     void this.addWordFromSelection(word, editor, view);
@@ -5858,23 +6661,23 @@ var LexisPlugin = class extends import_obsidian6.Plugin {
     const clean = (word || "").trim();
     const fileName = this.sanitizeName(clean);
     if (!fileName) {
-      new import_obsidian6.Notice(this.t("notice.invalidWord"));
+      new import_obsidian7.Notice(this.t("notice.invalidWord"));
       return;
     }
     const reqFolder = this.normalizeFolder(targetFolder || "");
     const folder = reqFolder && this.dictFolders().includes(reqFolder) ? reqFolder : this.primaryVocabFolder();
     const targetPath = (folder ? folder + "/" : "") + fileName + ".md";
     const target = this.app.vault.getAbstractFileByPath(targetPath);
-    let existing = target instanceof import_obsidian6.TFile ? target : null;
+    let existing = target instanceof import_obsidian7.TFile ? target : null;
     if (!existing) {
-      const hit = this.index.get(clean.toLowerCase());
-      if (hit && hit.file instanceof import_obsidian6.TFile) existing = hit.file;
+      const hit = this.index.get(this.resolveIndexKey(clean));
+      if (hit && hit.file instanceof import_obsidian7.TFile) existing = hit.file;
     }
     const srcFile = view && view.file || this.app.workspace.getActiveFile();
     const sentence = editor ? this.getSelectionSentence(editor) : this.getReadingSentence();
     const fromPdf = srcFile && srcFile.extension === "pdf" && !editor;
     if (existing) {
-      new import_obsidian6.Notice(this.t(openExisting ? "notice.exists" : "notice.existsNoOpen", { word: existing.basename }));
+      new import_obsidian7.Notice(this.t(openExisting ? "notice.exists" : "notice.existsNoOpen", { word: existing.basename }));
       if (openExisting) void this.app.workspace.getLeaf(fromPdf ? "tab" : false).openFile(existing);
       return;
     }
@@ -5900,27 +6703,32 @@ var LexisPlugin = class extends import_obsidian6.Plugin {
       };
       const file = await this.createEntryFile(targetPath, folder, content, addOccurrence);
       this.recordEncounter(file, "add");
-      new import_obsidian6.Notice(this.t(fromPdf ? "notice.addedPdf" : "notice.created", { word: fileName }));
+      new import_obsidian7.Notice(this.t(fromPdf ? "notice.addedPdf" : "notice.created", { word: fileName }));
       await this.rebuildIndex(false);
     } catch (err) {
-      new import_obsidian6.Notice(this.t("notice.createFailed", { error: errorMessage4(err) }));
+      new import_obsidian7.Notice(this.t("notice.createFailed", { error: errorMessage4(err) }));
     }
   }
 };
 Object.defineProperties(LexisPlugin.prototype, createBridgeApi({
   DEFAULT_SETTINGS,
-  TFile: import_obsidian6.TFile,
-  Component: import_obsidian6.Component,
+  TFile: import_obsidian7.TFile,
+  Component: import_obsidian7.Component,
   todayStr: todayString,
   escapeRe,
   renderLexisMarkdown,
-  finishRenderMath: import_obsidian6.finishRenderMath,
-  escHtml: escapeHtml
+  finishRenderMath: import_obsidian7.finishRenderMath,
+  escHtml: escapeHtml,
+  saveAnnotationImage,
+  vaultImageDataUrl
 }));
+Object.defineProperties(LexisPlugin.prototype, createReviewState({ todayStr: todayString, round2 }));
+Object.defineProperties(LexisPlugin.prototype, createReviewQueue({ todayStr: todayString }));
 Object.defineProperties(LexisPlugin.prototype, createHighlightEngine({
   FSRS,
-  Notice: import_obsidian6.Notice,
+  Notice: import_obsidian7.Notice,
   boundedSource,
+  compactMixedScriptSpacing,
   todayStr: todayString
 }));
 Object.defineProperties(LexisPlugin.prototype, createDocumentHighlights());
@@ -5936,20 +6744,20 @@ Object.defineProperties(LexisPlugin.prototype, createReaderUi({
   daysBetween,
   fmtDate: formatDate,
   todayStr: todayString,
-  TFile: import_obsidian6.TFile,
-  Notice: import_obsidian6.Notice,
+  TFile: import_obsidian7.TFile,
+  Notice: import_obsidian7.Notice,
   boundedSource,
   escapeRe,
-  Component: import_obsidian6.Component,
+  Component: import_obsidian7.Component,
   renderLexisMarkdown,
   openRestoreModal: (app, plugin, file) => new LexisRestoreModal(app, plugin, file).open()
 }));
 var LexisSettingTab = createSettingsTab({
   obsidian: obsidian4,
-  PluginSettingTab: import_obsidian6.PluginSettingTab,
-  Setting: import_obsidian6.Setting,
-  Notice: import_obsidian6.Notice,
-  TFolder: import_obsidian6.TFolder,
+  PluginSettingTab: import_obsidian7.PluginSettingTab,
+  Setting: import_obsidian7.Setting,
+  Notice: import_obsidian7.Notice,
+  TFolder: import_obsidian7.TFolder,
   DEFAULT_SETTINGS,
   cssColorToHex,
   createReorderController,

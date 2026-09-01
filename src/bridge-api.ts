@@ -30,6 +30,8 @@ interface BridgeApiDependencies {
   renderLexisMarkdown: (app: App, markdown: string, element: HTMLElement, sourcePath: string, component: ObsidianComponent) => Promise<void>;
   finishRenderMath: () => Promise<void>;
   escHtml: (value: string) => string;
+  saveAnnotationImage: (app: App, settings: LexisSettings, wordFile: ObsidianTFile, image: File) => Promise<ObsidianTFile>;
+  vaultImageDataUrl: (app: App, linkPath: string, sourcePath: string) => Promise<string | null>;
 }
 
 interface BridgeApiHost {
@@ -56,7 +58,7 @@ interface BridgeApiHost {
   parseTags(value: string): string[];
   colorForEntry(entry: LexisEntry): string;
   highlightAlphaForEntry(entry: LexisEntry): number;
-  highlightVisibleForEntry(entry: LexisEntry): boolean;
+  highlightVisibleForEntry(entry: LexisEntry, includeDictionary?: boolean): boolean;
   styleKindForEntry(entry: LexisEntry): HighlightStyle;
   effectiveHighlightColor(): string;
   dictColorMap(): Record<string, string>;
@@ -70,6 +72,7 @@ interface BridgeApiHost {
   findOccurrences(word: string): Promise<Occurrence[]>;
   getCuratedSourcePaths(file: ObsidianTFile): Promise<Set<string>>;
   boldMatchesInPlace(element: HTMLElement, word: string): void;
+  resolveIndexKey(value: string): string;
 }
 
 function errorMessage(error: unknown): string {
@@ -81,7 +84,7 @@ function textValue(value: unknown): string {
   return typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? String(value) : "";
 }
 
-function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, escapeRe, renderLexisMarkdown, finishRenderMath, escHtml }: BridgeApiDependencies): PropertyDescriptorMap {
+function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, escapeRe, renderLexisMarkdown, finishRenderMath, escHtml, saveAnnotationImage, vaultImageDataUrl }: BridgeApiDependencies): PropertyDescriptorMap {
   class BridgeApi {
   declare app: BridgeApiHost["app"];
   declare settings: BridgeApiHost["settings"];
@@ -120,6 +123,7 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, escapeR
   declare findOccurrences: BridgeApiHost["findOccurrences"];
   declare getCuratedSourcePaths: BridgeApiHost["getCuratedSourcePaths"];
   declare boldMatchesInPlace: BridgeApiHost["boldMatchesInPlace"];
+  declare resolveIndexKey: BridgeApiHost["resolveIndexKey"];
   // ---------- 词典桥接动作（由 Obsidian 卡片与外部阅读端共同调用） ----------
   // 网页划词/加出处:词不在库→新建,在库→加出处。来源是网址链接 [标题](url),不是 [[内链]]
   async bridgeAddWord(payload: BridgePayload) {
@@ -143,7 +147,7 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, escapeR
     // 拼出来的 targetPath 只会落在 primaryVocabFolder)。所以不管是不是在加别名,都按索引(标题或别名)兜底查一遍,
     // 找到就并入那个文件,而不是在错误的文件夹里新建重复笔记。(和 ob 内"设为别名"一致)
     if (!(existing instanceof TFile)) {
-      const hit = this.index.get(word.toLowerCase());
+      const hit = this.index.get(this.resolveIndexKey(word));
       if (hit && hit.file instanceof TFile) existing = hit.file;
     }
     const injectAlias = (data: string): string => {
@@ -197,7 +201,7 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, escapeR
     } catch (err) { return { ok: false, error: errorMessage(err) }; }
   }
   async bridgeDeleteWord(key: unknown) {
-    const k = textValue(key).toLowerCase();
+    const k = this.resolveIndexKey(textValue(key));
     const e = this.index.get(k);
     if (!e || !e.file) return { ok: false, error: "not-found" };
     if (e.inline) return { ok: false, error: "inline-readonly" };
@@ -208,7 +212,7 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, escapeR
     } catch (err) { return { ok: false, error: errorMessage(err) }; }
   }
   async bridgeTagWord(payload: BridgePayload) {
-    const key = textValue(payload.key).toLowerCase();
+    const key = this.resolveIndexKey(textValue(payload.key));
     const tag = textValue(payload.tag).toLowerCase().replace(/^#/, "");
     const action = textValue(payload.action) || "add";
     if (!tag) return { ok: false, error: "empty-tag" };
@@ -341,17 +345,19 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, escapeR
     return /^#{1,6}[ \t]/.test(v) ? v : `#### ${v}`;
   }
   annotationHeadingText() { return this.annotationHeadingLine().replace(/^#{1,6}[ \t]*/, "").trim() || "批注"; }
-  // 网页悬浮卡批注:纯文字写进已有词笔记的批注小节(词笔记里它自然落在出处等段附近)
+  // 批注写进词条笔记；Obsidian 卡片还可同时把图片保存为仓库附件并插入引用。
   async bridgeAnnotate(payload: BridgePayload) {
     const text = textValue(payload.note ?? payload.text).trim().replace(/\r?\n+/g, " ");
-    if (!text) return { ok: false, error: "empty-note" };
-    const key = textValue(payload.key ?? payload.word).trim().toLowerCase();
+    const image = typeof File !== "undefined" && payload.image instanceof File && payload.image.type.startsWith("image/") ? payload.image : null;
+    if (!text && !image) return { ok: false, error: "empty-note" };
+    const key = this.resolveIndexKey(textValue(payload.key ?? payload.word).trim());
     const e = this.index.get(key);
     if (!e || !e.file) return { ok: false, error: "not-found" };
     if (e.inline) return { ok: false, error: "inline-readonly" };
-    const line = `> ${text}`;
     try {
-      const apply = (data: string) => this.insertUnderHeading(data, this.annotationHeadingLine(), line, ["批注"]);
+      const imageFile = image ? await saveAnnotationImage(this.app, this.settings, e.file, image) : null;
+      const content = [text ? `> ${text}` : "", imageFile ? `![[${imageFile.path}]]` : ""].filter(Boolean).join("\n\n");
+      const apply = (data: string) => this.insertUnderHeading(data, this.annotationHeadingLine(), content, ["批注"]);
       if (this.app.vault.process) await this.app.vault.process(e.file, apply);
       else await this.app.vault.modify(e.file, apply(await this.app.vault.cachedRead(e.file)));
       this._occCache.clear();
@@ -377,7 +383,7 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, escapeR
   // 把已有词移动到另一个词典文件夹。默认只移动文件(正文/批注/出处全保留);
   // 但若该词笔记是空骨架且目标词典有自己的模板,则顺手重套模板——并把批注小节内容迁移过去。
   async bridgeMoveWord(payload: BridgePayload) {
-    const key = textValue(payload.key ?? payload.word).trim().toLowerCase();
+    const key = this.resolveIndexKey(textValue(payload.key ?? payload.word).trim());
     const folder = this.normalizeFolder(textValue(payload.folder));
     const e = this.index.get(key);
     if (!e || !e.file) return { ok: false, error: "not-found" };
@@ -418,7 +424,7 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, escapeR
     const keys: unknown[] = Array.isArray(payload.keys) ? payload.keys : [];
     let recorded = 0;
     for (const k of keys) {
-      const e = this.index.get(textValue(k).toLowerCase());
+      const e = this.index.get(this.resolveIndexKey(textValue(k)));
       if (e && !e.inline && e.file instanceof TFile) { this.passiveEncounter(e.file); recorded++; }
     }
     return { ok: true, recorded };
@@ -426,7 +432,7 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, escapeR
   bridgeWordList() {
     const words = [];
     // 已归档/已淘汰的词不发给浏览器扩展——扩展自己没有这套生命周期概念,最简单的处理是压根不让它高亮
-    for (const [key, e] of this.index) { if (e.archived || e.retired) continue; words.push({ key, word: e.display, alias: !!e.isAlias, inline: !!e.inline, tags: [...(e.tags || [])], file: e.file && e.file.path, color: this.colorForEntry(e), opacity: this.highlightAlphaForEntry(e), visible: this.highlightVisibleForEntry(e), wstyle: this.styleKindForEntry(e) }); }
+    for (const [key, e] of this.index) { if (e.archived || e.retired) continue; words.push({ key, word: e.display, alias: !!e.isAlias, inline: !!e.inline, tags: [...(e.tags || [])], file: e.file && e.file.path, color: this.colorForEntry(e), opacity: this.highlightAlphaForEntry(e), visible: this.highlightVisibleForEntry(e, false), wstyle: this.styleKindForEntry(e) }); }
     return {
       ok: true, version: this.manifest.version, count: words.length, words,
       styleConfig: {
@@ -465,7 +471,7 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, escapeR
     return style?.sheet ? Array.from(style.sheet.cssRules, (rule: CSSRule) => rule.cssText).join("\n") : "";
   }
   async bridgeWordDetail(key: unknown) {
-    const k = textValue(key).toLowerCase();
+    const k = this.resolveIndexKey(textValue(key));
     const e = this.index.get(k);
     if (!e) return { ok: false, error: "not-found" };
     if (e.inline) {
@@ -513,11 +519,11 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, escapeR
     const comp = new Component(); comp.load();
     try {
       await this.renderInlineEntryInto(div, entry, comp);
-      this.bridgePostProcess(div);
+      await this.bridgePostProcess(div, entry.file.path);
       return div.innerHTML;
     } finally { comp.unload(); }
   }
-  bridgePostProcess(div: HTMLElement): void {
+  async bridgePostProcess(div: HTMLElement, sourcePath: string): Promise<void> {
     const vault = encodeURIComponent(this.app.vault.getName());
     div.querySelectorAll("a.internal-link").forEach((a) => {
       const lp = a.getAttribute("data-href") || a.getAttribute("href") || a.textContent || "";
@@ -525,8 +531,22 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, escapeR
       a.removeAttribute("data-href");
       a.classList.add("lexis-web-ilink");
     });
-    div.querySelectorAll("img").forEach((img) => { if (!/^https?:/i.test(img.getAttribute("src") || "")) img.remove(); });
-    div.querySelectorAll(".internal-embed, iframe").forEach((x) => x.remove());
+    for (const img of div.querySelectorAll<HTMLImageElement>("img")) {
+      const src = img.getAttribute("src") || "";
+      if (/^(?:https?:|data:)/i.test(src)) continue;
+      const embed = img.closest<HTMLElement>(".internal-embed");
+      const linkPath = embed?.getAttribute("src") || embed?.getAttribute("data-href") || img.getAttribute("alt") || "";
+      try {
+        const dataUrl = await vaultImageDataUrl(this.app, linkPath, sourcePath);
+        if (dataUrl) img.setAttribute("src", dataUrl);
+        else img.remove();
+      } catch { img.remove(); }
+    }
+    div.querySelectorAll<HTMLElement>(".internal-embed").forEach((embed) => {
+      if (embed.querySelector("img")) embed.replaceWith(...Array.from(embed.childNodes));
+      else embed.remove();
+    });
+    div.querySelectorAll("iframe").forEach((frame) => frame.remove());
   }
   // 整篇笔记渲成 HTML,且 ```lexis 块在原位渲染(保持文档顺序),供浏览器扩展悬浮卡用
   async bridgeFullHtml(file: ObsidianTFile, display: string): Promise<string> {
@@ -578,7 +598,7 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, escapeR
     // 这里要把渲染好的 HTML 序列化发给浏览器扩展(扩展自己没有 MathJax),必须先等排版队列清空,
     // 不然抓到的还是没转换的公式源码,发过去以后就永远定格在那个状态了。
     try { await finishRenderMath(); } catch { /* Math rendering is optional for plain-text cards. */ }
-    this.bridgePostProcess(div);
+    await this.bridgePostProcess(div, file.path);
     const out = div.innerHTML;
     comp.unload();
     return out;

@@ -31,6 +31,8 @@ Lexis 会高亮已收录的词，悬停显示笔记。支持：
 - 通过 **Lexis for Zotero** 支持 Zotero Reader
 
 划词后可以加入指定词典、收藏出处或设为已有词条的别名。Obsidian 始终是唯一数据源；浏览器与 Zotero 通过带令牌的本机回环桥接访问数据。
+
+Obsidian 中每个词典都有独立高亮开关。Lexis Web 则按网站单独保存词典显示状态：从扩展弹窗控制当前网站显示哪些词典。浏览器选择不会覆盖 Obsidian 设置，切换后当前页面立即更新。
 <img width="727" height="465" alt="image" src="https://github.com/user-attachments/assets/3e510943-d126-40f3-b9b4-7a4edd02e51a" />
 
 ### 复习仍未记住的内容
@@ -97,7 +99,7 @@ Lexis 不承诺读得更快，也不承诺不费力地学习。
 
 ## 为什么高亮会渐隐、复习会回流、词条会被淘汰
 
-- **显著性是稀缺资源**：重复的视觉提示会逐渐失效，与界面研究中的 [banner blindness](https://en.wikipedia.org/wiki/Banner_blindness) 属于同一类现象。FSRS stability 增长后，高亮会淡向可调下限；技能内化后，辅助物应该退场。
+- **显著性是稀缺资源**：重复的视觉提示会逐渐失效，与界面研究中的 [banner blindness](https://en.wikipedia.org/wiki/Banner_blindness) 属于同一类现象。FSRS 稳定度 `S` 增长后，高亮按 `最终透明度 = 基础透明度 × [1 - S/(S+20) × (1-渐隐下限)]` 淡向可调下限；技能内化后，辅助物应该退场。
 - **悬停可能暴露回忆卡顿**：[测试效应](https://en.wikipedia.org/wiki/Testing_effect)与[合意难度](https://en.wikipedia.org/wiki/Desirable_difficulty)相关研究说明，尝试提取本身有信息量。悬停也可能只是好奇，所以 Lexis 最多把日期拉近，不把它计作复习，也不修改难度分数。
 - **重要性只能从使用中显现**：添加时无法知道一个词会成为领域骨架，还是再也不会出现。Lexis 只摆出长期未相遇的证据，让你选择淘汰、留下或已掌握，从不自动裁决。
 - **个人词典是只有一个读者的 OED**：[牛津英语词典](https://en.wikipedia.org/wiki/Oxford_English_Dictionary)曾依靠带日期和来源的引文卡片积累语料。Lexis 把同一种模式用于一个人的阅读史：释义和出处从真实相遇中长出来。

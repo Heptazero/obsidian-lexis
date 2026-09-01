@@ -11,6 +11,6 @@ mkdir -p "$DIST_DIR"
 rm -f "$OUTPUT"
 cd "$EXT_DIR"
 zip -qr "$OUTPUT" \
-  manifest.json background.js content.js content.css \
+  manifest.json config.js background.js content.js content.css \
   popover.css popup.html popup.js
 echo "$OUTPUT"

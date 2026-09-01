@@ -9,6 +9,7 @@ export default defineConfig(
     "pkg/browser-extension",
     "pkg/zotero-extension",
     "scripts",
+    "tests",
     "esbuild.config.mjs",
     "main.js",
     "package.json",

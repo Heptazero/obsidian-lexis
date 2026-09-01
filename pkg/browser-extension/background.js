@@ -1,9 +1,13 @@
 // Lexis Web —— 后台服务工作者:唯一与本机 Lexis 桥接通信的地方(有 host 权限,绕过页面 CORS/混合内容限制)
-const DEFAULT_CFG = { host: "127.0.0.1", port: 45945, token: "", highlight: true, showMemoryCurve: true, color: "#7c5cff", style: "wavy" };
+importScripts("config.js");
+const { defaultConnection, normalizePort } = globalThis.LexisWebConfig;
+const DEFAULT_CFG = { ...defaultConnection, token: "", highlight: true, showMemoryCurve: true, color: "#7c5cff", style: "wavy" };
 
 async function getCfg() {
   const { cfg } = await chrome.storage.local.get("cfg");
-  return Object.assign({}, DEFAULT_CFG, cfg || {});
+  const loaded = Object.assign({}, DEFAULT_CFG, cfg || {});
+  loaded.port = normalizePort(loaded.port);
+  return loaded;
 }
 function base(cfg) { return `http://${cfg.host}:${cfg.port}`; }
 

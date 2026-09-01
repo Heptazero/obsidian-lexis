@@ -31,6 +31,8 @@ Lexis highlights known entries and shows their notes on hover in:
 - Zotero Reader through **Lexis for Zotero**
 
 Selected text can be added to a dictionary, saved as an occurrence, or attached as an alias. Obsidian remains the source of truth; the browser and Zotero companions communicate with it over an authenticated loopback-only bridge.
+
+Each Obsidian dictionary has its own highlight switch. Lexis Web keeps a separate visibility profile for each website: open the extension popup to show or hide dictionaries on the current site. Browser choices do not overwrite Obsidian settings, and the current page updates immediately.
 <img width="727" height="465" alt="image" src="https://github.com/user-attachments/assets/d274dd14-7bd7-4003-9da6-3a7f8db02b06" />
 
 ### Review what still needs memory
@@ -97,7 +99,7 @@ Lexis does not promise faster reading or learning without effort.
 
 ## Why highlights fade, reviews move, and entries retire
 
-- **Salience is scarce.** Repeated visual cues lose force—the same family of effects behind [banner blindness](https://en.wikipedia.org/wiki/Banner_blindness). As FSRS stability grows, a highlight can fade toward a configurable floor. A support should recede when the skill is internalized.
+- **Salience is scarce.** Repeated visual cues lose force—the same family of effects behind [banner blindness](https://en.wikipedia.org/wiki/Banner_blindness). As FSRS stability `S` grows, a highlight fades toward a configurable floor: `final opacity = base opacity × [1 - S/(S+20) × (1-fade floor)]`. A support should recede when the skill is internalized.
 - **A hover can reveal friction.** [Testing-effect](https://en.wikipedia.org/wiki/Testing_effect) and [desirable-difficulty](https://en.wikipedia.org/wiki/Desirable_difficulty) research make retrieval attempts informative. A hover is noisy—it may mean curiosity, not forgetting—so Lexis may move a review date closer but never counts the hover as a review or changes a difficulty score.
 - **Importance appears through use.** At add time, nobody knows whether an entry will become foundational or never appear again. Lexis surfaces long-unseen entries with evidence and lets you retire, keep, or master them; it never decides automatically.
 - **A personal lexicon is an OED for one reader.** The [Oxford English Dictionary](https://en.wikipedia.org/wiki/Oxford_English_Dictionary) grew from dated, sourced citation slips. Lexis applies the same pattern to one person's reading history: definitions and occurrences accumulate from actual encounters.

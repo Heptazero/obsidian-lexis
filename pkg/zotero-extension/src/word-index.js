@@ -1,9 +1,42 @@
 (function (ns) {
   const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const ASCII_WORD = /[A-Za-z0-9_]/;
+  const EAST_ASIAN = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+  const HSPACE = /[ \t\u00a0\u3000]/;
+  const isMixedBoundary = (left, right) => (ASCII_WORD.test(left) && EAST_ASIAN.test(right)) || (EAST_ASIAN.test(left) && ASCII_WORD.test(right));
+  const compactMixedSpacing = (value) => {
+    const chars = [...String(value || "")];
+    let result = "", previous = "";
+    for (let i = 0; i < chars.length;) {
+      if (!HSPACE.test(chars[i])) { result += chars[i]; previous = chars[i]; i++; continue; }
+      let end = i + 1;
+      while (end < chars.length && HSPACE.test(chars[end])) end++;
+      if (!isMixedBoundary(previous, chars[end] || "")) result += chars.slice(i, end).join("");
+      i = end;
+    }
+    return result;
+  };
+  const flexibleMixedSource = (value) => {
+    const chars = [...String(value || "")];
+    let source = "", previous = "", boundaryAdded = false;
+    for (let i = 0; i < chars.length;) {
+      if (HSPACE.test(chars[i])) {
+        let end = i + 1;
+        while (end < chars.length && HSPACE.test(chars[end])) end++;
+        boundaryAdded = isMixedBoundary(previous, chars[end] || "");
+        source += boundaryAdded ? "[ \\t\\u00a0\\u3000]*" : escapeRegex(chars.slice(i, end).join(""));
+        i = end;
+        continue;
+      }
+      if (!boundaryAdded && previous && isMixedBoundary(previous, chars[i])) source += "[ \\t\\u00a0\\u3000]*";
+      source += escapeRegex(chars[i]); previous = chars[i]; boundaryAdded = false; i++;
+    }
+    return source;
+  };
   const boundedSource = (word) => {
     const left = /^[A-Za-z0-9_]/.test(word) ? "(?<![A-Za-z0-9_])" : "";
     const right = /[A-Za-z0-9_]$/.test(word) ? "(?![A-Za-z0-9_])" : "";
-    return left + escapeRegex(word) + right;
+    return left + flexibleMixedSource(word) + right;
   };
 
   function textColorFor(background) {
@@ -24,6 +57,7 @@
       this.styleConfig = styleConfig || {};
       this.entries = new Map();
       this.excluded = new Set();
+      this.keysByCompact = new Map();
       const excludedTags = new Set((this.styleConfig.excludeTags || []).map((tag) => String(tag).toLowerCase()));
       const keys = [];
       for (const raw of this.words) {
@@ -42,6 +76,9 @@
           inline: Boolean(raw.inline),
         };
         this.entries.set(key, entry);
+        this.keysByCompact.set(key, key);
+        const compact = compactMixedSpacing(key);
+        if (!this.keysByCompact.has(compact)) this.keysByCompact.set(compact, key);
         if (excludedTags.size && entry.tags.some((tag) => excludedTags.has(tag))) this.excluded.add(key);
         else keys.push(key);
       }
@@ -50,9 +87,13 @@
     }
 
     regex() { return this.pattern ? new RegExp(this.pattern, "gi") : null; }
-    has(key) { return this.entries.has(String(key || "").toLowerCase()) && !this.excluded.has(String(key || "").toLowerCase()); }
-    isExcluded(key) { return this.excluded.has(String(key || "").toLowerCase()); }
-    get(key) { return this.entries.get(String(key || "").toLowerCase()); }
+    resolve(key) {
+      const value = String(key || "").toLowerCase();
+      return this.keysByCompact.get(value) || this.keysByCompact.get(compactMixedSpacing(value)) || value;
+    }
+    has(key) { const resolved = this.resolve(key); return this.entries.has(resolved) && !this.excluded.has(resolved); }
+    isExcluded(key) { return this.excluded.has(this.resolve(key)); }
+    get(key) { return this.entries.get(this.resolve(key)); }
     dictionaries() { return (this.styleConfig.dicts || []).filter(Boolean); }
 
     knownTags() {
@@ -100,4 +141,5 @@
 
   ns.WordIndex = WordIndex;
   ns.boundedSource = boundedSource;
+  ns.compactMixedSpacing = compactMixedSpacing;
 })(LexisZotero);

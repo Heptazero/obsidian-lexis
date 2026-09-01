@@ -1,14 +1,71 @@
 // Lexis Web —— popup:读写配置、测试连接、同步词库
-const DEFAULT_CFG = { host: "127.0.0.1", port: 45945, token: "", highlight: true, showMemoryCurve: true, color: "#7c5cff", style: "wavy", useObsidianStyle: true, opacity: 100 };
+const { defaultConnection, normalizePort } = globalThis.LexisWebConfig;
+const DEFAULT_CFG = { ...defaultConnection, token: "", highlight: true, showMemoryCurve: true, color: "#7c5cff", style: "wavy", useObsidianStyle: true, opacity: 100 };
 const $ = (id) => document.getElementById(id);
 
 let cfg = DEFAULT_CFG;
 let hasStyleConfig = false;
+let saveTimer = null;
+let styleCfg = null;
+let currentSite = "";
+let siteDictionaryVisibility = {};
+
+const shortFolder = (folder) => String(folder || "").split("/").pop() || folder;
+
+async function resolveCurrentSite() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+  if (!tab?.id) return null;
+  const context = await chrome.tabs.sendMessage(tab.id, { type: "lexis-page-context" }).catch(() => null);
+  return context?.site ? context : null;
+}
+
+function renderDictionaries() {
+  const container = $("dictionaries");
+  container.textContent = "";
+  $("currentSite").textContent = currentSite || "当前页面不可设置";
+  const dictionaries = Array.isArray(styleCfg?.dicts) ? styleCfg.dicts.filter(Boolean) : [];
+  if (!currentSite || !dictionaries.length) {
+    const empty = document.createElement("div");
+    empty.className = "dictionary-empty";
+    empty.textContent = dictionaries.length ? "当前页面不可设置" : "同步后显示词典";
+    container.appendChild(empty);
+    return;
+  }
+  for (const folder of dictionaries) {
+    const row = document.createElement("label");
+    row.className = "dictionary-row";
+    row.title = folder;
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = siteDictionaryVisibility[currentSite]?.[folder] !== false;
+    const name = document.createElement("span");
+    name.textContent = shortFolder(folder);
+    input.addEventListener("change", async () => {
+      const siteState = { ...(siteDictionaryVisibility[currentSite] || {}) };
+      if (input.checked) delete siteState[folder];
+      else siteState[folder] = false;
+      siteDictionaryVisibility = { ...siteDictionaryVisibility };
+      if (Object.keys(siteState).length) siteDictionaryVisibility[currentSite] = siteState;
+      else delete siteDictionaryVisibility[currentSite];
+      await chrome.storage.local.set({ siteDictionaryVisibility });
+    });
+    row.append(input, name);
+    container.appendChild(row);
+  }
+}
 
 async function load() {
-  const { cfg: c, meta, pendingAdds, styleConfig } = await chrome.storage.local.get(["cfg", "meta", "pendingAdds", "styleConfig"]);
+  const stored = await chrome.storage.local.get(["cfg", "meta", "pendingAdds", "styleConfig", "siteDictionaryVisibility"]);
+  const { cfg: c, meta, pendingAdds, styleConfig } = stored;
   cfg = Object.assign({}, DEFAULT_CFG, c || {});
-  hasStyleConfig = !!styleConfig;
+  const storedPort = cfg.port;
+  cfg.port = normalizePort(storedPort);
+  if (cfg.port !== storedPort) await chrome.storage.local.set({ cfg });
+  styleCfg = styleConfig || null;
+  hasStyleConfig = !!styleCfg;
+  siteDictionaryVisibility = stored.siteDictionaryVisibility || {};
+  const page = await resolveCurrentSite();
+  currentSite = page?.site || "";
   $("host").value = cfg.host;
   $("port").value = cfg.port;
   $("token").value = cfg.token;
@@ -20,6 +77,7 @@ async function load() {
   $("opacityVal").textContent = (cfg.opacity || 100) + "%";
   $("useObsidianStyle").checked = !!(cfg.useObsidianStyle !== false && hasStyleConfig);
   toggleObsidianStyle();
+  renderDictionaries();
   renderMeta(meta, pendingAdds);
   autoSyncIfStale(meta);
 }
@@ -37,10 +95,12 @@ async function autoSyncIfStale(meta) {
   if (meta && meta.version === ping.version && meta.count != null) return;
   const r = await chrome.runtime.sendMessage({ type: "sync" }).catch(() => null);
   if (r && r.ok) {
-    const data = await chrome.storage.local.get(["meta", "pendingAdds"]);
+    const data = await chrome.storage.local.get(["meta", "pendingAdds", "styleConfig"]);
     renderMeta(r.meta, data.pendingAdds);
-    hasStyleConfig = true;
+    styleCfg = data.styleConfig || null;
+    hasStyleConfig = !!styleCfg;
     toggleObsidianStyle();
+    renderDictionaries();
   }
 }
 
@@ -59,9 +119,13 @@ function renderMeta(meta, pendingAdds) {
 }
 
 async function save() {
+  if (saveTimer !== null) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
   cfg = {
     host: $("host").value.trim() || "127.0.0.1",
-    port: parseInt($("port").value, 10) || 45945,
+    port: normalizePort($("port").value),
     token: $("token").value.trim(),
     highlight: $("highlight").checked,
     showMemoryCurve: $("showMemoryCurve").checked,
@@ -70,7 +134,13 @@ async function save() {
     opacity: parseInt($("opacity").value, 10) || 100,
     useObsidianStyle: $("useObsidianStyle").checked,
   };
+  $("port").value = cfg.port;
   await chrome.storage.local.set({ cfg });
+}
+
+function scheduleSave() {
+  if (saveTimer !== null) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => { void save(); }, 250);
 }
 
 function status(text, cls) {
@@ -93,15 +163,27 @@ $("sync").addEventListener("click", async () => {
   $("sync").disabled = true;
   const r = await chrome.runtime.sendMessage({ type: "sync" }).catch(() => null);
   $("sync").disabled = false;
-  if (r && r.ok) { status(`已同步 · ${r.meta.count} 个词`, "ok"); renderMeta(r.meta); }
+  if (r && r.ok) {
+    status(`已同步 · ${r.meta.count} 个词`, "ok");
+    renderMeta(r.meta);
+    const data = await chrome.storage.local.get("styleConfig");
+    styleCfg = data.styleConfig || null;
+    hasStyleConfig = !!styleCfg;
+    toggleObsidianStyle();
+    renderDictionaries();
+  }
   else if (r && r.error === "bad-token") status("令牌错误", "err");
   else status("同步失败：请检查 Obsidian 和桥接", "err");
 });
 
-for (const id of ["highlight", "showMemoryCurve", "style", "color"]) $(id).addEventListener("change", save);
-for (const id of ["host", "port", "token"]) $(id).addEventListener("input", save);
-$("opacity").addEventListener("input", save);
-$("opacity").addEventListener("input", () => { $("opacityVal").textContent = $("opacity").value + "%"; });
-$("useObsidianStyle").addEventListener("change", () => { toggleObsidianStyle(); save(); });
+function bindEvents() {
+  for (const id of ["highlight", "showMemoryCurve", "style", "color"]) $(id).addEventListener("change", save);
+  for (const id of ["host", "token"]) $(id).addEventListener("input", scheduleSave);
+  $("port").addEventListener("change", save);
+  $("token").addEventListener("paste", () => setTimeout(() => { void save(); }, 0));
+  $("opacity").addEventListener("input", scheduleSave);
+  $("opacity").addEventListener("input", () => { $("opacityVal").textContent = $("opacity").value + "%"; });
+  $("useObsidianStyle").addEventListener("change", () => { toggleObsidianStyle(); void save(); });
+}
 
-load();
+void load().then(bindEvents);

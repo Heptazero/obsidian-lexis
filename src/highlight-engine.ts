@@ -16,10 +16,11 @@ interface HighlightDependencies {
   FSRS: unknown;
   Notice: typeof ObsidianNotice;
   boundedSource: (value: string) => string;
+  compactMixedScriptSpacing: (value: string) => string;
   todayStr: () => string;
 }
 
-function createHighlightEngine({ Notice, boundedSource, todayStr }: HighlightDependencies): PropertyDescriptorMap {
+function createHighlightEngine({ Notice, boundedSource, compactMixedScriptSpacing, todayStr }: HighlightDependencies): PropertyDescriptorMap {
   class HighlightEngine {
   declare app: App;
   declare settings: LexisSettings;
@@ -34,6 +35,8 @@ function createHighlightEngine({ Notice, boundedSource, todayStr }: HighlightDep
   declare _indexBuildId: number;
   declare _rebuildTimer: number;
   declare _pattern: string | null;
+  declare _indexKeysByCompact: Map<string, string>;
+  declare _matchKeysByCompact: Map<string, string>;
   declare statusBarEl: HTMLElement | null;
   declare bridge: { running: boolean } | null;
   declare liveAvailable: boolean;
@@ -265,8 +268,28 @@ function createHighlightEngine({ Notice, boundedSource, todayStr }: HighlightDep
     // 已淘汰的词:比归档更彻底,连隐形代理 span 都不留,悬停也不再触发
     keys = keys.filter((k) => { const e = this.index.get(k); return !(e && e.retired); });
     keys.sort((a, b) => b.length - a.length);
+    this._indexKeysByCompact = new Map();
+    for (const key of this.index.keys()) {
+      this._indexKeysByCompact.set(key, key);
+      const compact = compactMixedScriptSpacing(key);
+      if (!this._indexKeysByCompact.has(compact)) this._indexKeysByCompact.set(compact, key);
+    }
+    this._matchKeysByCompact = new Map();
+    for (const key of keys) {
+      this._matchKeysByCompact.set(key, key);
+      const compact = compactMixedScriptSpacing(key);
+      if (!this._matchKeysByCompact.has(compact)) this._matchKeysByCompact.set(compact, key);
+    }
     if (!keys.length) { this._pattern = null; return; }
     this._pattern = keys.map(boundedSource).join("|");
+  }
+  resolveIndexKey(value: string): string {
+    const key = String(value || "").toLowerCase();
+    return this._indexKeysByCompact.get(key) || this._indexKeysByCompact.get(compactMixedScriptSpacing(key)) || key;
+  }
+  resolveMatchKey(value: string): string {
+    const key = String(value || "").toLowerCase();
+    return this._matchKeysByCompact.get(key) || this._matchKeysByCompact.get(compactMixedScriptSpacing(key)) || key;
   }
   updateStatusBar() {
     if (!this.statusBarEl) return;
@@ -316,7 +339,8 @@ function createHighlightEngine({ Notice, boundedSource, todayStr }: HighlightDep
     const opacity = Number(opacities[key]);
     return isNaN(opacity) ? null : Math.max(0.1, Math.min(1, opacity));
   }
-  highlightVisibleForEntry(entry: LexisEntry): boolean {
+  highlightVisibleForEntry(entry: LexisEntry, includeDictionary = true): boolean {
+    if (includeDictionary && this.dictSettingForFile(entry?.file)?.highlight === false) return false;
     if (!entry?.inline) return true;
     const fileMode = this.inlineClassificationMode() === "file";
     const parents = fileMode ? (this.settings.inlineFileHighlight || {}) : (this.settings.inlineCategoryHighlight || {});
@@ -475,7 +499,7 @@ function createHighlightEngine({ Notice, boundedSource, todayStr }: HighlightDep
       let m: RegExpExecArray | null;
       while ((m = regex.exec(text))) {
         if (m.index > last) frag.appendChild(doc.createTextNode(text.slice(last, m.index)));
-        const key = m[0].toLowerCase();
+        const key = this.resolveMatchKey(m[0]);
         if (excludeKeys && excludeKeys.has(key)) {
           frag.appendChild(doc.createTextNode(m[0]));
           last = m.index + m[0].length;
@@ -521,7 +545,7 @@ function createHighlightEngine({ Notice, boundedSource, todayStr }: HighlightDep
           regex.lastIndex = 0;
           let match: RegExpExecArray | null;
           while ((match = regex.exec(text))) {
-            const key = match[0].toLowerCase();
+            const key = this.resolveMatchKey(match[0]);
             if (selfKeys?.has(key)) {
               if (match[0].length === 0) regex.lastIndex++;
               continue;

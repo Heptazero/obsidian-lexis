@@ -43,6 +43,7 @@ function createReaderInteractions({ openAliasPicker }: ReaderInteractionDependen
   declare dictFolders: () => string[];
   declare normalizeFolder: (folder: string) => string;
   declare openInlineEntry: (entry: LexisEntry, newTab: boolean) => Promise<void>;
+  declare resolveIndexKey: (value: string) => string;
   declare positionPopover: (popover: HTMLElement, target: HTMLElement) => void;
   declare saveSettings: () => Promise<void>;
   declare showPopover: (target: HTMLElement) => Promise<void>;
@@ -176,7 +177,7 @@ function createReaderInteractions({ openAliasPicker }: ReaderInteractionDependen
       rect = { left: rect.left + frameRect.left, right: rect.right + frameRect.left, top: rect.top + frameRect.top, bottom: rect.bottom + frameRect.top, width: rect.width, height: rect.height };
     }
     this.removeSelPill();
-    const known = this.index.has(text.toLowerCase());
+    const known = this.index.has(this.resolveIndexKey(text));
     const pill = overlayDoc.body.createDiv({ cls: "lexis-sel-pill" });
     // 阻止 mousedown 收起选区/夺焦(事件冒泡到 pill 即可覆盖子按钮)
     pill.addEventListener("mousedown", (ev) => ev.preventDefault());

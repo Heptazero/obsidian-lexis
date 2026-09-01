@@ -5,6 +5,7 @@ const path = require("node:path");
 
 const root = path.resolve(__dirname, "..");
 const context = vm.createContext({ LexisZotero: {} });
+vm.runInContext(fs.readFileSync(path.join(root, "src/word-index.js"), "utf8"), context);
 vm.runInContext(fs.readFileSync(path.join(root, "src/pdf-highlighter.js"), "utf8"), context);
 
 assert.equal(context.LexisZotero.sentenceAt("First. The energy gap changed. Last.", 14), "The energy gap changed.");
@@ -51,5 +52,13 @@ assert.equal(matches.length, 2);
 assert.equal(matches[0].key, "energy gap");
 assert.equal(matches[0].ranges.map((range) => range.itemIndex).join(","), "0,1");
 assert.equal(matches[1].key, "metric");
+
+const mixedIndex = new context.LexisZotero.WordIndex();
+mixedIndex.update([{ key: "QL分解", word: "QL分解" }], {});
+const mixedMatches = context.LexisZotero.findPdfMatches([
+  { str: "使用 QL 分解。", transform: [1, 0, 0, 10, 10, 100], width: 70, height: 10 },
+], mixedIndex).matches;
+assert.equal(mixedMatches.length, 1);
+assert.equal(mixedMatches[0].key, "ql分解");
 
 console.log("sentence tests passed");

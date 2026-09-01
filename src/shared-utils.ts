@@ -1,12 +1,6 @@
 import { Component, MarkdownRenderer, type App } from "obsidian";
 
-export const escapeRe = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-export const boundedSource = (word: string): string => {
-  const leftBoundary = /^[A-Za-z0-9_]/.test(word) ? "\\b" : "";
-  const rightBoundary = /[A-Za-z0-9_]$/.test(word) ? "\\b" : "";
-  return leftBoundary + escapeRe(word) + rightBoundary;
-};
+export { boundedSource, compactMixedScriptSpacing, escapeRe } from "./match-text";
 
 export const escapeHtml = (value: string | number | null | undefined): string => String(value == null ? "" : value).replace(
   /[&<>"]/g,

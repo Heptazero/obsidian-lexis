@@ -65,7 +65,7 @@
     const matches = [];
     let match;
     while ((match = regex.exec(stream.text))) {
-      const key = match[0].toLowerCase();
+      const key = index.resolve ? index.resolve(match[0]) : match[0].toLowerCase();
       const entry = index.get(key);
       if (!entry || index.isExcluded?.(key)) continue;
       const byItem = new Map();
