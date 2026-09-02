@@ -149,7 +149,16 @@ function status(text, cls) {
   el.className = "status " + (cls || "");
 }
 
+// Firefox MV3 安装时不自动授予 host 权限,后台 fetch 本地桥接前需用户点头;
+// Chrome 下权限装完就有,此调用静默通过。必须在没有其他 await 的情况下最先调用,否则用户手势失效。
+function ensureLocalPermission() {
+  if (!chrome.permissions) return Promise.resolve(true);
+  const origin = `http://${$("host").value.trim() || "127.0.0.1"}:${normalizePort($("port").value)}/`;
+  return chrome.permissions.request({ origins: [origin] }).then(() => true, () => false);
+}
+
 $("test").addEventListener("click", async () => {
+  if (!(await ensureLocalPermission())) { status("需要允许访问本地地址后才能连接", "err"); return; }
   await save();
   status("连接中…");
   const r = await chrome.runtime.sendMessage({ type: "ping" }).catch(() => null);
@@ -158,6 +167,7 @@ $("test").addEventListener("click", async () => {
 });
 
 $("sync").addEventListener("click", async () => {
+  if (!(await ensureLocalPermission())) { status("需要允许访问本地地址后才能同步", "err"); return; }
   await save();
   status("同步中…");
   $("sync").disabled = true;

@@ -21,7 +21,7 @@
     }
   },
   "background": {
-    "service_worker": "background.js"
+    "scripts": ["config.js", "background.js"]
   },
   "content_scripts": [
     {
@@ -37,5 +37,11 @@
       "resources": ["popover.css"],
       "matches": ["<all_urls>"]
     }
-  ]
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "lexis-web@obsidian-lexis.local",
+      "strict_min_version": "115.0"
+    }
+  }
 }

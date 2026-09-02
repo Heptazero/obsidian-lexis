@@ -1,5 +1,6 @@
 // Lexis Web —— 后台服务工作者:唯一与本机 Lexis 桥接通信的地方(有 host 权限,绕过页面 CORS/混合内容限制)
-importScripts("config.js");
+// Chrome: service worker 用 importScripts;Firefox: 事件页按 manifest 里的 scripts 顺序先加载 config.js
+if (typeof importScripts === "function") importScripts("config.js");
 const { defaultConnection, normalizePort } = globalThis.LexisWebConfig;
 const DEFAULT_CFG = { ...defaultConnection, token: "", highlight: true, showMemoryCurve: true, color: "#7c5cff", style: "wavy" };
 
