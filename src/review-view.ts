@@ -149,7 +149,8 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
     this.showBtn.addEventListener("click", () => { void this.reveal(); });
     this.rateBar = c.createDiv({ cls: "lexis-rv-rate" });
     this.rateBar.setCssStyles({ display: "none" });
-    const bs = this.plugin.settings.reviewBottomSpace || 70;
+    const bs = this.plugin.settings.reviewBottomSpace ?? 70;
+    this.containerEl.setCssProps({ "--lexis-review-bottom-space": `${bs}px` });
     const isPhone = this.containerEl.doc.body.classList.contains("is-phone");
     this.rateBar.setCssStyles({ marginBottom: isPhone ? "" : bs + "px" });
     if (isPhone) this.updateMobileRateBarOffset();
@@ -189,7 +190,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
   updateMobileRateBarOffset() {
     if (!this.rateBar || !this.containerEl.doc.body.classList.contains("is-phone")) return;
     const navbarHeight = Math.ceil(this.containerEl.doc.querySelector(".mobile-navbar")?.getBoundingClientRect().height || 58);
-    this.rateBar.setCssProps({ "--lexis-mobile-navbar-height": `${navbarHeight}px` });
+    this.containerEl.setCssProps({ "--lexis-mobile-navbar-height": `${navbarHeight}px` });
   }
   async grade(g: number) {
     if (!this.revealed) { new Notice(this.plugin.t("review.revealFirst")); return; }
@@ -310,7 +311,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
     const b = d.createEl("button", { cls: "mod-cta", text: this.plugin.t("review.checkAgain") });
     b.onclick = () => { void this.plugin.rebuildIndex(false); void this.refresh(); };
     this.plugin.renderHeatmap(d.createDiv({ cls: "lexis-hm-wrap" }));
-    c.setCssStyles({ paddingBottom: (this.plugin.settings.reviewBottomSpace || 70) + "px" });
+    c.setCssStyles({ paddingBottom: (this.plugin.settings.reviewBottomSpace ?? 70) + "px" });
   }
 };
 

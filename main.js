@@ -683,8 +683,8 @@ var MESSAGES = {
   "settings.clozeCard": { zh: "\u51FA\u5904\u586B\u7A7A", en: "Occurrence cloze" },
   "settings.showReviewMetadata": { zh: "\u663E\u793A\u590D\u4E60\u5185\u90E8\u72B6\u6001", en: "Show internal review state" },
   "settings.showReviewMetadataDesc": { zh: "\u9ED8\u8BA4\u5728\u5C5E\u6027\u9762\u677F\u9690\u85CF\uFF0C\u6570\u636E\u4ECD\u4FDD\u5B58\u5728\u7B14\u8BB0\u4E2D\u3002", en: "Hidden from Properties by default; the data remains in the note." },
-  "settings.ratingOffset": { zh: "\u8BC4\u5206\u680F\u5E95\u90E8\u95F4\u8DDD", en: "Rating bar bottom offset" },
-  "settings.ratingOffsetDesc": { zh: "\u79FB\u52A8\u7AEF\u7528\u4E8E\u907F\u5F00\u5DE5\u5177\u680F\u3002", en: "Keeps the mobile rating bar above the toolbar." },
+  "settings.ratingOffset": { zh: "\u79FB\u52A8\u7AEF\u8BC4\u5206\u680F\u5E95\u90E8\u4F4D\u7F6E", en: "Mobile rating bar position" },
+  "settings.ratingOffsetDesc": { zh: "\u81EA\u52A8\u907F\u5F00\u5E95\u90E8\u5DE5\u5177\u680F\uFF1B\u4ECD\u88AB\u6321\u4F4F\u65F6\u8C03\u5927\u3002", en: "Avoids the bottom toolbar automatically. Increase it if the bar is still covered." },
   "settings.openReview": { zh: "\u6253\u5F00\u590D\u4E60", en: "Open review" },
   "settings.hoverFeedback": { zh: "\u60AC\u505C\u56DE\u6D41", en: "Hover feedback" },
   "settings.hoverFeedbackDesc": { zh: "\u628A\u8F83\u8FDC\u7684\u5230\u671F\u65E5\u63D0\u524D\u5230\u4ECA\u5929\uFF0C\u4E0D\u8BA1\u4F5C\u590D\u4E60\u3002", en: "Pulls distant due dates to today without recording a review." },
@@ -922,7 +922,8 @@ var createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown: renderL
     });
     this.rateBar = c.createDiv({ cls: "lexis-rv-rate" });
     this.rateBar.setCssStyles({ display: "none" });
-    const bs = this.plugin.settings.reviewBottomSpace || 70;
+    const bs = this.plugin.settings.reviewBottomSpace ?? 70;
+    this.containerEl.setCssProps({ "--lexis-review-bottom-space": `${bs}px` });
     const isPhone = this.containerEl.doc.body.classList.contains("is-phone");
     this.rateBar.setCssStyles({ marginBottom: isPhone ? "" : bs + "px" });
     if (isPhone) this.updateMobileRateBarOffset();
@@ -968,7 +969,7 @@ var createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown: renderL
   updateMobileRateBarOffset() {
     if (!this.rateBar || !this.containerEl.doc.body.classList.contains("is-phone")) return;
     const navbarHeight = Math.ceil(this.containerEl.doc.querySelector(".mobile-navbar")?.getBoundingClientRect().height || 58);
-    this.rateBar.setCssProps({ "--lexis-mobile-navbar-height": `${navbarHeight}px` });
+    this.containerEl.setCssProps({ "--lexis-mobile-navbar-height": `${navbarHeight}px` });
   }
   async grade(g) {
     if (!this.revealed) {
@@ -1129,7 +1130,7 @@ var createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown: renderL
       void this.refresh();
     };
     this.plugin.renderHeatmap(d.createDiv({ cls: "lexis-hm-wrap" }));
-    c.setCssStyles({ paddingBottom: (this.plugin.settings.reviewBottomSpace || 70) + "px" });
+    c.setCssStyles({ paddingBottom: (this.plugin.settings.reviewBottomSpace ?? 70) + "px" });
   }
 };
 
@@ -4982,8 +4983,9 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
         this.plugin.applyReviewMetadataVisibility();
         await save();
       }));
-      new Setting3(fsrsSection).setName(t("settings.ratingOffset")).setDesc(t("settings.ratingOffsetDesc")).addSlider((s) => s.setLimits(0, 200, 5).setValue(this.plugin.settings.reviewBottomSpace).onChange(async (v) => {
-        this.plugin.settings.reviewBottomSpace = v;
+      new Setting3(fsrsSection).setName(t("settings.ratingOffset")).setDesc(t("settings.ratingOffsetDesc")).addSlider((s) => s.setLimits(0, 200, 5).setValue(this.plugin.settings.reviewBottomSpace).setInstant(true).setDisplayFormat((value) => `${value}px`).onChange(async (value) => {
+        this.plugin.settings.reviewBottomSpace = value;
+        this.app.workspace.containerEl.ownerDocument.querySelectorAll('.workspace-leaf-content[data-type="lexis-review-view"]').forEach((view) => view.setCssProps({ "--lexis-review-bottom-space": `${value}px` }));
         await save();
       }));
       new Setting3(fsrsSection).setName(t("home.start")).addButton((b) => b.setButtonText(t("settings.openReview")).setCta().onClick(() => this.plugin.openHome()));

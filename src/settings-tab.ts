@@ -635,7 +635,18 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
           await save();
         }));
       new Setting(fsrsSection).setName(t("settings.ratingOffset")).setDesc(t("settings.ratingOffsetDesc"))
-        .addSlider((s) => s.setLimits(0, 200, 5).setValue(this.plugin.settings.reviewBottomSpace).onChange(async (v) => { this.plugin.settings.reviewBottomSpace = v; await save(); }));
+        .addSlider((s) => s
+          .setLimits(0, 200, 5)
+          .setValue(this.plugin.settings.reviewBottomSpace)
+          .setInstant(true)
+          .setDisplayFormat((value) => `${value}px`)
+          .onChange(async (value) => {
+            this.plugin.settings.reviewBottomSpace = value;
+            this.app.workspace.containerEl.ownerDocument
+              .querySelectorAll<HTMLElement>('.workspace-leaf-content[data-type="lexis-review-view"]')
+              .forEach((view) => view.setCssProps({ "--lexis-review-bottom-space": `${value}px` }));
+            await save();
+          }));
       new Setting(fsrsSection).setName(t("home.start")).addButton((b) => b.setButtonText(t("settings.openReview")).setCta().onClick(() => this.plugin.openHome()));
       new Setting(fsrsSection).setName(t("settings.hoverFeedback")).setDesc(t("settings.hoverFeedbackDesc"))
         .addToggle((t) => t.setValue(this.plugin.settings.hoverFeedback).onChange(async (v) => { this.plugin.settings.hoverFeedback = v; await save(); }));

@@ -984,7 +984,10 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
 body.is-phone
     .workspace-leaf-content[data-type="lexis-review-view"]
     .view-content {
-    padding-bottom: 136px;
+    padding-bottom: calc(80px + max(
+        var(--lexis-mobile-navbar-height, calc(58px + env(safe-area-inset-bottom, 0px))),
+        var(--lexis-review-bottom-space, 70px)
+    ));
 }
 body.is-phone
     .workspace-leaf-content[data-type="lexis-home-view"]
@@ -995,7 +998,10 @@ body.is-phone .workspace-leaf-content[data-type="lexis-review-view"] .lexis-rv-r
     position: fixed;
     left: max(8px, env(safe-area-inset-left));
     right: max(8px, env(safe-area-inset-right));
-    bottom: var(--lexis-mobile-navbar-height, calc(58px + env(safe-area-inset-bottom, 0px)));
+    bottom: max(
+        var(--lexis-mobile-navbar-height, calc(58px + env(safe-area-inset-bottom, 0px))),
+        var(--lexis-review-bottom-space, 70px)
+    );
     z-index: var(--layer-popover, 50);
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -1010,7 +1016,10 @@ body.is-phone .workspace-leaf-content[data-type="lexis-review-view"] .lexis-rv-r
     backdrop-filter: blur(12px);
 }
 body.is-phone .workspace-leaf-content[data-type="lexis-review-view"] .lexis-review {
-    padding-bottom: 124px;
+    padding-bottom: calc(80px + max(
+        var(--lexis-mobile-navbar-height, calc(58px + env(safe-area-inset-bottom, 0px))),
+        var(--lexis-review-bottom-space, 70px)
+    ));
 }
 
 /* 移动端适配 */
