@@ -277,6 +277,7 @@
 .lexis-web-pop-content img,
 .lexis-web-pop-content svg { max-width: 100%; height: auto; }
 .lexis-web-pop-content .lexis-web-curve { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
+.lexis-web-pop-content .lexis-curve-history { position: sticky; left: 0; width: max-content; max-width: 100%; margin-bottom: 2px; opacity: .7; font-size: 11px; white-space: normal; }
 .lexis-web-pop-content .lexis-web-curve svg { width: auto; height: 122px; max-width: none; }
 .lexis-web-pop-content table { width: 100%; border-collapse: collapse; }
 .lexis-web-pop-content th,

@@ -15,7 +15,7 @@ import { DEFAULT_SETTINGS } from "./default-settings";
 import { FSRS } from "./fsrs";
 import { LexisHomeView, type RetireCandidate } from "./home-view";
 import { createI18n } from "./i18n";
-import { buildCurveSVG } from "./curve";
+import { buildCurveSVG, recentReviewDates } from "./curve";
 import { createReviewView } from "./review-view";
 import { createOccurrenceSearch } from "./occurrence-search";
 import { createBridgeServer } from "./bridge-server";
@@ -968,6 +968,7 @@ Object.defineProperties(LexisPlugin.prototype, createBridgeApi({
   TFile,
   Component,
   todayStr,
+  recentReviewDates,
   escapeRe,
   renderLexisMarkdown,
   finishRenderMath,
@@ -990,6 +991,7 @@ Object.defineProperties(LexisPlugin.prototype, createReaderInteractions({
 }));
 Object.defineProperties(LexisPlugin.prototype, createReaderUi({
   buildCurveSVG,
+  recentReviewDates,
   FSRS,
   addDaysStr,
   daysBetween,

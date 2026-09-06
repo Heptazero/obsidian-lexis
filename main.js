@@ -483,6 +483,7 @@ var MESSAGES = {
   "review.undo": { zh: "\u64A4\u9500 (Z)", en: "Undo (Z)" },
   "review.skip": { zh: "\u8DF3\u8FC7 (S)", en: "Skip (S)" },
   "review.openSource": { zh: "\u5728\u5F53\u524D\u6807\u7B7E\u9875\u6253\u5F00\u539F\u6587", en: "Open source in current tab" },
+  "curve.recentReviews": { zh: "\u6700\u8FD1\u590D\u4E60\uFF1A{dates}", en: "Recent reviews: {dates}" },
   "review.onlyTag": { zh: "\u53EA\u80CC #{tag}", en: "Review only #{tag}" },
   "review.show": { zh: "\u663E\u793A\u7B54\u6848 (\u7A7A\u683C)", en: "Show answer (Space)" },
   "review.again": { zh: "\u91CD\u6765", en: "Again" },
@@ -731,6 +732,12 @@ function createI18n(getLanguage) {
 }
 
 // src/curve.ts
+function recentReviewDates(card, limit = 4) {
+  const dates = (Array.isArray(card.history) ? card.history : []).map((event) => String(event?.date || "").slice(0, 10)).filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date));
+  const lastDate = String(card.last || "").slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(lastDate)) dates.push(lastDate);
+  return [...new Set(dates)].sort().reverse().slice(0, Math.max(1, limit));
+}
 function buildCurveSVG(card, { requestRetention, nextInterval, retrievability, addDaysStr, daysBetween: daysBetween2, todayStr }) {
   const currentS = Number(card.s);
   if (!currentS || isNaN(currentS)) return null;
@@ -776,7 +783,7 @@ function buildCurveSVG(card, { requestRetention, nextInterval, retrievability, a
       path += ` L${xx.toFixed(1)} ${y(retention).toFixed(1)}`;
     }
   }
-  const grid = [1, 0.5, 0].map((retention) => {
+  const grid = [1, 0.75, 0.5, 0.25, 0].map((retention) => {
     const yy = y(retention).toFixed(1);
     return `<line x1="${left}" y1="${yy}" x2="${W - right}" y2="${yy}" stroke="var(--background-modifier-border)" stroke-width="1"/><text x="${left - 5}" y="${(+yy + 3.5).toFixed(1)}" text-anchor="end" fill="var(--text-muted)" font-size="9">${Math.round(retention * 100)}%</text>`;
   }).join("");
@@ -795,7 +802,7 @@ function buildCurveSVG(card, { requestRetention, nextInterval, retrievability, a
   const todayRetention = retrievability(Math.max(0, daysBetween2(latest.date, today)), latest.s);
   const todayX = xDate(today);
   const todayPoint = today >= startDate && today <= endDate ? `<circle cx="${todayX.toFixed(1)}" cy="${y(todayRetention).toFixed(1)}" r="3" fill="var(--interactive-accent)"/>` : "";
-  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">` + grid + `<line x1="${left}" y1="${targetY}" x2="${W - right}" y2="${targetY}" stroke="var(--text-faint)" stroke-dasharray="3 3" stroke-width="1"/><path d="${path}" fill="none" stroke="var(--interactive-accent)" stroke-width="2"/>` + reviewMarks + todayPoint + `</svg>`;
+  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">` + grid + `<line x1="${left}" y1="${top}" x2="${left}" y2="${H - bottom}" stroke="var(--text-muted)" stroke-width="1"/><line x1="${left}" y1="${H - bottom}" x2="${W - right}" y2="${H - bottom}" stroke="var(--text-muted)" stroke-width="1"/><line x1="${left}" y1="${targetY}" x2="${W - right}" y2="${targetY}" stroke="var(--text-faint)" stroke-dasharray="3 3" stroke-width="1"/><path d="${path}" fill="none" stroke="var(--interactive-accent)" stroke-width="2"/>` + reviewMarks + todayPoint + `</svg>`;
 }
 
 // src/review-view.ts
@@ -885,6 +892,13 @@ var createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown: renderL
     const sb = topbtns.createEl("button", { cls: "lexis-rv-undo", text: this.plugin.t("review.skip") });
     sb.addEventListener("click", () => this.skip());
     const card = c.createDiv({ cls: "lexis-rv-card" });
+    card.addEventListener("click", (event) => {
+      const image = event.composedPath().find((node) => node?.tagName === "IMG");
+      if (!image || !card.contains(image)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.openImagePreview(image);
+    }, { capture: true });
     let wordEl;
     if (item.type === "syntax" && item.syntax) {
       const source = card.createEl("button", { cls: "lexis-rv-source", text: `${item.file.basename} \xB7 L${item.syntax.line + 1}`, attr: { type: "button" } });
@@ -960,7 +974,6 @@ var createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown: renderL
         openOcc();
         window.setTimeout(openOcc, 60);
       }
-      this.installAnswerInteractions();
     } catch (err) {
       this.backEl.setText(this.plugin.t("review.renderFailed", { error: errorMessage(err) }));
       console.error("[Lexis] reveal error", err);
@@ -1079,16 +1092,6 @@ var createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown: renderL
     this._frontComp = new import_obsidian3.Component();
     this._frontComp.load();
     await renderLexisMarkdown2(this.app, item.syntax.front, wordEl, item.file.path, this._frontComp);
-  }
-  installAnswerInteractions() {
-    this.backEl.querySelectorAll("img").forEach((img) => {
-      img.classList.add("lexis-rv-zoomable");
-      img.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        this.openImagePreview(img);
-      });
-    });
   }
   openImagePreview(source) {
     this.closeImagePreview();
@@ -1384,7 +1387,7 @@ function errorMessage2(error) {
 function textValue(value) {
   return typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? String(value) : "";
 }
-function createBridgeApi({ DEFAULT_SETTINGS: DEFAULT_SETTINGS2, TFile: TFile4, Component: Component4, todayStr, escapeRe: escapeRe2, renderLexisMarkdown: renderLexisMarkdown2, finishRenderMath: finishRenderMath2, escHtml, saveAnnotationImage: saveAnnotationImage2, vaultImageDataUrl: vaultImageDataUrl2 }) {
+function createBridgeApi({ DEFAULT_SETTINGS: DEFAULT_SETTINGS2, TFile: TFile4, Component: Component4, todayStr, recentReviewDates: recentReviewDates2, escapeRe: escapeRe2, renderLexisMarkdown: renderLexisMarkdown2, finishRenderMath: finishRenderMath2, escHtml, saveAnnotationImage: saveAnnotationImage2, vaultImageDataUrl: vaultImageDataUrl2 }) {
   class BridgeApi {
     // ---------- 词典桥接动作（由 Obsidian 卡片与外部阅读端共同调用） ----------
     // 网页划词/加出处:词不在库→新建,在库→加出处。来源是网址链接 [标题](url),不是 [[内链]]
@@ -1965,7 +1968,9 @@ ${line}`);
         const svg = this.buildCurveSVG(card);
         if (svg) {
           const due = card.due ? ` \xB7 \u4E0B\u6B21\u590D\u4E60 ${String(card.due).slice(0, 10)}` : "";
-          html += `<div class="lexis-web-sec">\u{1F9E0} \u8BB0\u5FC6\u66F2\u7EBF\uFF08\u590D\u4E60\u65E5\u671F \xD7 \u4FDD\u7559\u7387${due}\uFF09</div><div class="lexis-web-curve">${svg}</div>`;
+          const dates = recentReviewDates2(card);
+          const history = dates.length ? `<div class="lexis-curve-history">${escHtml(this.t("curve.recentReviews", { dates: dates.map((date) => date.slice(5)).join(" \xB7 ") }))}</div>` : "";
+          html += `<div class="lexis-web-sec">\u{1F9E0} \u8BB0\u5FC6\u66F2\u7EBF\uFF08\u590D\u4E60\u65E5\u671F \xD7 \u4FDD\u7559\u7387${due}\uFF09</div><div class="lexis-web-curve">${history}${svg}</div>`;
         }
       }
       if (showRelated && this.settings.showRelated) {
@@ -3371,7 +3376,7 @@ function confirmAction(app, title, message) {
     new ConfirmModal(app).open();
   });
 }
-function createReaderUi({ buildCurveSVG: buildCurveSVG2, FSRS: FSRS2, addDaysStr, daysBetween: daysBetween2, todayStr, fmtDate, TFile: TFile4, Notice: Notice4, boundedSource: boundedSource2, escapeRe: escapeRe2, Component: Component4, renderLexisMarkdown: renderLexisMarkdown2, openRestoreModal }) {
+function createReaderUi({ buildCurveSVG: buildCurveSVG2, recentReviewDates: recentReviewDates2, FSRS: FSRS2, addDaysStr, daysBetween: daysBetween2, todayStr, fmtDate, TFile: TFile4, Notice: Notice4, boundedSource: boundedSource2, escapeRe: escapeRe2, Component: Component4, renderLexisMarkdown: renderLexisMarkdown2, openRestoreModal }) {
   class ReaderUi {
     // 遗忘曲线 SVG(FSRS 衰减)
     buildCurveSVG(card) {
@@ -3413,6 +3418,8 @@ function createReaderUi({ buildCurveSVG: buildCurveSVG2, FSRS: FSRS2, addDaysStr
           el.createDiv({ cls: "lexis-section-title", text: `\u{1F9E0} \u8BB0\u5FC6\u66F2\u7EBF\uFF08\u590D\u4E60\u65E5\u671F \xD7 \u4FDD\u7559\u7387${due}\uFF09` });
           const parsed = new DOMParser().parseFromString(svg, "image/svg+xml");
           const curve = el.createDiv({ cls: "lexis-curve" });
+          const dates = recentReviewDates2(card);
+          if (dates.length) curve.createDiv({ cls: "lexis-curve-history", text: this.t("curve.recentReviews", { dates: dates.map((date) => date.slice(5)).join(" \xB7 ") }) });
           curve.appendChild(curve.ownerDocument.importNode(parsed.documentElement, true));
         }
       }
@@ -6717,6 +6724,7 @@ Object.defineProperties(LexisPlugin.prototype, createBridgeApi({
   TFile: import_obsidian7.TFile,
   Component: import_obsidian7.Component,
   todayStr: todayString,
+  recentReviewDates,
   escapeRe,
   renderLexisMarkdown,
   finishRenderMath: import_obsidian7.finishRenderMath,
@@ -6741,6 +6749,7 @@ Object.defineProperties(LexisPlugin.prototype, createReaderInteractions({
 }));
 Object.defineProperties(LexisPlugin.prototype, createReaderUi({
   buildCurveSVG,
+  recentReviewDates,
   FSRS,
   addDaysStr: addDaysString,
   daysBetween,

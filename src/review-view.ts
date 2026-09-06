@@ -120,6 +120,13 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
     const sb = topbtns.createEl("button", { cls: "lexis-rv-undo", text: this.plugin.t("review.skip") });
     sb.addEventListener("click", () => this.skip());
     const card = c.createDiv({ cls: "lexis-rv-card" });
+    card.addEventListener("click", (event) => {
+      const image = event.composedPath().find((node): node is HTMLImageElement => (node as HTMLElement)?.tagName === "IMG");
+      if (!image || !card.contains(image)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.openImagePreview(image);
+    }, { capture: true });
     let wordEl: HTMLElement;
     if (item.type === "syntax" && item.syntax) {
       const source = card.createEl("button", { cls: "lexis-rv-source", text: `${item.file.basename} · L${item.syntax.line + 1}`, attr: { type: "button" } });
@@ -181,7 +188,6 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
         const openOcc = () => this.backEl.querySelectorAll<HTMLDetailsElement>("details.lexis-occ-details").forEach((details) => { details.open = true; });
         openOcc(); window.setTimeout(openOcc, 60);
       }
-      this.installAnswerInteractions();
     } catch (err) {
       this.backEl.setText(this.plugin.t("review.renderFailed", { error: errorMessage(err) }));
       console.error("[Lexis] reveal error", err);
@@ -267,12 +273,6 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
     if (!item.syntax || this.currentItem !== item) return;
     this._frontComp = new Component(); this._frontComp.load();
     await renderLexisMarkdown(this.app, item.syntax.front, wordEl, item.file.path, this._frontComp);
-  }
-  installAnswerInteractions() {
-    this.backEl.querySelectorAll("img").forEach((img) => {
-      img.classList.add("lexis-rv-zoomable");
-      img.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); this.openImagePreview(img); });
-    });
   }
   openImagePreview(source: HTMLImageElement) {
     this.closeImagePreview();

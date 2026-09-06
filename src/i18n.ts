@@ -95,6 +95,7 @@ const MESSAGES: Record<string, TranslationPair> = {
   "review.undo": { zh: "撤销 (Z)", en: "Undo (Z)" },
   "review.skip": { zh: "跳过 (S)", en: "Skip (S)" },
   "review.openSource": { zh: "在当前标签页打开原文", en: "Open source in current tab" },
+  "curve.recentReviews": { zh: "最近复习：{dates}", en: "Recent reviews: {dates}" },
   "review.onlyTag": { zh: "只背 #{tag}", en: "Review only #{tag}" },
   "review.show": { zh: "显示答案 (空格)", en: "Show answer (Space)" },
   "review.again": { zh: "重来", en: "Again" },

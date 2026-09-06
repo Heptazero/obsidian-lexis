@@ -24,6 +24,15 @@ interface CurveEvent {
   retention?: number;
 }
 
+function recentReviewDates(card: CurveCard, limit = 4): string[] {
+  const dates = (Array.isArray(card.history) ? card.history : [])
+    .map((event) => String(event?.date || "").slice(0, 10))
+    .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date));
+  const lastDate = String(card.last || "").slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(lastDate)) dates.push(lastDate);
+  return [...new Set(dates)].sort().reverse().slice(0, Math.max(1, limit));
+}
+
 // 纯呈现：按真实复习日期画分段遗忘曲线；调度参数和日期工具由主插件注入。
 function buildCurveSVG(card: CurveCard, { requestRetention, nextInterval, retrievability, addDaysStr, daysBetween, todayStr }: CurveDependencies): string | null {
   const currentS = Number(card.s);
@@ -77,7 +86,7 @@ function buildCurveSVG(card: CurveCard, { requestRetention, nextInterval, retrie
     }
   }
 
-  const grid = [1, 0.5, 0].map((retention) => {
+  const grid = [1, 0.75, 0.5, 0.25, 0].map((retention) => {
     const yy = y(retention).toFixed(1);
     return `<line x1="${left}" y1="${yy}" x2="${W - right}" y2="${yy}" stroke="var(--background-modifier-border)" stroke-width="1"/>` +
       `<text x="${left - 5}" y="${(+yy + 3.5).toFixed(1)}" text-anchor="end" fill="var(--text-muted)" font-size="9">${Math.round(retention * 100)}%</text>`;
@@ -104,10 +113,12 @@ function buildCurveSVG(card: CurveCard, { requestRetention, nextInterval, retrie
 
   return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">` +
     grid +
+    `<line x1="${left}" y1="${top}" x2="${left}" y2="${H - bottom}" stroke="var(--text-muted)" stroke-width="1"/>` +
+    `<line x1="${left}" y1="${H - bottom}" x2="${W - right}" y2="${H - bottom}" stroke="var(--text-muted)" stroke-width="1"/>` +
     `<line x1="${left}" y1="${targetY}" x2="${W - right}" y2="${targetY}" stroke="var(--text-faint)" stroke-dasharray="3 3" stroke-width="1"/>` +
     `<path d="${path}" fill="none" stroke="var(--interactive-accent)" stroke-width="2"/>` +
     reviewMarks + todayPoint +
     `</svg>`;
 }
 
-export { buildCurveSVG };
+export { buildCurveSVG, recentReviewDates };

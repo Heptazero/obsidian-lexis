@@ -563,8 +563,9 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
 .lexis-rv-back img {
     max-width: 100%;
 }
-.lexis-rv-back img.lexis-rv-zoomable {
+.lexis-rv-card img {
     cursor: zoom-in;
+    touch-action: manipulation;
 }
 .lexis-rv-rate {
     display: flex;
@@ -717,6 +718,16 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     overflow-x: auto;
     overscroll-behavior-inline: contain;
     -webkit-overflow-scrolling: touch;
+}
+.lexis-curve-history {
+    position: sticky;
+    left: 0;
+    width: max-content;
+    max-width: 100%;
+    margin-bottom: 2px;
+    color: var(--text-muted);
+    font-size: 11px;
+    white-space: normal;
 }
 .lexis-curve svg {
     width: auto;

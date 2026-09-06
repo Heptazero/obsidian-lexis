@@ -15,6 +15,7 @@ type HighlightSource = { file: ObsidianTFile | null; sentence: string; page?: nu
 interface FsrsDisplayApi { nextInterval(stability: number, retention: number): number; retrievability(elapsedDays: number, stability: number): number }
 interface ReaderUiDependencies {
   buildCurveSVG: (card: CurveCard, dependencies: { requestRetention: number; nextInterval: FsrsDisplayApi["nextInterval"]; retrievability: FsrsDisplayApi["retrievability"]; addDaysStr: (date: string, days: number) => string; daysBetween: (start: string, end: string) => number; todayStr: () => string }) => string | null;
+  recentReviewDates: (card: CurveCard, limit?: number) => string[];
   FSRS: FsrsDisplayApi;
   addDaysStr: (date: string, days: number) => string;
   daysBetween: (start: string, end: string) => number;
@@ -48,7 +49,7 @@ function confirmAction(app: App, title: string, message: string): Promise<boolea
   });
 }
 
-function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr, fmtDate, TFile, Notice, boundedSource, escapeRe, Component, renderLexisMarkdown, openRestoreModal }: ReaderUiDependencies): PropertyDescriptorMap {
+function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, daysBetween, todayStr, fmtDate, TFile, Notice, boundedSource, escapeRe, Component, renderLexisMarkdown, openRestoreModal }: ReaderUiDependencies): PropertyDescriptorMap {
   class ReaderUi {
   declare app: App;
   declare settings: LexisSettings;
@@ -121,6 +122,8 @@ function createReaderUi({ buildCurveSVG, FSRS, addDaysStr, daysBetween, todayStr
         el.createDiv({ cls: "lexis-section-title", text: `🧠 记忆曲线（复习日期 × 保留率${due}）` });
         const parsed = new DOMParser().parseFromString(svg, "image/svg+xml");
         const curve = el.createDiv({ cls: "lexis-curve" });
+        const dates = recentReviewDates(card);
+        if (dates.length) curve.createDiv({ cls: "lexis-curve-history", text: this.t("curve.recentReviews", { dates: dates.map((date) => date.slice(5)).join(" · ") }) });
         curve.appendChild(curve.ownerDocument.importNode(parsed.documentElement, true));
       }
     }

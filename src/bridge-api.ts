@@ -26,6 +26,7 @@ interface BridgeApiDependencies {
   TFile: typeof ObsidianTFile;
   Component: typeof ObsidianComponent;
   todayStr: () => string;
+  recentReviewDates: (card: CurveCard, limit?: number) => string[];
   escapeRe: (value: string) => string;
   renderLexisMarkdown: (app: App, markdown: string, element: HTMLElement, sourcePath: string, component: ObsidianComponent) => Promise<void>;
   finishRenderMath: () => Promise<void>;
@@ -37,6 +38,7 @@ interface BridgeApiDependencies {
 interface BridgeApiHost {
   app: App;
   settings: LexisSettings;
+  t(key: string, vars?: Record<string, string | number | boolean | null | undefined>): string;
   index: Map<string, LexisEntry>;
   stats: LexisStats;
   inlineCategoryOccurrences: InlineCategoryOccurrence[];
@@ -84,10 +86,11 @@ function textValue(value: unknown): string {
   return typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? String(value) : "";
 }
 
-function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, escapeRe, renderLexisMarkdown, finishRenderMath, escHtml, saveAnnotationImage, vaultImageDataUrl }: BridgeApiDependencies): PropertyDescriptorMap {
+function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, recentReviewDates, escapeRe, renderLexisMarkdown, finishRenderMath, escHtml, saveAnnotationImage, vaultImageDataUrl }: BridgeApiDependencies): PropertyDescriptorMap {
   class BridgeApi {
   declare app: BridgeApiHost["app"];
   declare settings: BridgeApiHost["settings"];
+  declare t: BridgeApiHost["t"];
   declare index: BridgeApiHost["index"];
   declare stats: BridgeApiHost["stats"];
   declare inlineCategoryOccurrences: BridgeApiHost["inlineCategoryOccurrences"];
@@ -626,7 +629,12 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, escapeR
     if (showCurve) {
       const card = this.readCard(file);
       const svg = this.buildCurveSVG(card);
-      if (svg) { const due = card.due ? ` · 下次复习 ${String(card.due).slice(0, 10)}` : ""; html += `<div class="lexis-web-sec">🧠 记忆曲线（复习日期 × 保留率${due}）</div><div class="lexis-web-curve">${svg}</div>`; }
+      if (svg) {
+        const due = card.due ? ` · 下次复习 ${String(card.due).slice(0, 10)}` : "";
+        const dates = recentReviewDates(card);
+        const history = dates.length ? `<div class="lexis-curve-history">${escHtml(this.t("curve.recentReviews", { dates: dates.map((date) => date.slice(5)).join(" · ") }))}</div>` : "";
+        html += `<div class="lexis-web-sec">🧠 记忆曲线（复习日期 × 保留率${due}）</div><div class="lexis-web-curve">${history}${svg}</div>`;
+      }
     }
     if (showRelated && this.settings.showRelated) {
       try {
