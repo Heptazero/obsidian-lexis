@@ -685,7 +685,7 @@ var MESSAGES = {
   "settings.showReviewMetadata": { zh: "\u663E\u793A\u590D\u4E60\u5185\u90E8\u72B6\u6001", en: "Show internal review state" },
   "settings.showReviewMetadataDesc": { zh: "\u9ED8\u8BA4\u5728\u5C5E\u6027\u9762\u677F\u9690\u85CF\uFF0C\u6570\u636E\u4ECD\u4FDD\u5B58\u5728\u7B14\u8BB0\u4E2D\u3002", en: "Hidden from Properties by default; the data remains in the note." },
   "settings.ratingOffset": { zh: "\u79FB\u52A8\u7AEF\u8BC4\u5206\u680F\u5E95\u90E8\u4F4D\u7F6E", en: "Mobile rating bar position" },
-  "settings.ratingOffsetDesc": { zh: "\u81EA\u52A8\u907F\u5F00\u5E95\u90E8\u5DE5\u5177\u680F\uFF1B\u4ECD\u88AB\u6321\u4F4F\u65F6\u8C03\u5927\u3002", en: "Avoids the bottom toolbar automatically. Increase it if the bar is still covered." },
+  "settings.ratingOffsetDesc": { zh: "\u8BC4\u5206\u680F\u81EA\u52A8\u907F\u5F00\u5DE5\u5177\u680F\uFF0C\u5361\u7247\u5E95\u90E8\u7559\u767D\u4F1A\u540C\u6B65\u8C03\u6574\u3002", en: "Moves the rating bar above the toolbar and keeps matching space below the card." },
   "settings.openReview": { zh: "\u6253\u5F00\u590D\u4E60", en: "Open review" },
   "settings.hoverFeedback": { zh: "\u60AC\u505C\u56DE\u6D41", en: "Hover feedback" },
   "settings.hoverFeedbackDesc": { zh: "\u628A\u8F83\u8FDC\u7684\u5230\u671F\u65E5\u63D0\u524D\u5230\u4ECA\u5929\uFF0C\u4E0D\u8BA1\u4F5C\u590D\u4E60\u3002", en: "Pulls distant due dates to today without recording a review." },
@@ -837,7 +837,7 @@ var createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown: renderL
   }
   async onOpen() {
     this.registerDomEvent(window, "keydown", (event) => this.onKey(event));
-    this.registerDomEvent(window, "resize", () => this.updateMobileRateBarOffset());
+    this.registerDomEvent(window, "resize", () => this.updateMobileReviewLayout());
     const saved = this.plugin.takeReviewSession(this.leaf);
     if (!saved) {
       await this.refresh();
@@ -870,6 +870,7 @@ var createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown: renderL
     const c = this.contentEl;
     c.empty();
     c.addClass("lexis-review");
+    c.setCssStyles({ paddingBottom: "" });
     if (this.pos >= this.queue.length) {
       this.renderDone(c);
       return;
@@ -940,7 +941,6 @@ var createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown: renderL
     this.containerEl.setCssProps({ "--lexis-review-bottom-space": `${bs}px` });
     const isPhone = this.containerEl.doc.body.classList.contains("is-phone");
     this.rateBar.setCssStyles({ marginBottom: isPhone ? "" : bs + "px" });
-    if (isPhone) this.updateMobileRateBarOffset();
     const grades = [[1, "review.again"], [2, "review.hard"], [3, "review.good"], [4, "review.easy"]];
     for (const [g, key] of grades) {
       const ivl = this.plugin.scheduleCard(item.card, g).interval;
@@ -951,6 +951,7 @@ var createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown: renderL
         void this.grade(g);
       });
     }
+    if (isPhone) this.updateMobileReviewLayout();
   }
   async reveal() {
     if (this.revealed) return;
@@ -958,6 +959,7 @@ var createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown: renderL
     this.showBtn.setCssStyles({ display: "none" });
     this.backEl.setCssStyles({ display: "" });
     this.rateBar.setCssStyles({ display: "" });
+    this.updateMobileReviewLayout();
     try {
       if (this._comp) this._comp.unload();
       this._comp = new import_obsidian3.Component();
@@ -979,10 +981,12 @@ var createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown: renderL
       console.error("[Lexis] reveal error", err);
     }
   }
-  updateMobileRateBarOffset() {
+  updateMobileReviewLayout() {
     if (!this.rateBar || !this.containerEl.doc.body.classList.contains("is-phone")) return;
     const navbarHeight = Math.ceil(this.containerEl.doc.querySelector(".mobile-navbar")?.getBoundingClientRect().height || 58);
     this.containerEl.setCssProps({ "--lexis-mobile-navbar-height": `${navbarHeight}px` });
+    const rateBarHeight = Math.ceil(this.rateBar.getBoundingClientRect().height);
+    if (rateBarHeight) this.containerEl.setCssProps({ "--lexis-mobile-rate-height": `${rateBarHeight}px` });
   }
   async grade(g) {
     if (!this.revealed) {
@@ -1133,7 +1137,8 @@ var createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown: renderL
       void this.refresh();
     };
     this.plugin.renderHeatmap(d.createDiv({ cls: "lexis-hm-wrap" }));
-    c.setCssStyles({ paddingBottom: (this.plugin.settings.reviewBottomSpace ?? 70) + "px" });
+    const isPhone = this.containerEl.doc.body.classList.contains("is-phone");
+    c.setCssStyles({ paddingBottom: isPhone ? "" : `${this.plugin.settings.reviewBottomSpace ?? 70}px` });
   }
 };
 
@@ -2599,6 +2604,10 @@ function createHighlightEngine({ Notice: Notice4, boundedSource: boundedSource2,
 }
 
 // src/document-highlights.ts
+function selectionTouchesLayer(layer, selection) {
+  if (!selection || selection.isCollapsed) return false;
+  return !!(selection.anchorNode && layer.contains(selection.anchorNode) || selection.focusNode && layer.contains(selection.focusNode));
+}
 function createDocumentHighlights() {
   class DocumentHighlights {
     // ---------- PDF 高亮(钩 pdf.js 文字层) ----------
@@ -2822,6 +2831,17 @@ function createDocumentHighlights() {
         if (!next.done) {
           this._pdfPending.delete(next.value);
           if (next.value.isConnected) {
+            if (this.pdfLayerHasSelection(next.value)) {
+              this._pdfPending.add(next.value);
+              next.value.parentElement?.querySelector(":scope > .lexis-pdf-hl-layer")?.classList.remove("is-geometry-changing");
+              if (!this._pdfResizeTimer) {
+                this._pdfResizeTimer = this._pdfWindow?.setTimeout(() => {
+                  this._pdfResizeTimer = 0;
+                  if (!this._pdfRaf) this._pdfRaf = this._pdfWindow?.requestAnimationFrame(flush) || 0;
+                }, 120) || 0;
+              }
+              return;
+            }
             this.scanPdfLayer(next.value);
             next.value.parentElement?.querySelector(":scope > .lexis-pdf-hl-layer")?.classList.remove("is-geometry-changing");
           }
@@ -2858,6 +2878,20 @@ function createDocumentHighlights() {
         let geometryChanged = false;
         for (const mu of muts) {
           const targetElement = mu.target.nodeType === 1 ? mu.target : mu.target.parentElement;
+          if (mu.type === "attributes") {
+            if (targetElement?.classList.contains("textLayer")) {
+              this.markPdfGeometryChanging(targetElement);
+              geometryChanged = true;
+            } else if (targetElement?.matches(".page, .canvasWrapper, canvas")) {
+              const page = targetElement.classList.contains("page") ? targetElement : targetElement.closest(".page");
+              const layer = page?.querySelector(":scope > .textLayer");
+              if (layer) {
+                this.markPdfGeometryChanging(layer);
+                geometryChanged = true;
+              }
+            }
+            continue;
+          }
           if (targetElement && !targetElement.closest(".lexis-hl,.lexis-pdf-hl-layer")) {
             const containingLayer = targetElement.classList.contains("textLayer") ? targetElement : targetElement.closest(".textLayer");
             if (containingLayer) {
@@ -2872,7 +2906,6 @@ function createDocumentHighlights() {
               }
             }
           }
-          if (mu.type === "attributes") continue;
           for (const node of mu.addedNodes) {
             if (node.nodeType !== 1) continue;
             const element = node;
@@ -2904,7 +2937,10 @@ function createDocumentHighlights() {
     markPdfGeometryChanging(layer) {
       if (!layer?.isConnected) return;
       this._pdfPending?.add(layer);
-      layer.parentElement?.querySelector(":scope > .lexis-pdf-hl-layer")?.classList.add("is-geometry-changing");
+      if (!this.pdfLayerHasSelection(layer)) layer.parentElement?.querySelector(":scope > .lexis-pdf-hl-layer")?.classList.add("is-geometry-changing");
+    }
+    pdfLayerHasSelection(layer) {
+      return selectionTouchesLayer(layer, this._pdfWindow?.getSelection() || null);
     }
     scanPdfLayer(layer) {
       if (!this.settings.enablePdfHighlight || !this.settings.enableHighlight) return;
@@ -3190,6 +3226,8 @@ function createReaderInteractions({ openAliasPicker }) {
         event.stopPropagation();
         window.clearTimeout(this._hideTimer);
         const start = popover.getBoundingClientRect();
+        const startHeight = popover.style.height;
+        const startMaxHeight = popover.style.maxHeight;
         const startX = event.clientX;
         const startY = event.clientY;
         popover.dataset.lexisResizing = "1";
@@ -3210,11 +3248,12 @@ function createReaderInteractions({ openAliasPicker }) {
           handle.removeEventListener("pointercancel", onPointerCancel);
           delete popover.dataset.lexisResizing;
           if (cancelled) {
-            popover.setCssStyles({ width: `${start.width}px`, height: `${start.height}px`, maxHeight: `${start.height}px` });
+            popover.setCssStyles({ width: `${start.width}px`, height: startHeight, maxHeight: startMaxHeight });
           } else {
             const result = popover.getBoundingClientRect();
             this.settings.popoverWidth = Math.round(result.width);
             this.settings.popoverMaxHeight = Math.round(result.height);
+            popover.setCssStyles({ height: "", maxHeight: `${this.settings.popoverMaxHeight}px` });
             void this.saveSettings();
           }
           this.positionPopover(popover, target);
@@ -3973,11 +4012,9 @@ ${line}---` + data.slice(fm.index + fm[0].length);
         "--lexis-popover-height": `${height}px`,
         "--lexis-popover-font-size": `${fontSize}px`
       });
-      const isPreview = pop.classList.contains("lexis-popover-preview");
-      const coarsePointer = pop.ownerDocument.defaultView?.matchMedia?.("(pointer: coarse)").matches;
       pop.setCssStyles({
         width: `${width}px`,
-        height: !isPreview && !coarsePointer ? `${height}px` : "",
+        height: "",
         maxHeight: `${height}px`,
         fontSize: `${fontSize}px`
       });
@@ -5492,6 +5529,30 @@ function createReviewQueue({ todayStr }) {
   return descriptors;
 }
 
+// src/settings-migration.ts
+function pluginFolderName(manifestDir, pluginId) {
+  return (manifestDir || pluginId).replace(/\/+$/, "").split("/").pop() || pluginId;
+}
+function mergeRecord(legacy, current) {
+  const left = legacy && typeof legacy === "object" && !Array.isArray(legacy) ? legacy : {};
+  const right = current && typeof current === "object" && !Array.isArray(current) ? current : {};
+  return { ...left, ...right };
+}
+function migrateLegacySettings(current, legacy) {
+  if (!legacy || current.legacySettingsImported) return { settings: current, migrated: false };
+  return {
+    settings: {
+      ...current,
+      ...legacy,
+      reviewLog: mergeRecord(legacy.reviewLog, current.reviewLog),
+      reviewHistory: mergeRecord(legacy.reviewHistory, current.reviewHistory),
+      syntaxCardStates: mergeRecord(legacy.syntaxCardStates, current.syntaxCardStates),
+      legacySettingsImported: true
+    },
+    migrated: true
+  };
+}
+
 // src/workspace-documents.ts
 var WorkspaceDocuments = class {
   constructor(plugin, callbacks) {
@@ -5993,8 +6054,22 @@ var LexisPlugin = class extends import_obsidian7.Plugin {
     this.bridge?.stop();
     this._workspaceDocuments?.forEach((document2) => document2.body?.classList.remove("lexis-show-review-metadata"));
   }
+  async loadStoredSettings() {
+    const current = await this.loadData() || {};
+    if (pluginFolderName(this.manifest.dir, this.manifest.id) !== this.manifest.id || current.legacySettingsImported) return current;
+    const legacyPath = `${this.app.vault.configDir}/plugins/lexis-local/data.json`;
+    if (!await this.app.vault.adapter.exists(legacyPath)) return current;
+    try {
+      const legacy = JSON.parse(await this.app.vault.adapter.read(legacyPath));
+      const result = migrateLegacySettings(current, legacy);
+      if (result.migrated) await this.saveData(result.settings);
+      return result.settings;
+    } catch {
+      return current;
+    }
+  }
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadStoredSettings());
     if ((!this.settings.tagRules || !this.settings.tagRules.length) && this.settings.tagRulesText) {
       this.settings.tagRules = this.parseTagRulesText(this.settings.tagRulesText);
       delete this.settings.tagRulesText;

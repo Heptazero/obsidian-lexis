@@ -77,6 +77,7 @@ export interface ReviewHistoryEvent {
 }
 
 export interface LexisSettings {
+  legacySettingsImported?: boolean;
   language: Language;
   vocabTags: string;
   includeAliases: boolean;

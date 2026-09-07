@@ -15,11 +15,9 @@
 .lexis-web-pop {
   position: relative;
   width: min(var(--lexis-popover-width, 460px), calc(100vw - 20px));
-  height: min(var(--lexis-popover-height, 420px), calc(100vh - 20px));
   max-width: calc(100vw - 20px);
   max-height: min(var(--lexis-popover-height, 420px), calc(100vh - 20px));
   min-width: 260px;
-  min-height: 160px;
   overflow: hidden;
   border: 1px solid rgba(0, 0, 0, 0.12);
   border-radius: 10px;
@@ -32,7 +30,7 @@
 .lexis-web-pop-scroll {
   position: relative;
   width: 100%;
-  height: 100%;
+  max-height: inherit;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 10px 12px 20px;

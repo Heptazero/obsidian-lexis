@@ -29,6 +29,7 @@ import { createTemplateProvider } from "./template-provider";
 import { createSettingsTab } from "./settings-tab";
 import { createReviewState } from "./review-state";
 import { createReviewQueue } from "./review-queue";
+import { migrateLegacySettings, pluginFolderName, type StoredSettings } from "./settings-migration";
 import { WorkspaceDocuments } from "./workspace-documents";
 import { LexisRestoreModal } from "./restore-modal";
 import { saveAnnotationImage, vaultImageDataUrl } from "./annotation-images";
@@ -393,8 +394,23 @@ class LexisPlugin extends Plugin {
     this._workspaceDocuments?.forEach((document) => document.body?.classList.remove("lexis-show-review-metadata"));
   }
 
+  async loadStoredSettings(): Promise<StoredSettings> {
+    const current = ((await this.loadData()) || {}) as StoredSettings;
+    if (pluginFolderName(this.manifest.dir, this.manifest.id) !== this.manifest.id || current.legacySettingsImported) return current;
+    const legacyPath = `${this.app.vault.configDir}/plugins/lexis-local/data.json`;
+    if (!(await this.app.vault.adapter.exists(legacyPath))) return current;
+    try {
+      const legacy = JSON.parse(await this.app.vault.adapter.read(legacyPath)) as StoredSettings;
+      const result = migrateLegacySettings(current, legacy);
+      if (result.migrated) await this.saveData(result.settings);
+      return result.settings;
+    } catch {
+      return current;
+    }
+  }
+
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData()) as LexisSettings;
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadStoredSettings()) as LexisSettings;
     if ((!this.settings.tagRules || !this.settings.tagRules.length) && this.settings.tagRulesText) {
       this.settings.tagRules = this.parseTagRulesText(this.settings.tagRulesText);
       delete this.settings.tagRulesText;

@@ -569,11 +569,9 @@ function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, da
       "--lexis-popover-font-size": `${fontSize}px`,
     });
     // 内联值保证主题样式无法盖掉用户设置；桌面实卡恢复上次拖拽后的实际尺寸。
-    const isPreview = pop.classList.contains("lexis-popover-preview");
-    const coarsePointer = pop.ownerDocument.defaultView?.matchMedia?.("(pointer: coarse)").matches;
     pop.setCssStyles({
       width: `${width}px`,
-      height: !isPreview && !coarsePointer ? `${height}px` : "",
+      height: "",
       maxHeight: `${height}px`,
       fontSize: `${fontSize}px`,
     });

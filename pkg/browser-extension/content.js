@@ -431,6 +431,8 @@
       event.stopPropagation();
       clearTimeout(hideTimer);
       const start = box.getBoundingClientRect();
+      const startHeight = box.style.height;
+      const startMaxHeight = box.style.maxHeight;
       const startX = event.clientX;
       const startY = event.clientY;
       box.dataset.lexisResizing = "1";
@@ -451,11 +453,13 @@
         delete box.dataset.lexisResizing;
         if (cancelled) {
           box.style.width = start.width + "px";
-          box.style.height = start.height + "px";
-          box.style.maxHeight = start.height + "px";
+          box.style.height = startHeight;
+          box.style.maxHeight = startMaxHeight;
         } else {
           const result = box.getBoundingClientRect();
           popoverSize = { width: Math.round(result.width), height: Math.round(result.height) };
+          box.style.height = "";
+          box.style.maxHeight = popoverSize.height + "px";
           void chrome.storage.local.set({ popoverSize });
         }
         position(popHost, anchor);
@@ -495,7 +499,6 @@
     pop.style.setProperty("--lexis-popover-height", height + "px");
     pop.style.setProperty("--lexis-popover-font-size", fontSize + "px");
     pop.style.width = width + "px";
-    pop.style.height = height + "px";
     pop.style.maxHeight = height + "px";
     attachPopoverResize(pop, span);
     position(popHost, span);

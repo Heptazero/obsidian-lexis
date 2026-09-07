@@ -301,7 +301,7 @@ const MESSAGES: Record<string, TranslationPair> = {
   "settings.showReviewMetadata": { zh: "显示复习内部状态", en: "Show internal review state" },
   "settings.showReviewMetadataDesc": { zh: "默认在属性面板隐藏，数据仍保存在笔记中。", en: "Hidden from Properties by default; the data remains in the note." },
   "settings.ratingOffset": { zh: "移动端评分栏底部位置", en: "Mobile rating bar position" },
-  "settings.ratingOffsetDesc": { zh: "自动避开底部工具栏；仍被挡住时调大。", en: "Avoids the bottom toolbar automatically. Increase it if the bar is still covered." },
+  "settings.ratingOffsetDesc": { zh: "评分栏自动避开工具栏，卡片底部留白会同步调整。", en: "Moves the rating bar above the toolbar and keeps matching space below the card." },
   "settings.openReview": { zh: "打开复习", en: "Open review" },
   "settings.hoverFeedback": { zh: "悬停回流", en: "Hover feedback" },
   "settings.hoverFeedbackDesc": { zh: "把较远的到期日提前到今天，不计作复习。", en: "Pulls distant due dates to today without recording a review." },

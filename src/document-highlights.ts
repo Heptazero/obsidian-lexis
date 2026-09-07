@@ -13,6 +13,11 @@ type PdfCandidate = { key: string; entry: LexisEntry; segments: PdfSegment[]; le
 type EpubHooks = { over: (event: MouseEvent) => void; out: (event: MouseEvent) => void; click: (event: MouseEvent) => void; mouseup: (event: MouseEvent) => void };
 type ObserverWindow = Window & { MutationObserver: typeof MutationObserver; ResizeObserver?: typeof ResizeObserver };
 
+function selectionTouchesLayer(layer: Pick<Node, "contains">, selection: Pick<Selection, "isCollapsed" | "anchorNode" | "focusNode"> | null): boolean {
+  if (!selection || selection.isCollapsed) return false;
+  return !!((selection.anchorNode && layer.contains(selection.anchorNode)) || (selection.focusNode && layer.contains(selection.focusNode)));
+}
+
 function createDocumentHighlights(): PropertyDescriptorMap {
   class DocumentHighlights {
   declare app: App;
@@ -265,6 +270,17 @@ function createDocumentHighlights(): PropertyDescriptorMap {
       if (!next.done) {
         this._pdfPending.delete(next.value);
         if (next.value.isConnected) {
+          if (this.pdfLayerHasSelection(next.value)) {
+            this._pdfPending.add(next.value);
+            next.value.parentElement?.querySelector(":scope > .lexis-pdf-hl-layer")?.classList.remove("is-geometry-changing");
+            if (!this._pdfResizeTimer) {
+              this._pdfResizeTimer = this._pdfWindow?.setTimeout(() => {
+                this._pdfResizeTimer = 0;
+                if (!this._pdfRaf) this._pdfRaf = this._pdfWindow?.requestAnimationFrame(flush) || 0;
+              }, 120) || 0;
+            }
+            return;
+          }
           this.scanPdfLayer(next.value);
           next.value.parentElement?.querySelector(":scope > .lexis-pdf-hl-layer")?.classList.remove("is-geometry-changing");
         }
@@ -301,6 +317,17 @@ function createDocumentHighlights(): PropertyDescriptorMap {
       let geometryChanged = false;
       for (const mu of muts) {
         const targetElement = mu.target.nodeType === 1 ? mu.target as Element : mu.target.parentElement;
+        if (mu.type === "attributes") {
+          if (targetElement?.classList.contains("textLayer")) {
+            this.markPdfGeometryChanging(targetElement as HTMLElement);
+            geometryChanged = true;
+          } else if (targetElement?.matches(".page, .canvasWrapper, canvas")) {
+            const page = targetElement.classList.contains("page") ? targetElement : targetElement.closest(".page");
+            const layer = page?.querySelector<HTMLElement>(":scope > .textLayer");
+            if (layer) { this.markPdfGeometryChanging(layer); geometryChanged = true; }
+          }
+          continue;
+        }
         if (targetElement && !targetElement.closest(".lexis-hl,.lexis-pdf-hl-layer")) {
           const containingLayer = targetElement.classList.contains("textLayer")
             ? targetElement as HTMLElement
@@ -314,7 +341,6 @@ function createDocumentHighlights(): PropertyDescriptorMap {
             if (layer) { this.markPdfGeometryChanging(layer); geometryChanged = true; }
           }
         }
-        if (mu.type === "attributes") continue;
         for (const node of mu.addedNodes) {
           if (node.nodeType !== 1) continue;
           const element = node as Element;
@@ -341,7 +367,10 @@ function createDocumentHighlights(): PropertyDescriptorMap {
   markPdfGeometryChanging(layer: HTMLElement): void {
     if (!layer?.isConnected) return;
     this._pdfPending?.add(layer);
-    layer.parentElement?.querySelector(":scope > .lexis-pdf-hl-layer")?.classList.add("is-geometry-changing");
+    if (!this.pdfLayerHasSelection(layer)) layer.parentElement?.querySelector(":scope > .lexis-pdf-hl-layer")?.classList.add("is-geometry-changing");
+  }
+  pdfLayerHasSelection(layer: HTMLElement): boolean {
+    return selectionTouchesLayer(layer, this._pdfWindow?.getSelection() || null);
   }
   scanPdfLayer(layer: HTMLElement): void {
     if (!this.settings.enablePdfHighlight || !this.settings.enableHighlight) return;
@@ -518,4 +547,4 @@ function createDocumentHighlights(): PropertyDescriptorMap {
   return descriptors;
 }
 
-export { createDocumentHighlights };
+export { createDocumentHighlights, selectionTouchesLayer };

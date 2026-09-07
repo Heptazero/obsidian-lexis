@@ -99,7 +99,6 @@
       card.style.setProperty("--lexis-popover-height", height + "px");
       card.style.setProperty("--lexis-popover-font-size", Math.max(11, Number(this.index.styleConfig.popoverFontSize || 14)) + "px");
       card.style.width = width + "px";
-      card.style.height = height + "px";
       card.style.maxHeight = height + "px";
       card.innerHTML = `<div class="lexis-web-pop-scroll"><div class="lexis-web-pop-title">${this.escape(meta.key)}</div><div class="lexis-web-pop-corner"></div><div class="lexis-web-pop-meta"></div><div class="lexis-web-pop-body">加载中…</div></div>`;
       card.addEventListener("mouseenter", () => {
@@ -364,6 +363,8 @@
         event.stopPropagation();
         this.win.clearTimeout(this.hideTimer);
         const start = card.getBoundingClientRect();
+        const startHeight = card.style.height;
+        const startMaxHeight = card.style.maxHeight;
         const startX = event.clientX;
         const startY = event.clientY;
         card.dataset.lexisResizing = "1";
@@ -384,12 +385,14 @@
           delete card.dataset.lexisResizing;
           if (cancelled) {
             card.style.width = start.width + "px";
-            card.style.height = start.height + "px";
-            card.style.maxHeight = start.height + "px";
+            card.style.height = startHeight;
+            card.style.maxHeight = startMaxHeight;
           } else {
             const result = card.getBoundingClientRect();
             Zotero.Prefs.set(PREF + "popoverWidth", Math.round(result.width), true);
             Zotero.Prefs.set(PREF + "popoverHeight", Math.round(result.height), true);
+            card.style.height = "";
+            card.style.maxHeight = Math.round(result.height) + "px";
           }
           this.position(anchor);
         };

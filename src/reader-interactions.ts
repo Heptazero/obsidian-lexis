@@ -119,6 +119,8 @@ function createReaderInteractions({ openAliasPicker }: ReaderInteractionDependen
       event.stopPropagation();
       window.clearTimeout(this._hideTimer);
       const start = popover.getBoundingClientRect();
+      const startHeight = popover.style.height;
+      const startMaxHeight = popover.style.maxHeight;
       const startX = event.clientX;
       const startY = event.clientY;
       popover.dataset.lexisResizing = "1";
@@ -136,11 +138,12 @@ function createReaderInteractions({ openAliasPicker }: ReaderInteractionDependen
         handle.removeEventListener("pointercancel", onPointerCancel);
         delete popover.dataset.lexisResizing;
         if (cancelled) {
-          popover.setCssStyles({ width: `${start.width}px`, height: `${start.height}px`, maxHeight: `${start.height}px` });
+          popover.setCssStyles({ width: `${start.width}px`, height: startHeight, maxHeight: startMaxHeight });
         } else {
           const result = popover.getBoundingClientRect();
           this.settings.popoverWidth = Math.round(result.width);
           this.settings.popoverMaxHeight = Math.round(result.height);
+          popover.setCssStyles({ height: "", maxHeight: `${this.settings.popoverMaxHeight}px` });
           void this.saveSettings();
         }
         this.positionPopover(popover, target);
