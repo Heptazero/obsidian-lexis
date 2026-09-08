@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Lexis Web",
-  "version": "1.2.0",
+  "version": "1.1.1",
   "description": "Highlight your Obsidian Lexis entries on the web, open notes on hover, and send selections back over a local-only bridge.",
   "permissions": ["storage"],
   "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
@@ -21,7 +21,7 @@
     }
   },
   "background": {
-    "service_worker": "background.js"
+    "scripts": ["config.js", "background.js"]
   },
   "content_scripts": [
     {
@@ -37,5 +37,11 @@
       "resources": ["popover.css"],
       "matches": ["<all_urls>"]
     }
-  ]
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "lexis-web@obsidian-lexis.local",
+      "strict_min_version": "115.0"
+    }
+  }
 }
