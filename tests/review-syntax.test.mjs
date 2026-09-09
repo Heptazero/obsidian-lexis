@@ -81,6 +81,57 @@ test("builds separate or combined cloze review items within any folder", async (
   assert.equal(cloze.syntax.front, "一共有 […] 和 […]。");
 });
 
+test("builds syntax cards from the Markdown files directly linked by a hub", async () => {
+  const { createReviewQueue } = await loadTypeScript("src/review-queue.ts");
+  const hub = { path: "00_hub/数学.md", extension: "md" };
+  const linkedA = { path: "10_atom/群.md", extension: "md" };
+  const linkedB = { path: "10_atom/环.md", extension: "md" };
+  const outside = { path: "10_atom/域.md", extension: "md" };
+  const pdf = { path: "30_resource/代数.pdf", extension: "pdf" };
+  const files = [hub, linkedA, linkedB, outside];
+  const byPath = new Map([...files, pdf].map((file) => [file.path, file]));
+  const destinations = new Map([["群", linkedA], ["群#定义", linkedA], ["环别名", linkedB], ["代数.pdf", pdf]]);
+  const markdown = {
+    [hub.path]: "[[群]] [[群#定义]] [[环别名|环]] [[代数.pdf]] [[不存在]]",
+    [linkedA.path]: "群的单位元::幺元",
+    [linkedB.path]: "环是否要求乘法交换??\n不要求",
+    [outside.path]: "域::field",
+  };
+  const host = {
+    app: {
+      vault: {
+        getMarkdownFiles: () => files,
+        getFileByPath: (path) => byPath.get(path) || null,
+        cachedRead: async (file) => markdown[file.path] || "",
+      },
+      metadataCache: {
+        getFileCache: (file) => file === hub ? { links: [...destinations.keys(), "不存在"].map((link) => ({ link })) } : null,
+        getFirstLinkpathDest: (link) => destinations.get(link) || null,
+      },
+    },
+    settings: {
+      flashcardInlineTemplate: templates.inline,
+      flashcardBidirectionalTemplate: templates.bidirectional,
+      flashcardBlockTemplate: templates.block,
+      flashcardClozeTemplate: templates.cloze,
+      syntaxCardStates: {}, reviewHistory: {}, newPerDay: 20, maxReviewsPerSession: 200,
+    },
+    inVocabFolder: () => false,
+    readLifecycle: () => ({ archived: false, retired: false }),
+    normalizeFolder: (value) => value,
+    inScope: () => true,
+    getTags: () => new Set(),
+    readCard: () => ({}),
+    readSyntaxCardState: () => ({}),
+    freqVal: () => 1,
+    saveSettings: async () => {},
+  };
+  Object.defineProperties(host, createReviewQueue({ todayStr: () => "2026-09-09" }));
+  const queue = await host.buildQueue({ scope: "hub", hub: hub.path, content: "notes" });
+  assert.deepEqual(new Set(queue.map((item) => item.file.path)), new Set([linkedA.path, linkedB.path]));
+  assert.ok(queue.every((item) => item.type === "syntax"));
+});
+
 test("counts note text and sorts eligible notes by field and direction", async () => {
   const { countNoteWords, createReviewQueue } = await loadTypeScript("src/review-queue.ts");
   assert.equal(countNoteWords("---\ntitle: ignored words\n---\nQL 分解 is useful"), 5);

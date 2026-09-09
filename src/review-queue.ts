@@ -76,6 +76,18 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
       return [...tags].sort((left, right) => left.localeCompare(right));
     }
 
+    hubLinkedFiles(hubPath: string): TFile[] {
+      const hub = this.app.vault.getFileByPath(hubPath);
+      if (!hub) return [];
+      const links = this.app.metadataCache.getFileCache(hub)?.links || [];
+      const linked = new Map<string, TFile>();
+      for (const link of links) {
+        const file = this.app.metadataCache.getFirstLinkpathDest(link.link, hub.path);
+        if (file?.extension === "md" && file.path !== hub.path) linked.set(file.path, file);
+      }
+      return [...linked.values()];
+    }
+
     reviewScopeFiles(options: ReviewOptions): TFile[] {
       const scope = options.scope || "vocab";
       let files = this.app.vault.getMarkdownFiles();
@@ -84,6 +96,7 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
         const folder = this.normalizeFolder(options.folder || "");
         if (folder) files = files.filter((file) => this.inScope(file.path, [folder]));
       }
+      if (scope === "hub") files = this.hubLinkedFiles(options.hub || "");
       if (scope === "tag") {
         const tag = String(options.tag || "").toLowerCase().replace(/^#/, "");
         files = tag ? files.filter((file) => this.getTags(file).has(tag)) : [];
@@ -154,7 +167,7 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
 
     async buildQueue(options: ReviewOptions = {}): Promise<ReviewItem[]> {
       const resolved = options || {};
-      const content = resolved.content || "notes";
+      const content = resolved.scope === "hub" ? "syntax" : resolved.content || "notes";
       const sortBy = resolved.sortBy || "due";
       const direction = resolved.sortDirection === "desc" ? -1 : 1;
       const files = this.reviewScopeFiles(resolved);

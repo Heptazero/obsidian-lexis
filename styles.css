@@ -859,6 +859,16 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     gap: 8px;
     margin-top: 10px;
 }
+.lexis-file-suggest-name {
+    font-weight: 600;
+}
+.lexis-file-suggest-path {
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 
 /* 淘汰法庭(主页里的淘汰候选区) */
 .lexis-retire-wrap {

@@ -38,7 +38,8 @@ Each Obsidian dictionary has its own highlight switch. Lexis Web keeps a separat
 ### Review what still needs memory
 
 - FSRS spaced repetition with note and occurrence-cloze cards
-- due/new counts, review heatmap, undo, skip, and tag-filtered sessions
+- review by dictionary, folder, tag, current note, or syntax cards linked from a selected Hub note
+- due/new counts, review heatmap, undo, and skip
 - highlights that fade as memory stability grows
 - real reading encounters that can pull a distant review closer
 - retirement candidates based on long absence, with the final decision always left to you

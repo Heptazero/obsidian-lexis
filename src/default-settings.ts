@@ -61,6 +61,7 @@ export const DEFAULT_SETTINGS: DefaultLexisSettings = {
   annotationImageFolder: "",
   cardFront: "note",
   reviewBottomSpace: 70,
+  lastReviewHub: "",
   bridgeEnabled: false,
   bridgePort: LEXIS_BRIDGE_DEFAULT_PORT,
   bridgeToken: "",
