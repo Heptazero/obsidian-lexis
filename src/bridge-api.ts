@@ -562,7 +562,9 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, recentR
     const div = createDiv();
     const comp = new Component(); comp.load();
     try {
-      await renderLexisMarkdown(this.app, raw, div, file.path || "", comp);
+      // 超时保护:render/finishRenderMath 若因 MathJax 队列卡死而永不 resolve,try/catch 救不了,
+      // 会让整个 /word 挂死。race 一个定时器,卡死时用已渲染的部分继续。
+      await Promise.race([renderLexisMarkdown(this.app, raw, div, file.path || "", comp), new Promise((resolve) => setTimeout(resolve, 5000))]);
     } catch { /* Keep any partial renderer output. */ }
     for (let i = 0; i < blocks.length; i++) {
       const marker = `@@LEXIS${i}@@`;
@@ -600,7 +602,11 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, recentR
     // MarkdownRenderer.render() resolve 时,LaTeX 的 MathJax 排版还在异步队列里没跑完;
     // 这里要把渲染好的 HTML 序列化发给浏览器扩展(扩展自己没有 MathJax),必须先等排版队列清空,
     // 不然抓到的还是没转换的公式源码,发过去以后就永远定格在那个状态了。
-    try { await finishRenderMath(); } catch { /* Math rendering is optional for plain-text cards. */ }
+    // 只有笔记里真的有数学符号才需要等排版;无公式的笔记直接跳过,避免白等卡住的 MathJax 队列拖慢卡片。
+    // race 定时器兜底:即使有公式,MathJax 队列卡死也不会让 /word 永久挂起。
+    if (raw.includes("$$") || raw.includes("\\(") || raw.includes("\\[") || /\$[^\s$]/.test(raw)) {
+      try { await Promise.race([finishRenderMath(), new Promise((resolve) => setTimeout(resolve, 3000))]); } catch { /* Math rendering is optional for plain-text cards. */ }
+    }
     await this.bridgePostProcess(div, file.path);
     const out = div.innerHTML;
     comp.unload();
