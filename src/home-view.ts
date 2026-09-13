@@ -34,7 +34,7 @@ interface HomeViewHost {
 
 export class LexisHomeView extends ItemView {
   private retireRenderTimer: number | undefined;
-  private hubSuggest: MarkdownFileSuggest | null = null;
+  private fileSuggest: MarkdownFileSuggest | null = null;
   sourceFilePath = "";
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: HomeViewHost) {
@@ -58,7 +58,6 @@ export class LexisHomeView extends ItemView {
     stats.createDiv({ cls: "lexis-stat", text: `📚 ${this.plugin.t("home.total", { count: current.total })}` });
     this.plugin.renderHeatmap(container.createDiv({ cls: "lexis-hm-wrap" }));
 
-    container.createEl("h4", { text: this.plugin.t("home.start") });
     const folders = this.plugin.collectReviewFolders();
     const tags = this.plugin.collectReviewTags();
     const markdownFiles = this.app.vault.getMarkdownFiles().sort((left, right) => left.path.localeCompare(right.path));
@@ -67,6 +66,7 @@ export class LexisHomeView extends ItemView {
     const currentFile = activeFile || (rememberedFile instanceof TFile ? rememberedFile : null);
     let selectedScope: ReviewScopeMode = "vocab";
     let selectedFolder = "";
+    let selectedLinkSource = this.app.vault.getFileByPath(this.plugin.settings.lastReviewLinkSource || "")?.path || "";
     let selectedHub = this.app.vault.getFileByPath(this.plugin.settings.lastReviewHub || "")?.path || "";
     let selectedTag = "";
     let selectedContent: ReviewContentMode = "notes";
@@ -89,19 +89,21 @@ export class LexisHomeView extends ItemView {
       }
     };
     renderControls = () => {
-      this.hubSuggest?.close();
-      this.hubSuggest = null;
+      this.fileSuggest?.close();
+      this.fileSuggest = null;
       controls.empty();
       let updateStartState = () => {};
       new Setting(controls).setName(this.plugin.t("home.reviewScope")).addDropdown((dropdown) => dropdown
         .addOption("vocab", this.plugin.t("home.scopeVocab"))
         .addOption("folder", this.plugin.t("home.scopeFolder"))
+        .addOption("links", this.plugin.t("home.scopeLinks"))
         .addOption("hub", this.plugin.t("home.scopeHub"))
         .addOption("tag", this.plugin.t("home.scopeTag"))
         .addOption("current", this.plugin.t("home.scopeCurrent"))
         .setValue(selectedScope)
         .onChange((value) => {
-          if (["vocab", "folder", "hub", "tag", "current"].includes(value)) selectedScope = value as ReviewScopeMode;
+          if (["vocab", "folder", "links", "hub", "tag", "current"].includes(value)) selectedScope = value as ReviewScopeMode;
+          if (selectedScope === "links") selectedContent = "notes";
           if (selectedScope === "hub") selectedContent = "syntax";
           rerenderControls();
         }));
@@ -110,6 +112,24 @@ export class LexisHomeView extends ItemView {
           dropdown.addOption("", this.plugin.t("home.scopeAllFiles"));
           for (const folder of folders) dropdown.addOption(folder, folder);
           dropdown.setValue(selectedFolder).onChange((value) => { selectedFolder = value; });
+        });
+      }
+      if (selectedScope === "links") {
+        new Setting(controls).setName(this.plugin.t("home.reviewLinkSource")).addSearch((search) => {
+          const applyPath = (value: string) => {
+            const file = this.app.vault.getFileByPath(value.trim());
+            selectedLinkSource = file?.extension === "md" ? file.path : "";
+            updateStartState();
+            if (selectedLinkSource && selectedLinkSource !== this.plugin.settings.lastReviewLinkSource) {
+              this.plugin.settings.lastReviewLinkSource = selectedLinkSource;
+              void this.plugin.saveSettings();
+            }
+          };
+          search.setPlaceholder(this.plugin.t("home.chooseMarkdownFile")).setValue(selectedLinkSource).onChange(applyPath);
+          this.fileSuggest = new MarkdownFileSuggest(this.app, search.inputEl, () => markdownFiles, (file) => {
+            search.setValue(file.path);
+            applyPath(file.path);
+          });
         });
       }
       if (selectedScope === "hub") {
@@ -123,8 +143,8 @@ export class LexisHomeView extends ItemView {
               void this.plugin.saveSettings();
             }
           };
-          search.setPlaceholder(this.plugin.t("home.chooseHub")).setValue(selectedHub).onChange(applyPath);
-          this.hubSuggest = new MarkdownFileSuggest(this.app, search.inputEl, () => markdownFiles, (file) => {
+          search.setPlaceholder(this.plugin.t("home.chooseMarkdownFile")).setValue(selectedHub).onChange(applyPath);
+          this.fileSuggest = new MarkdownFileSuggest(this.app, search.inputEl, () => markdownFiles, (file) => {
             search.setValue(file.path);
             applyPath(file.path);
           });
@@ -140,7 +160,7 @@ export class LexisHomeView extends ItemView {
       if (selectedScope === "current") {
         new Setting(controls).setName(this.plugin.t("home.currentNote")).setDesc(currentFile?.path || this.plugin.t("home.noCurrentNote"));
       }
-      if (selectedScope !== "hub") {
+      if (selectedScope !== "links" && selectedScope !== "hub") {
         const contentSetting = new Setting(controls).setName(this.plugin.t("home.reviewContent"));
         addSegments(contentSetting, [
           ["notes", this.plugin.t("home.contentNotes")],
@@ -148,7 +168,7 @@ export class LexisHomeView extends ItemView {
           ["both", this.plugin.t("home.contentBoth")],
         ], selectedContent, (value) => { selectedContent = value; rerenderControls(); });
       }
-      if (selectedScope === "hub" || selectedContent !== "notes") {
+      if (selectedScope === "hub" || (selectedScope !== "links" && selectedContent !== "notes")) {
         const clozeSetting = new Setting(controls).setName(this.plugin.t("home.clozeMode"));
         addSegments(clozeSetting, [
           ["separate", this.plugin.t("home.clozeSeparate")],
@@ -181,6 +201,7 @@ export class LexisHomeView extends ItemView {
         updateStartState = () => {
           button.setDisabled(
             (selectedScope === "current" && !currentFile) ||
+            (selectedScope === "links" && !selectedLinkSource) ||
             (selectedScope === "hub" && !selectedHub) ||
             (selectedScope === "tag" && !selectedTag),
           );
@@ -191,10 +212,11 @@ export class LexisHomeView extends ItemView {
           .onClick(() => this.plugin.openReview({
             scope: selectedScope,
             folder: selectedFolder,
+            linkSource: selectedLinkSource,
             hub: selectedHub,
             tag: selectedTag,
             file: currentFile?.path,
-            content: selectedScope === "hub" ? "syntax" : selectedContent,
+            content: selectedScope === "hub" ? "syntax" : selectedScope === "links" ? "notes" : selectedContent,
             clozeMode: selectedClozeMode,
             sortBy: selectedSort,
             sortDirection: selectedDirection,
@@ -304,5 +326,5 @@ export class LexisHomeView extends ItemView {
     });
   }
 
-  async onClose(): Promise<void> { this.hubSuggest?.close(); }
+  async onClose(): Promise<void> { this.fileSuggest?.close(); }
 }

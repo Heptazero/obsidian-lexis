@@ -130,6 +130,7 @@ var DEFAULT_SETTINGS = {
   annotationImageFolder: "",
   cardFront: "note",
   reviewBottomSpace: 70,
+  lastReviewLinkSource: "",
   lastReviewHub: "",
   bridgeEnabled: false,
   bridgePort: LEXIS_BRIDGE_DEFAULT_PORT,
@@ -189,7 +190,7 @@ var MarkdownFileSuggest = class extends import_obsidian2.AbstractInputSuggest {
   getSuggestions(query) {
     const value = query.trim();
     const files = this.getFiles();
-    if (!value) return files.slice(0, this.limit);
+    if (!value) return [];
     const match = (0, import_obsidian2.prepareFuzzySearch)(value);
     return files.filter((file) => match(`${file.basename} ${file.path}`)).slice(0, this.limit);
   }
@@ -209,7 +210,7 @@ var LexisHomeView = class extends import_obsidian3.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.plugin = plugin;
-    this.hubSuggest = null;
+    this.fileSuggest = null;
     this.sourceFilePath = "";
   }
   getViewType() {
@@ -235,7 +236,6 @@ var LexisHomeView = class extends import_obsidian3.ItemView {
     stats.createDiv({ cls: "lexis-stat", text: `\u2728 ${this.plugin.t("home.new", { count: current.fresh })}` });
     stats.createDiv({ cls: "lexis-stat", text: `\u{1F4DA} ${this.plugin.t("home.total", { count: current.total })}` });
     this.plugin.renderHeatmap(container.createDiv({ cls: "lexis-hm-wrap" }));
-    container.createEl("h4", { text: this.plugin.t("home.start") });
     const folders = this.plugin.collectReviewFolders();
     const tags = this.plugin.collectReviewTags();
     const markdownFiles = this.app.vault.getMarkdownFiles().sort((left, right) => left.path.localeCompare(right.path));
@@ -244,6 +244,7 @@ var LexisHomeView = class extends import_obsidian3.ItemView {
     const currentFile = activeFile || (rememberedFile instanceof import_obsidian3.TFile ? rememberedFile : null);
     let selectedScope = "vocab";
     let selectedFolder = "";
+    let selectedLinkSource = this.app.vault.getFileByPath(this.plugin.settings.lastReviewLinkSource || "")?.path || "";
     let selectedHub = this.app.vault.getFileByPath(this.plugin.settings.lastReviewHub || "")?.path || "";
     let selectedTag = "";
     let selectedContent = "notes";
@@ -268,13 +269,14 @@ var LexisHomeView = class extends import_obsidian3.ItemView {
       }
     };
     renderControls = () => {
-      this.hubSuggest?.close();
-      this.hubSuggest = null;
+      this.fileSuggest?.close();
+      this.fileSuggest = null;
       controls.empty();
       let updateStartState = () => {
       };
-      new import_obsidian3.Setting(controls).setName(this.plugin.t("home.reviewScope")).addDropdown((dropdown) => dropdown.addOption("vocab", this.plugin.t("home.scopeVocab")).addOption("folder", this.plugin.t("home.scopeFolder")).addOption("hub", this.plugin.t("home.scopeHub")).addOption("tag", this.plugin.t("home.scopeTag")).addOption("current", this.plugin.t("home.scopeCurrent")).setValue(selectedScope).onChange((value) => {
-        if (["vocab", "folder", "hub", "tag", "current"].includes(value)) selectedScope = value;
+      new import_obsidian3.Setting(controls).setName(this.plugin.t("home.reviewScope")).addDropdown((dropdown) => dropdown.addOption("vocab", this.plugin.t("home.scopeVocab")).addOption("folder", this.plugin.t("home.scopeFolder")).addOption("links", this.plugin.t("home.scopeLinks")).addOption("hub", this.plugin.t("home.scopeHub")).addOption("tag", this.plugin.t("home.scopeTag")).addOption("current", this.plugin.t("home.scopeCurrent")).setValue(selectedScope).onChange((value) => {
+        if (["vocab", "folder", "links", "hub", "tag", "current"].includes(value)) selectedScope = value;
+        if (selectedScope === "links") selectedContent = "notes";
         if (selectedScope === "hub") selectedContent = "syntax";
         rerenderControls();
       }));
@@ -284,6 +286,24 @@ var LexisHomeView = class extends import_obsidian3.ItemView {
           for (const folder of folders) dropdown.addOption(folder, folder);
           dropdown.setValue(selectedFolder).onChange((value) => {
             selectedFolder = value;
+          });
+        });
+      }
+      if (selectedScope === "links") {
+        new import_obsidian3.Setting(controls).setName(this.plugin.t("home.reviewLinkSource")).addSearch((search) => {
+          const applyPath = (value) => {
+            const file = this.app.vault.getFileByPath(value.trim());
+            selectedLinkSource = file?.extension === "md" ? file.path : "";
+            updateStartState();
+            if (selectedLinkSource && selectedLinkSource !== this.plugin.settings.lastReviewLinkSource) {
+              this.plugin.settings.lastReviewLinkSource = selectedLinkSource;
+              void this.plugin.saveSettings();
+            }
+          };
+          search.setPlaceholder(this.plugin.t("home.chooseMarkdownFile")).setValue(selectedLinkSource).onChange(applyPath);
+          this.fileSuggest = new MarkdownFileSuggest(this.app, search.inputEl, () => markdownFiles, (file) => {
+            search.setValue(file.path);
+            applyPath(file.path);
           });
         });
       }
@@ -298,8 +318,8 @@ var LexisHomeView = class extends import_obsidian3.ItemView {
               void this.plugin.saveSettings();
             }
           };
-          search.setPlaceholder(this.plugin.t("home.chooseHub")).setValue(selectedHub).onChange(applyPath);
-          this.hubSuggest = new MarkdownFileSuggest(this.app, search.inputEl, () => markdownFiles, (file) => {
+          search.setPlaceholder(this.plugin.t("home.chooseMarkdownFile")).setValue(selectedHub).onChange(applyPath);
+          this.fileSuggest = new MarkdownFileSuggest(this.app, search.inputEl, () => markdownFiles, (file) => {
             search.setValue(file.path);
             applyPath(file.path);
           });
@@ -318,7 +338,7 @@ var LexisHomeView = class extends import_obsidian3.ItemView {
       if (selectedScope === "current") {
         new import_obsidian3.Setting(controls).setName(this.plugin.t("home.currentNote")).setDesc(currentFile?.path || this.plugin.t("home.noCurrentNote"));
       }
-      if (selectedScope !== "hub") {
+      if (selectedScope !== "links" && selectedScope !== "hub") {
         const contentSetting = new import_obsidian3.Setting(controls).setName(this.plugin.t("home.reviewContent"));
         addSegments(contentSetting, [
           ["notes", this.plugin.t("home.contentNotes")],
@@ -329,7 +349,7 @@ var LexisHomeView = class extends import_obsidian3.ItemView {
           rerenderControls();
         });
       }
-      if (selectedScope === "hub" || selectedContent !== "notes") {
+      if (selectedScope === "hub" || selectedScope !== "links" && selectedContent !== "notes") {
         const clozeSetting = new import_obsidian3.Setting(controls).setName(this.plugin.t("home.clozeMode"));
         addSegments(clozeSetting, [
           ["separate", this.plugin.t("home.clozeSeparate")],
@@ -360,16 +380,17 @@ var LexisHomeView = class extends import_obsidian3.ItemView {
       startSetting.addButton((button) => {
         updateStartState = () => {
           button.setDisabled(
-            selectedScope === "current" && !currentFile || selectedScope === "hub" && !selectedHub || selectedScope === "tag" && !selectedTag
+            selectedScope === "current" && !currentFile || selectedScope === "links" && !selectedLinkSource || selectedScope === "hub" && !selectedHub || selectedScope === "tag" && !selectedTag
           );
         };
         button.setButtonText(this.plugin.t("home.start")).setCta().onClick(() => this.plugin.openReview({
           scope: selectedScope,
           folder: selectedFolder,
+          linkSource: selectedLinkSource,
           hub: selectedHub,
           tag: selectedTag,
           file: currentFile?.path,
-          content: selectedScope === "hub" ? "syntax" : selectedContent,
+          content: selectedScope === "hub" ? "syntax" : selectedScope === "links" ? "notes" : selectedContent,
           clozeMode: selectedClozeMode,
           sortBy: selectedSort,
           sortDirection: selectedDirection
@@ -469,7 +490,7 @@ var LexisHomeView = class extends import_obsidian3.ItemView {
     });
   }
   async onClose() {
-    this.hubSuggest?.close();
+    this.fileSuggest?.close();
   }
 };
 
@@ -582,13 +603,15 @@ var MESSAGES = {
   "home.reviewScope": { zh: "\u8303\u56F4", en: "Scope" },
   "home.scopeVocab": { zh: "Lexis \u8BCD\u5178", en: "Lexis dictionaries" },
   "home.scopeFolder": { zh: "\u6587\u4EF6\u5939", en: "Folder" },
+  "home.scopeLinks": { zh: "\u6587\u4EF6\u53CC\u94FE", en: "File links" },
   "home.scopeHub": { zh: "Hub \u53CC\u94FE", en: "Hub links" },
   "home.scopeTag": { zh: "\u6807\u7B7E", en: "Tag" },
   "home.scopeCurrent": { zh: "\u5F53\u524D\u7B14\u8BB0", en: "Current note" },
   "home.scopeAllFiles": { zh: "\u6574\u4E2A\u4ED3\u5E93", en: "Whole vault" },
   "home.reviewFolder": { zh: "\u590D\u4E60\u6587\u4EF6\u5939", en: "Review folder" },
+  "home.reviewLinkSource": { zh: "\u6765\u6E90\u6587\u4EF6", en: "Source file" },
   "home.reviewHub": { zh: "Hub \u6587\u4EF6", en: "Hub file" },
-  "home.chooseHub": { zh: "\u641C\u7D22 Markdown \u6587\u4EF6", en: "Search Markdown files" },
+  "home.chooseMarkdownFile": { zh: "\u8F93\u5165\u540D\u79F0\u6216\u8DEF\u5F84\u641C\u7D22", en: "Search by name or path" },
   "home.reviewTag": { zh: "\u590D\u4E60\u6807\u7B7E", en: "Review tag" },
   "home.chooseTag": { zh: "\u9009\u62E9\u6807\u7B7E", en: "Choose a tag" },
   "home.currentNote": { zh: "\u5F53\u524D\u7B14\u8BB0", en: "Current note" },
@@ -5462,14 +5485,14 @@ function createReviewQueue({ todayStr }) {
       for (const file of this.app.vault.getMarkdownFiles()) for (const tag of this.getTags(file)) tags.add(tag);
       return [...tags].sort((left, right) => left.localeCompare(right));
     }
-    hubLinkedFiles(hubPath) {
-      const hub = this.app.vault.getFileByPath(hubPath);
-      if (!hub) return [];
-      const links = this.app.metadataCache.getFileCache(hub)?.links || [];
+    directLinkedFiles(sourcePath) {
+      const source = this.app.vault.getFileByPath(sourcePath);
+      if (!source) return [];
+      const links = this.app.metadataCache.getFileCache(source)?.links || [];
       const linked = /* @__PURE__ */ new Map();
       for (const link of links) {
-        const file = this.app.metadataCache.getFirstLinkpathDest(link.link, hub.path);
-        if (file?.extension === "md" && file.path !== hub.path) linked.set(file.path, file);
+        const file = this.app.metadataCache.getFirstLinkpathDest(link.link, source.path);
+        if (file?.extension === "md" && file.path !== source.path) linked.set(file.path, file);
       }
       return [...linked.values()];
     }
@@ -5481,7 +5504,8 @@ function createReviewQueue({ todayStr }) {
         const folder = this.normalizeFolder(options.folder || "");
         if (folder) files = files.filter((file) => this.inScope(file.path, [folder]));
       }
-      if (scope === "hub") files = this.hubLinkedFiles(options.hub || "");
+      if (scope === "links") files = this.directLinkedFiles(options.linkSource || "");
+      if (scope === "hub") files = this.directLinkedFiles(options.hub || "");
       if (scope === "tag") {
         const tag = String(options.tag || "").toLowerCase().replace(/^#/, "");
         files = tag ? files.filter((file) => this.getTags(file).has(tag)) : [];
@@ -5553,7 +5577,7 @@ function createReviewQueue({ todayStr }) {
     }
     async buildQueue(options = {}) {
       const resolved = options || {};
-      const content = resolved.scope === "hub" ? "syntax" : resolved.content || "notes";
+      const content = resolved.scope === "hub" ? "syntax" : resolved.scope === "links" ? "notes" : resolved.content || "notes";
       const sortBy = resolved.sortBy || "due";
       const direction = resolved.sortDirection === "desc" ? -1 : 1;
       const files = this.reviewScopeFiles(resolved);

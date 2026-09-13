@@ -14,7 +14,7 @@ class MarkdownFileSuggest extends AbstractInputSuggest<TFile> {
   protected getSuggestions(query: string): TFile[] {
     const value = query.trim();
     const files = this.getFiles();
-    if (!value) return files.slice(0, this.limit);
+    if (!value) return [];
     const match = prepareFuzzySearch(value);
     return files.filter((file) => match(`${file.basename} ${file.path}`)).slice(0, this.limit);
   }

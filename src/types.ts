@@ -7,7 +7,7 @@ export type EmptyNotePreset = "blank" | "occ";
 export type CardFront = "note" | "cloze";
 export type AnnotationImageLocation = "obsidian" | "custom";
 export type ReviewContentMode = "notes" | "syntax" | "both";
-export type ReviewScopeMode = "vocab" | "folder" | "hub" | "tag" | "current";
+export type ReviewScopeMode = "vocab" | "folder" | "links" | "hub" | "tag" | "current";
 export type ClozeReviewMode = "separate" | "combined";
 export type ReviewSortKey = "due" | "wordCount" | "modified" | "created" | "frequency" | "random";
 export type ReviewSortDirection = "asc" | "desc";
@@ -25,6 +25,7 @@ export interface ReviewCardState {
 export interface ReviewOptions {
   scope?: ReviewScopeMode;
   folder?: string;
+  linkSource?: string;
   hub?: string;
   tag?: string;
   file?: string;
@@ -136,6 +137,7 @@ export interface LexisSettings {
   annotationImageFolder: string;
   cardFront: CardFront;
   reviewBottomSpace: number;
+  lastReviewLinkSource: string;
   lastReviewHub: string;
   bridgeEnabled: boolean;
   bridgePort: number;

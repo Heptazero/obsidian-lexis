@@ -130,6 +130,10 @@ test("builds syntax cards from the Markdown files directly linked by a hub", asy
   const queue = await host.buildQueue({ scope: "hub", hub: hub.path, content: "notes" });
   assert.deepEqual(new Set(queue.map((item) => item.file.path)), new Set([linkedA.path, linkedB.path]));
   assert.ok(queue.every((item) => item.type === "syntax"));
+
+  const linkedNotes = await host.buildQueue({ scope: "links", linkSource: hub.path, content: "syntax" });
+  assert.deepEqual(new Set(linkedNotes.map((item) => item.file.path)), new Set([linkedA.path, linkedB.path]));
+  assert.ok(linkedNotes.every((item) => item.type === "note"));
 });
 
 test("counts note text and sorts eligible notes by field and direction", async () => {
