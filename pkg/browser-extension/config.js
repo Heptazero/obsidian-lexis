@@ -30,10 +30,26 @@
     return visibilityBySite?.[site]?.[dictionary] !== false;
   }
 
+  function hasExpandedSelection(selection) {
+    return !!selection && !selection.isCollapsed && selection.rangeCount > 0;
+  }
+
+  function selectionIntersectsNode(selection, node) {
+    if (!hasExpandedSelection(selection)) return false;
+    for (let index = 0; index < selection.rangeCount; index++) {
+      try {
+        if (selection.getRangeAt(index).intersectsNode(node)) return true;
+      } catch (_error) { /* Dynamic pages may detach a node while it is being scanned. */ }
+    }
+    return false;
+  }
+
   globalThis.LexisWebConfig = Object.freeze({
     defaultConnection: Object.freeze({ host: "127.0.0.1", port: DEFAULT_PORT }),
     normalizePort,
     dictionaryForFolder,
     isDictionaryVisible,
+    hasExpandedSelection,
+    selectionIntersectsNode,
   });
 })();

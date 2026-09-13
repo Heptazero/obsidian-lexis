@@ -428,7 +428,8 @@ function createDocumentHighlights(): PropertyDescriptorMap {
             height: `${rect.height / scaleY}px`,
             background: this.applyAlpha(color, alpha),
             borderRadius: "2px",
-            pointerEvents: "auto",
+            pointerEvents: "none",
+            mixBlendMode: "multiply",
           });
           hl.appendChild(d);
         }

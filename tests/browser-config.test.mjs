@@ -22,3 +22,18 @@ test("browser dictionary visibility uses the current site and longest matching d
   assert.equal(config.isDictionaryVisible("https://other.example", "60_english/00-word", dictionaries, visibility), true);
   assert.equal(config.isDictionaryVisible("https://example.com", "unmanaged", dictionaries, visibility), true);
 });
+
+test("browser highlighting leaves the active selection untouched", async () => {
+  const config = await loadConfig();
+  const selectedNode = {};
+  const outsideNode = {};
+  const selection = {
+    isCollapsed: false,
+    rangeCount: 1,
+    getRangeAt: () => ({ intersectsNode: (node) => node === selectedNode }),
+  };
+  assert.equal(config.hasExpandedSelection(selection), true);
+  assert.equal(config.selectionIntersectsNode(selection, selectedNode), true);
+  assert.equal(config.selectionIntersectsNode(selection, outsideNode), false);
+  assert.equal(config.selectionIntersectsNode({ ...selection, isCollapsed: true }, selectedNode), false);
+});

@@ -1145,5 +1145,6 @@ body.is-phone .workspace-leaf-content[data-type="lexis-review-view"] .lexis-rv-r
     visibility: hidden;
 }
 .lexis-pdf-hl {
-    cursor: pointer;
+    pointer-events: none;
+    mix-blend-mode: multiply;
 }

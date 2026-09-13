@@ -1,6 +1,6 @@
 // Lexis Web —— 内容脚本:在网页上高亮词库里的词,悬停显示释义
 (() => {
-  const { isDictionaryVisible } = globalThis.LexisWebConfig;
+  const { isDictionaryVisible, hasExpandedSelection, selectionIntersectsNode } = globalThis.LexisWebConfig;
   const HL = "lexis-web-hl";
   const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "INPUT", "CODE", "PRE", "SELECT", "OPTION", "KBD", "SAMP"]);
   const DEFAULT_CFG = { highlight: true, showMemoryCurve: true, color: "#7c5cff", style: "wavy", useObsidianStyle: true, opacity: 100 };
@@ -27,6 +27,8 @@
   let lastSelectionFolder = "";
   let popoverSize = null;
   let pendingRoots = new Set();
+  const selectionDeferredRoots = new Set();
+  let pointerSelecting = false;
   let styleCfg = null;
   const detailCache = new Map();
   let pop = null, popHost = null, hideTimer = null, currentSpan = null;
@@ -262,7 +264,7 @@
       const s = cfg.style || "wavy";
       const a = (cfg.opacity != null ? cfg.opacity : 100) / 100;
       if (a < 1) c = `color-mix(in srgb, ${c} ${Math.round(a * 100)}%, transparent)`;
-      if (s === "background") return `background-color:${c};border-radius:3px;padding:0 1px;text-decoration-line:none`;
+      if (s === "background") return `background-color:${c};border-radius:3px;text-decoration-line:none`;
       const line = s === "underline" ? "solid" : "wavy";
       return `text-decoration-line:underline;text-decoration-style:${line};text-decoration-color:${c};text-underline-offset:2px`;
     }
@@ -281,7 +283,7 @@
     if (!styleKind) styleKind = styleCfg.highlightStyle || cfg.style || "wavy";
     const alpha = keyOpacity.has(key) ? keyOpacity.get(key) : (styleCfg.highlightOpacity != null ? styleCfg.highlightOpacity : 1);
     if (alpha < 1) color = `color-mix(in srgb, ${color} ${Math.round(alpha * 100)}%, transparent)`;
-    if (styleKind === "background") return `background-color:${color};border-radius:3px;padding:0 1px;text-decoration-line:none`;
+    if (styleKind === "background") return `background-color:${color};border-radius:3px;text-decoration-line:none`;
     const line = styleKind === "underline" ? "solid" : "wavy";
     return `text-decoration-line:underline;text-decoration-style:${line};text-decoration-color:${color};text-underline-offset:2px`;
   }
@@ -342,10 +344,15 @@
 
   function scan(root) {
     if (!regex || !(cfg && cfg.highlight)) return;
+    const selection = window.getSelection();
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
       acceptNode(n) {
         if (!n.nodeValue || (n.nodeValue.length < 2 && !/[^\x00-\x7f]/.test(n.nodeValue))) return NodeFilter.FILTER_REJECT;
         if (skip(n)) return NodeFilter.FILTER_REJECT;
+        if (selectionIntersectsNode(selection, n)) {
+          if (n.parentElement) selectionDeferredRoots.add(n.parentElement);
+          return NodeFilter.FILTER_REJECT;
+        }
         regex.lastIndex = 0;
         if (!regex.test(n.nodeValue)) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
@@ -811,6 +818,7 @@
   document.addEventListener("mouseover", (e) => {
     const t = e.target;
     if (!(t && t.classList && t.classList.contains(HL))) return;
+    if (pointerSelecting || (e.buttons & 1) || hasExpandedSelection(window.getSelection())) return;
     clearTimeout(hideTimer);
     if (pop && pop.dataset.k === t.dataset.k) return;
     if (hoverTarget === t) return;
@@ -990,9 +998,27 @@
   }
   // mouseup + selectionchange 双触发:YouTube 等会吞掉 player 内的 mouseup,selectionchange 兜底
   function scheduleSel() { clearTimeout(selTimer); selTimer = setTimeout(onSelect, 200); }
-  document.addEventListener("mouseup", scheduleSel);
-  document.addEventListener("selectionchange", scheduleSel);
-  document.addEventListener("mousedown", (e) => { if (selBtn && !selBtn.contains(e.target)) hideSelBtn(); });
+  document.addEventListener("mouseup", () => { pointerSelecting = false; scheduleSel(); });
+  document.addEventListener("selectionchange", () => {
+    const selection = window.getSelection();
+    const selectionInsidePopover = !!(pop && selection?.anchorNode && pop.contains(selection.anchorNode));
+    if (hasExpandedSelection(selection) && !selectionInsidePopover) removePop();
+    else if (selectionDeferredRoots.size) {
+      for (const root of selectionDeferredRoots) if (root.isConnected) pendingRoots.add(root);
+      selectionDeferredRoots.clear();
+      scheduleScan();
+    }
+    scheduleSel();
+  });
+  document.addEventListener("mousedown", (e) => {
+    const insidePopover = !!(popHost && e.composedPath().includes(popHost));
+    if (e.button === 0 && !(selBtn && selBtn.contains(e.target))) {
+      pointerSelecting = true;
+      if (!insidePopover) removePop();
+    }
+    if (selBtn && !selBtn.contains(e.target)) hideSelBtn();
+  });
+  window.addEventListener("blur", () => { pointerSelecting = false; });
   document.addEventListener("scroll", hideSelBtn, { passive: true });
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

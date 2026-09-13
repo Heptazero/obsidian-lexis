@@ -27,6 +27,11 @@ function overlayDocumentFor(element: Element): Document {
   return sourceDocument.defaultView?.frameElement?.ownerDocument || sourceDocument;
 }
 
+function hasExpandedSelection(element: Element): boolean {
+  const selection = element.ownerDocument.defaultView?.getSelection();
+  return !!selection && !selection.isCollapsed && selection.rangeCount > 0;
+}
+
 function createReaderInteractions({ openAliasPicker }: ReaderInteractionDependencies): PropertyDescriptorMap {
   class ReaderInteractions {
   declare app: App;
@@ -60,6 +65,7 @@ function createReaderInteractions({ openAliasPicker }: ReaderInteractionDependen
   onMouseOver(e: MouseEvent): void {
     const t = this.highlightTarget(e);
     if (!t) return;
+    if ((e.buttons & 1) || hasExpandedSelection(t)) return;
     window.clearTimeout(this._hideTimer);
     if (this._popover?.dataset.lexisKey === t.dataset.lexisKey) return;
     if (this._showTarget === t) return;
@@ -85,6 +91,7 @@ function createReaderInteractions({ openAliasPicker }: ReaderInteractionDependen
   onClick(e: MouseEvent): void {
     const t = this.highlightTarget(e);
     if (t) {
+      if (hasExpandedSelection(t)) return;
       const entry = this.index.get(t.dataset.lexisKey);
       if (entry) {
         e.preventDefault();
@@ -252,4 +259,4 @@ function createReaderInteractions({ openAliasPicker }: ReaderInteractionDependen
   return descriptors;
 }
 
-export { createReaderInteractions, overlayDocumentFor };
+export { createReaderInteractions, overlayDocumentFor, hasExpandedSelection };

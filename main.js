@@ -3136,7 +3136,8 @@ function createDocumentHighlights() {
               height: `${rect.height / scaleY}px`,
               background: this.applyAlpha(color, alpha),
               borderRadius: "2px",
-              pointerEvents: "auto"
+              pointerEvents: "none",
+              mixBlendMode: "multiply"
             });
             hl.appendChild(d);
           }
@@ -3288,6 +3289,10 @@ function overlayDocumentFor(element) {
   const sourceDocument = element.ownerDocument;
   return sourceDocument.defaultView?.frameElement?.ownerDocument || sourceDocument;
 }
+function hasExpandedSelection(element) {
+  const selection = element.ownerDocument.defaultView?.getSelection();
+  return !!selection && !selection.isCollapsed && selection.rangeCount > 0;
+}
 function createReaderInteractions({ openAliasPicker }) {
   class ReaderInteractions {
     // ---------- 悬浮卡 ----------
@@ -3301,6 +3306,7 @@ function createReaderInteractions({ openAliasPicker }) {
     onMouseOver(e) {
       const t = this.highlightTarget(e);
       if (!t) return;
+      if (e.buttons & 1 || hasExpandedSelection(t)) return;
       window.clearTimeout(this._hideTimer);
       if (this._popover?.dataset.lexisKey === t.dataset.lexisKey) return;
       if (this._showTarget === t) return;
@@ -3327,6 +3333,7 @@ function createReaderInteractions({ openAliasPicker }) {
     onClick(e) {
       const t = this.highlightTarget(e);
       if (t) {
+        if (hasExpandedSelection(t)) return;
         const entry = this.index.get(t.dataset.lexisKey);
         if (entry) {
           e.preventDefault();

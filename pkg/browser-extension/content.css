@@ -2,16 +2,20 @@
 :root { --lexis-web-color: #7c5cff; }
 
 .lexis-web-hl {
-  cursor: help;
+  cursor: text;
   text-decoration-line: underline;
   text-decoration-style: wavy;
   text-decoration-color: var(--lexis-web-color);
   text-decoration-thickness: 1px;
   text-underline-offset: 2px;
 }
+.lexis-web-hl::selection {
+  background: Highlight;
+  color: HighlightText;
+  text-decoration-color: transparent;
+}
 [data-lexis-style="underline"] .lexis-web-hl { text-decoration-style: solid; }
 [data-lexis-style="background"] .lexis-web-hl {
-  padding: 0 1px;
   border-radius: 3px;
   background-color: color-mix(in srgb, var(--lexis-web-color) 22%, transparent);
   text-decoration-line: none;
