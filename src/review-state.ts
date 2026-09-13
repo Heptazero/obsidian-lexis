@@ -1,4 +1,5 @@
 import type { App } from "obsidian";
+import { reviewItemSuspensionKeys } from "./review-item";
 import type { LexisSettings, ReviewCardState, ReviewItem, ReviewStateSnapshot } from "./types";
 
 interface ReviewSchedule {
@@ -64,6 +65,11 @@ export function createReviewState({ todayStr, round2 }: ReviewStateDependencies)
         return;
       }
       for (const id of item.syntax?.memberIds || []) this.settings.syntaxCardStates[id] = { ...state };
+      await this.saveSettings();
+    }
+
+    async suspendReviewItem(item: ReviewItem): Promise<void> {
+      for (const key of reviewItemSuspensionKeys(item)) this.settings.suspendedReviewItems[key] = true;
       await this.saveSettings();
     }
 

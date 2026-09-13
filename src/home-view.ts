@@ -2,7 +2,7 @@ import { ItemView, Setting, TFile, type WorkspaceLeaf } from "obsidian";
 import { LEXIS_HOME_VIEW } from "./constants";
 import type { TranslationVars } from "./i18n";
 import { MarkdownFileSuggest } from "./markdown-file-suggest";
-import type { ClozeReviewMode, LexisSettings, ReviewContentMode, ReviewOptions, ReviewScopeMode, ReviewSortDirection, ReviewSortKey } from "./types";
+import type { LexisSettings, ReviewContentMode, ReviewOptions, ReviewScopeMode, ReviewSortDirection, ReviewSortKey } from "./types";
 
 export interface RetireCandidate {
   file: TFile;
@@ -66,11 +66,9 @@ export class LexisHomeView extends ItemView {
     const currentFile = activeFile || (rememberedFile instanceof TFile ? rememberedFile : null);
     let selectedScope: ReviewScopeMode = "vocab";
     let selectedFolder = "";
-    let selectedLinkSource = this.app.vault.getFileByPath(this.plugin.settings.lastReviewLinkSource || "")?.path || "";
-    let selectedHub = this.app.vault.getFileByPath(this.plugin.settings.lastReviewHub || "")?.path || "";
+    let selectedLinkSource = this.app.vault.getFileByPath(this.plugin.settings.lastReviewLinkSource || this.plugin.settings.lastReviewHub || "")?.path || "";
     let selectedTag = "";
     let selectedContent: ReviewContentMode = "notes";
-    let selectedClozeMode: ClozeReviewMode = "separate";
     let selectedSort: ReviewSortKey = "due";
     let selectedDirection: ReviewSortDirection = "asc";
     const controls = container.createDiv({ cls: "lexis-review-controls" });
@@ -97,14 +95,11 @@ export class LexisHomeView extends ItemView {
         .addOption("vocab", this.plugin.t("home.scopeVocab"))
         .addOption("folder", this.plugin.t("home.scopeFolder"))
         .addOption("links", this.plugin.t("home.scopeLinks"))
-        .addOption("hub", this.plugin.t("home.scopeHub"))
         .addOption("tag", this.plugin.t("home.scopeTag"))
         .addOption("current", this.plugin.t("home.scopeCurrent"))
         .setValue(selectedScope)
         .onChange((value) => {
-          if (["vocab", "folder", "links", "hub", "tag", "current"].includes(value)) selectedScope = value as ReviewScopeMode;
-          if (selectedScope === "links") selectedContent = "notes";
-          if (selectedScope === "hub") selectedContent = "syntax";
+          if (["vocab", "folder", "links", "tag", "current"].includes(value)) selectedScope = value as ReviewScopeMode;
           rerenderControls();
         }));
       if (selectedScope === "folder") {
@@ -132,24 +127,6 @@ export class LexisHomeView extends ItemView {
           });
         });
       }
-      if (selectedScope === "hub") {
-        new Setting(controls).setName(this.plugin.t("home.reviewHub")).addSearch((search) => {
-          const applyPath = (value: string) => {
-            const file = this.app.vault.getFileByPath(value.trim());
-            selectedHub = file?.extension === "md" ? file.path : "";
-            updateStartState();
-            if (selectedHub && selectedHub !== this.plugin.settings.lastReviewHub) {
-              this.plugin.settings.lastReviewHub = selectedHub;
-              void this.plugin.saveSettings();
-            }
-          };
-          search.setPlaceholder(this.plugin.t("home.chooseMarkdownFile")).setValue(selectedHub).onChange(applyPath);
-          this.fileSuggest = new MarkdownFileSuggest(this.app, search.inputEl, () => markdownFiles, (file) => {
-            search.setValue(file.path);
-            applyPath(file.path);
-          });
-        });
-      }
       if (selectedScope === "tag") {
         new Setting(controls).setName(this.plugin.t("home.reviewTag")).addDropdown((dropdown) => {
           dropdown.addOption("", this.plugin.t("home.chooseTag"));
@@ -160,21 +137,12 @@ export class LexisHomeView extends ItemView {
       if (selectedScope === "current") {
         new Setting(controls).setName(this.plugin.t("home.currentNote")).setDesc(currentFile?.path || this.plugin.t("home.noCurrentNote"));
       }
-      if (selectedScope !== "links" && selectedScope !== "hub") {
-        const contentSetting = new Setting(controls).setName(this.plugin.t("home.reviewContent"));
-        addSegments(contentSetting, [
-          ["notes", this.plugin.t("home.contentNotes")],
-          ["syntax", this.plugin.t("home.contentSyntax")],
-          ["both", this.plugin.t("home.contentBoth")],
-        ], selectedContent, (value) => { selectedContent = value; rerenderControls(); });
-      }
-      if (selectedScope === "hub" || (selectedScope !== "links" && selectedContent !== "notes")) {
-        const clozeSetting = new Setting(controls).setName(this.plugin.t("home.clozeMode"));
-        addSegments(clozeSetting, [
-          ["separate", this.plugin.t("home.clozeSeparate")],
-          ["combined", this.plugin.t("home.clozeCombined")],
-        ], selectedClozeMode, (value) => { selectedClozeMode = value; rerenderControls(); });
-      }
+      const contentSetting = new Setting(controls).setName(this.plugin.t("home.reviewContent"));
+      addSegments(contentSetting, [
+        ["notes", this.plugin.t("home.contentNotes")],
+        ["syntax", this.plugin.t("home.contentSyntax")],
+        ["both", this.plugin.t("home.contentBoth")],
+      ], selectedContent, (value) => { selectedContent = value; rerenderControls(); });
       new Setting(controls).setName(this.plugin.t("home.sortBy")).addDropdown((dropdown) => {
         dropdown
           .addOption("due", this.plugin.t("home.sortDue"))
@@ -202,7 +170,6 @@ export class LexisHomeView extends ItemView {
           button.setDisabled(
             (selectedScope === "current" && !currentFile) ||
             (selectedScope === "links" && !selectedLinkSource) ||
-            (selectedScope === "hub" && !selectedHub) ||
             (selectedScope === "tag" && !selectedTag),
           );
         };
@@ -213,11 +180,9 @@ export class LexisHomeView extends ItemView {
             scope: selectedScope,
             folder: selectedFolder,
             linkSource: selectedLinkSource,
-            hub: selectedHub,
             tag: selectedTag,
             file: currentFile?.path,
-            content: selectedScope === "hub" ? "syntax" : selectedScope === "links" ? "notes" : selectedContent,
-            clozeMode: selectedClozeMode,
+            content: selectedContent,
             sortBy: selectedSort,
             sortDirection: selectedDirection,
           }));

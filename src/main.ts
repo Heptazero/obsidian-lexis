@@ -151,6 +151,7 @@ class LexisPlugin extends Plugin {
   declare readSyntaxCardState: (id: string) => ReviewCardState;
   declare snapshotReviewItem: (item: ReviewItem) => ReviewStateSnapshot;
   declare applyReviewItemSchedule: (item: ReviewItem, schedule: Schedule) => Promise<void>;
+  declare suspendReviewItem: (item: ReviewItem) => Promise<void>;
   declare restoreReviewItem: (item: ReviewItem, snapshot: ReviewStateSnapshot) => Promise<void>;
   declare logReviewItem: (item: ReviewItem, schedule: Schedule, grade: number, retentionBefore: number) => Promise<void>;
   declare undoReviewItemLog: (item: ReviewItem) => Promise<void>;

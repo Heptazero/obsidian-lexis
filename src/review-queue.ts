@@ -1,5 +1,6 @@
 import type { App, TFile } from "obsidian";
 import { parseSyntaxCards, type FlashcardTemplates, type ParsedSyntaxCard } from "./flashcard-syntax";
+import { noteSuspensionKey, syntaxSuspensionKey } from "./review-item";
 import type { LexisSettings, ReviewCardState, ReviewItem, ReviewOptions, ReviewSortKey } from "./types";
 
 interface ReviewQueueDependencies {
@@ -21,6 +22,11 @@ interface ReviewQueueHost {
 }
 
 const isFresh = (card: ReviewCardState): boolean => card.s == null || Number.isNaN(Number(card.s));
+
+const reviewedToday = (card: ReviewCardState, today: string): boolean => {
+  const latest = card.history?.[card.history.length - 1];
+  return latest?.date === today && latest.grade !== 1;
+};
 
 const syntaxTemplates = (settings: LexisSettings): FlashcardTemplates => ({
   inline: settings.flashcardInlineTemplate,
@@ -97,7 +103,6 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
         if (folder) files = files.filter((file) => this.inScope(file.path, [folder]));
       }
       if (scope === "links") files = this.directLinkedFiles(options.linkSource || "");
-      if (scope === "hub") files = this.directLinkedFiles(options.hub || "");
       if (scope === "tag") {
         const tag = String(options.tag || "").toLowerCase().replace(/^#/, "");
         files = tag ? files.filter((file) => this.getTags(file).has(tag)) : [];
@@ -109,11 +114,13 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
       });
     }
 
-    syntaxItems(file: TFile, cards: ParsedSyntaxCard[], clozeMode: ReviewOptions["clozeMode"]): ReviewItem[] {
+    syntaxItems(file: TFile, cards: ParsedSyntaxCard[], today: string): ReviewItem[] {
       const result: ReviewItem[] = [];
       const combinedGroups = new Map<string, ParsedSyntaxCard[]>();
       for (const syntax of cards) {
-        if (syntax.kind === "cloze" && clozeMode === "combined") {
+        const card = this.readSyntaxCardState(syntax.id);
+        if (this.settings.suspendedReviewItems?.[syntaxSuspensionKey(syntax.id)] || reviewedToday(card, today)) continue;
+        if (syntax.kind === "cloze") {
           const group = combinedGroups.get(syntax.groupId) || [];
           group.push(syntax);
           combinedGroups.set(syntax.groupId, group);
@@ -122,18 +129,27 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
         result.push({
           type: "syntax",
           file,
-          card: this.readSyntaxCardState(syntax.id),
+          card,
           syntax: { id: syntax.id, memberIds: [syntax.id], kind: syntax.kind, front: syntax.front, back: syntax.back, line: syntax.line },
         });
       }
       for (const group of combinedGroups.values()) {
         const first = group[0];
-        const memberIds = group.map((card) => card.id);
+        const members = group.map((syntax) => ({ id: syntax.id, front: syntax.front, card: this.readSyntaxCardState(syntax.id) }));
         result.push({
           type: "syntax",
           file,
-          card: representativeState(memberIds.map((id) => this.readSyntaxCardState(id))),
-          syntax: { id: first.groupId, memberIds, kind: "cloze", front: first.combinedFront || first.front, back: first.back, line: first.line },
+          card: representativeState(members.map((member) => member.card)),
+          syntax: {
+            id: first.groupId,
+            memberIds: members.map((member) => member.id),
+            members,
+            kind: "cloze",
+            front: members[0].front,
+            combinedFront: first.combinedFront || first.front,
+            back: first.back,
+            line: first.line,
+          },
         });
       }
       return result;
@@ -168,10 +184,11 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
 
     async buildQueue(options: ReviewOptions = {}): Promise<ReviewItem[]> {
       const resolved = options || {};
-      const content = resolved.scope === "hub" ? "syntax" : resolved.scope === "links" ? "notes" : resolved.content || "notes";
+      const content = resolved.content || "notes";
       const sortBy = resolved.sortBy || "due";
       const direction = resolved.sortDirection === "desc" ? -1 : 1;
       const files = this.reviewScopeFiles(resolved);
+      const today = todayStr();
       const markdownByPath = new Map<string, string>();
       if (content !== "notes" || sortBy === "wordCount") {
         await Promise.all(files.map(async (file) => {
@@ -181,15 +198,19 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
       }
       const candidates: ReviewItem[] = [];
       if (content === "notes" || content === "both") {
-        for (const file of files) candidates.push({ type: "note", file, card: this.readCard(file) });
+        for (const file of files) {
+          const card = this.readCard(file);
+          if (!this.settings.suspendedReviewItems?.[noteSuspensionKey(file.path)] && !reviewedToday(card, today)) {
+            candidates.push({ type: "note", file, card });
+          }
+        }
       }
       if (content === "syntax" || content === "both") {
         const templates = syntaxTemplates(this.settings);
-        const parsed = files.map((file) => this.syntaxItems(file, parseSyntaxCards(markdownByPath.get(file.path) || "", file.path, templates), resolved.clozeMode || "separate"));
+        const parsed = files.map((file) => this.syntaxItems(file, parseSyntaxCards(markdownByPath.get(file.path) || "", file.path, templates), today));
         for (const items of parsed) candidates.push(...items);
       }
 
-      const today = todayStr();
       const due = candidates.filter((item) => !isFresh(item.card) && (!item.card.due || String(item.card.due).slice(0, 10) <= today));
       const fresh = candidates.filter((item) => isFresh(item.card));
       let queue = due.concat(fresh);

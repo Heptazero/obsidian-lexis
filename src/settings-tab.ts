@@ -626,6 +626,19 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
         .addSlider((s) => s.setLimits(0.8, 0.97, 0.01).setValue(this.plugin.settings.requestRetention).onChange(async (v) => { this.plugin.settings.requestRetention = v; await save(); }));
       new Setting(fsrsSection).setName(t("settings.newLimit")).addSlider((s) => s.setLimits(0, 100, 5).setValue(this.plugin.settings.newPerDay).onChange(async (v) => { this.plugin.settings.newPerDay = v; await save(); }));
       new Setting(fsrsSection).setName(t("settings.sessionLimit")).addSlider((s) => s.setLimits(10, 500, 10).setValue(this.plugin.settings.maxReviewsPerSession).onChange(async (v) => { this.plugin.settings.maxReviewsPerSession = v; await save(); }));
+      const suspendedCount = Object.values(this.plugin.settings.suspendedReviewItems || {}).filter(Boolean).length;
+      new Setting(fsrsSection)
+        .setName(t("settings.suspendedCards"))
+        .setDesc(t("settings.suspendedCardsDesc", { count: suspendedCount }))
+        .addButton((button) => button
+          .setButtonText(t("settings.restoreSuspended"))
+          .setDisabled(!suspendedCount)
+          .onClick(async () => {
+            this.plugin.settings.suspendedReviewItems = {};
+            await save();
+            new Notice(t("settings.suspendedRestored"));
+            this.update();
+          }));
       new Setting(fsrsSection).setName(t("settings.cardFront")).setDesc(t("settings.cardFrontDesc"))
         .addDropdown((dd) => dd.addOption("note", t("settings.noteCard")).addOption("cloze", t("settings.clozeCard")).setValue(this.plugin.settings.cardFront).onChange(async (v) => { this.plugin.settings.cardFront = v === "cloze" ? "cloze" : "note"; await save(); }));
       new Setting(fsrsSection).setName(t("settings.showReviewMetadata")).setDesc(t("settings.showReviewMetadataDesc"))

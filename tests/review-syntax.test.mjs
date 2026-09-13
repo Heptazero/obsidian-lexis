@@ -45,8 +45,9 @@ test("supports a custom separator on its own line", async () => {
   assert.equal(cards[0].back, "- A\n- B");
 });
 
-test("builds separate or combined cloze review items within any folder", async () => {
+test("groups multiple clozes so reveal mode can be chosen on the card", async () => {
   const { createReviewQueue } = await loadTypeScript("src/review-queue.ts");
+  const { chooseClozeRevealMode } = await loadTypeScript("src/review-item.ts");
   const files = [{ path: "A/a.md", extension: "md" }, { path: "B/b.md", extension: "md" }];
   const markdown = {
     "A/a.md": "问题??\n- 答案一\n- 答案二\n\n一共有 ==甲== 和 ==乙==。",
@@ -72,16 +73,22 @@ test("builds separate or combined cloze review items within any folder", async (
     saveSettings: async () => {},
   };
   Object.defineProperties(host, createReviewQueue({ todayStr: () => "2026-08-31" }));
-  const separate = await host.buildQueue({ scope: "folder", folder: "A", content: "syntax", clozeMode: "separate" });
-  assert.equal(separate.length, 3);
-  const combined = await host.buildQueue({ scope: "folder", folder: "A", content: "syntax", clozeMode: "combined" });
-  assert.equal(combined.length, 2);
-  const cloze = combined.find((item) => item.syntax.kind === "cloze");
+  const queue = await host.buildQueue({ scope: "folder", folder: "A", content: "syntax" });
+  assert.equal(queue.length, 2);
+  const cloze = queue.find((item) => item.syntax.kind === "cloze");
   assert.equal(cloze.syntax.memberIds.length, 2);
-  assert.equal(cloze.syntax.front, "一共有 […] 和 […]。");
+  assert.equal(cloze.syntax.front, "一共有 […] 和 ==乙==。");
+  assert.equal(cloze.syntax.combinedFront, "一共有 […] 和 […]。");
+  const one = chooseClozeRevealMode(cloze, "one");
+  assert.equal(one.current.syntax.memberIds.length, 1);
+  assert.equal(one.remaining.length, 1);
+  const all = chooseClozeRevealMode(cloze, "all");
+  assert.equal(all.current.syntax.memberIds.length, 2);
+  assert.equal(all.remaining.length, 0);
+  assert.equal(all.current.syntax.front, "一共有 […] 和 […]。");
 });
 
-test("builds syntax cards from the Markdown files directly linked by a hub", async () => {
+test("reviews notes or syntax cards directly linked by one selected file", async () => {
   const { createReviewQueue } = await loadTypeScript("src/review-queue.ts");
   const hub = { path: "00_hub/数学.md", extension: "md" };
   const linkedA = { path: "10_atom/群.md", extension: "md" };
@@ -127,13 +134,40 @@ test("builds syntax cards from the Markdown files directly linked by a hub", asy
     saveSettings: async () => {},
   };
   Object.defineProperties(host, createReviewQueue({ todayStr: () => "2026-09-09" }));
-  const queue = await host.buildQueue({ scope: "hub", hub: hub.path, content: "notes" });
-  assert.deepEqual(new Set(queue.map((item) => item.file.path)), new Set([linkedA.path, linkedB.path]));
-  assert.ok(queue.every((item) => item.type === "syntax"));
-
-  const linkedNotes = await host.buildQueue({ scope: "links", linkSource: hub.path, content: "syntax" });
+  const linkedNotes = await host.buildQueue({ scope: "links", linkSource: hub.path, content: "notes" });
   assert.deepEqual(new Set(linkedNotes.map((item) => item.file.path)), new Set([linkedA.path, linkedB.path]));
   assert.ok(linkedNotes.every((item) => item.type === "note"));
+
+  const linkedSyntax = await host.buildQueue({ scope: "links", linkSource: hub.path, content: "syntax" });
+  assert.deepEqual(new Set(linkedSyntax.map((item) => item.file.path)), new Set([linkedA.path, linkedB.path]));
+  assert.ok(linkedSyntax.every((item) => item.type === "syntax"));
+
+  host.settings.suspendedReviewItems = { [`note:${linkedA.path}`]: true };
+  const unsuspended = await host.buildQueue({ scope: "links", linkSource: hub.path, content: "notes" });
+  assert.deepEqual(unsuspended.map((item) => item.file.path), [linkedB.path]);
+});
+
+test("does not rebuild a card already reviewed today unless it was graded again", async () => {
+  const { createReviewQueue } = await loadTypeScript("src/review-queue.ts");
+  const file = { path: "notes/a.md", extension: "md", stat: { ctime: 1, mtime: 1 } };
+  let grade = 3;
+  const host = {
+    app: { vault: { getMarkdownFiles: () => [file], cachedRead: async () => "" } },
+    settings: { syntaxCardStates: {}, suspendedReviewItems: {}, reviewHistory: {}, newPerDay: 20, maxReviewsPerSession: 200 },
+    inVocabFolder: () => true,
+    readLifecycle: () => ({ archived: false, retired: false }),
+    normalizeFolder: (value) => value,
+    inScope: () => true,
+    getTags: () => new Set(),
+    readCard: () => ({ s: 2, due: "2026-09-13", last: "2026-09-12", history: [{ date: "2026-09-13", grade }] }),
+    readSyntaxCardState: () => ({}),
+    freqVal: () => 1,
+    saveSettings: async () => {},
+  };
+  Object.defineProperties(host, createReviewQueue({ todayStr: () => "2026-09-13" }));
+  assert.equal((await host.buildQueue({ content: "notes" })).length, 0);
+  grade = 1;
+  assert.equal((await host.buildQueue({ content: "notes" })).length, 1);
 });
 
 test("counts note text and sorts eligible notes by field and direction", async () => {
@@ -169,9 +203,9 @@ test("counts note text and sorts eligible notes by field and direction", async (
   assert.deepEqual(latest.map((item) => item.file.path), ["notes/short.md", "notes/long.md"]);
 });
 
-test("applies and undoes one combined grade across member clozes", async () => {
+test("applies, suspends, and undoes one combined action across member clozes", async () => {
   const { createReviewState } = await loadTypeScript("src/review-state.ts");
-  const settings = { syntaxCardStates: {}, reviewHistory: {}, reviewLog: {} };
+  const settings = { syntaxCardStates: {}, suspendedReviewItems: {}, reviewHistory: {}, reviewLog: {} };
   const host = {
     app: { fileManager: { processFrontMatter: async () => {} } },
     settings,
@@ -186,6 +220,9 @@ test("applies and undoes one combined grade across member clozes", async () => {
   assert.equal(settings.syntaxCardStates.a.s, 1.23);
   assert.equal(settings.syntaxCardStates.b.d, 4.57);
   assert.equal(settings.reviewLog["2026-08-31"], 1);
+  await host.suspendReviewItem(item);
+  assert.equal(settings.suspendedReviewItems["syntax:a"], true);
+  assert.equal(settings.suspendedReviewItems["syntax:b"], true);
   await host.restoreReviewItem(item, snapshot);
   await host.undoReviewItemLog(item);
   assert.equal(settings.syntaxCardStates.a, undefined);

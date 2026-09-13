@@ -7,8 +7,7 @@ export type EmptyNotePreset = "blank" | "occ";
 export type CardFront = "note" | "cloze";
 export type AnnotationImageLocation = "obsidian" | "custom";
 export type ReviewContentMode = "notes" | "syntax" | "both";
-export type ReviewScopeMode = "vocab" | "folder" | "links" | "hub" | "tag" | "current";
-export type ClozeReviewMode = "separate" | "combined";
+export type ReviewScopeMode = "vocab" | "folder" | "links" | "tag" | "current";
 export type ReviewSortKey = "due" | "wordCount" | "modified" | "created" | "frequency" | "random";
 export type ReviewSortDirection = "asc" | "desc";
 
@@ -26,11 +25,9 @@ export interface ReviewOptions {
   scope?: ReviewScopeMode;
   folder?: string;
   linkSource?: string;
-  hub?: string;
   tag?: string;
   file?: string;
   content?: ReviewContentMode;
-  clozeMode?: ClozeReviewMode;
   sortBy?: ReviewSortKey;
   sortDirection?: ReviewSortDirection;
 }
@@ -38,10 +35,18 @@ export interface ReviewOptions {
 export interface SyntaxReviewCard {
   id: string;
   memberIds: string[];
+  members?: SyntaxReviewMember[];
   kind: "inline" | "bidirectional" | "block" | "cloze";
   front: string;
+  combinedFront?: string;
   back: string;
   line: number;
+}
+
+export interface SyntaxReviewMember {
+  id: string;
+  front: string;
+  card: ReviewCardState;
 }
 
 export interface ReviewItem {
@@ -124,6 +129,7 @@ export interface LexisSettings {
   reviewLog: Record<string, number>;
   reviewHistory: Record<string, ReviewHistoryEvent[]>;
   syntaxCardStates: Record<string, ReviewCardState>;
+  suspendedReviewItems: Record<string, boolean>;
   showReviewMetadata: boolean;
   flashcardInlineTemplate: string;
   flashcardBidirectionalTemplate: string;

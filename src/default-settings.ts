@@ -48,6 +48,7 @@ export const DEFAULT_SETTINGS: DefaultLexisSettings = {
   reviewLog: {},
   reviewHistory: {},
   syntaxCardStates: {},
+  suspendedReviewItems: {},
   showReviewMetadata: false,
   flashcardInlineTemplate: "{{question}}::{{answer}}",
   flashcardBidirectionalTemplate: "{{sideA}}:::{{sideB}}",
