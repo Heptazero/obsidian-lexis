@@ -4,7 +4,7 @@
 
 ## 一句话背景
 
-用户(Hz)的 Obsidian 单词学习库在 `/Users/heptazero/Documents/2en`,自建插件 **Lexis**(`.obsidian/plugins/lexis/`,GitHub: https://github.com/Heptazero/obsidian-lexis)。当前开发版本:**插件 v1.10.4** / **浏览器扩展源码 v1.0.23**(两个 `manifest.json` 版本号独立,互不绑定)。当前先在 `/Users/heptazero/Documents/my-obsidian/.obsidian/plugins/lexis-local` 接收、重构和验收；正式英文库仍停在插件 v1.6.1 / 浏览器扩展 v1.0.17，未同步本轮改动。
+用户(Hz)的 Obsidian 单词学习库在 `/Users/heptazero/Documents/2en`，自建插件 **Lexis**（GitHub: https://github.com/Heptazero/obsidian-lexis）。开发仓库位于 `/Users/heptazero/Documents/2en/.obsidian/plugins/lexis-local`；Obsidian、浏览器扩展和 Zotero 扩展各自独立发布，当前版本以对应 manifest 和 Git 标签为准。
 
 项目定位已经从"背单词工具"扩展为**「全方位个人词典」**——词典文件夹里的笔记标题可以是任何语言的单词、术语、概念,不局限于英语背诵这一件事。这个定位决定了很多设计取舍(比如高亮匹配必须语言无关、复习卡不该叫"例句"该叫"出处")。Zotero 阅读端 v0.1.10 已按真机诊断改为 PDF iframe 内序列化数据并打包，等待复测。
 
