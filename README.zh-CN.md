@@ -53,7 +53,7 @@ Obsidian 中每个词典都有独立高亮开关。Lexis Web 则按网站单独�
 
 ### 浏览器插件
 
-1. 从最新的 [`browser-v*` release](https://github.com/Heptazero/obsidian-lexis/releases?q=browser-v) 下载 `lexis-web-*.zip` 并解压。
+1. [下载 Lexis Web 1.2.0（`lexis-web-1.2.0.zip`）](https://github.com/Heptazero/obsidian-lexis/releases/download/browser-v1.2.0/lexis-web-1.2.0.zip)并解压。
 2. 打开 `chrome://extensions`，启用“开发者模式”，选择“加载已解压的扩展程序”。
 3. 在 Lexis 设置中启用“本机桥接”，把端口和访问令牌填入 Lexis Web。
 
@@ -61,7 +61,7 @@ Obsidian 中每个词典都有独立高亮开关。Lexis Web 则按网站单独�
 
 ### Zotero 插件
 
-1. 从最新的 [`zotero-v*` release](https://github.com/Heptazero/obsidian-lexis/releases?q=zotero-v) 下载 `lexis-zotero-*.xpi`。
+1. [下载 Lexis for Zotero 0.2.2（`lexis-zotero-0.2.2.xpi`）](https://github.com/Heptazero/obsidian-lexis/releases/download/zotero-v0.2.2/lexis-zotero-0.2.2.xpi)。
 2. 在 Zotero 中打开“工具 → 插件”，选择“从文件安装插件”。
 3. 填入同一个本机桥接端口和令牌。
 

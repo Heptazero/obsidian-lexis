@@ -53,7 +53,7 @@ Install **Lexis** from *Settings → Community plugins → Browse*. For manual i
 
 ### Browser companion
 
-1. Download `lexis-web-*.zip` from the latest [`browser-v*` release](https://github.com/Heptazero/obsidian-lexis/releases?q=browser-v).
+1. [Download Lexis Web 1.2.0 (`lexis-web-1.2.0.zip`)](https://github.com/Heptazero/obsidian-lexis/releases/download/browser-v1.2.0/lexis-web-1.2.0.zip).
 2. Extract it, open `chrome://extensions`, enable **Developer mode**, and choose **Load unpacked**.
 3. Enable *Local bridge* in Lexis settings, then copy its port and access token into Lexis Web.
 
@@ -61,7 +61,7 @@ Chrome does not auto-update unpacked extensions. Replace the extracted folder wi
 
 ### Zotero companion
 
-1. Download `lexis-zotero-*.xpi` from the latest [`zotero-v*` release](https://github.com/Heptazero/obsidian-lexis/releases?q=zotero-v).
+1. [Download Lexis for Zotero 0.2.2 (`lexis-zotero-0.2.2.xpi`)](https://github.com/Heptazero/obsidian-lexis/releases/download/zotero-v0.2.2/lexis-zotero-0.2.2.xpi).
 2. In Zotero, open *Tools → Plugins*, choose *Install Plugin From File*, and select the XPI.
 3. Enter the same local bridge port and token in Lexis for Zotero.
 
