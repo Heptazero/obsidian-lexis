@@ -4,6 +4,7 @@ import * as obsidian from "obsidian";
 import type { App, Component as ObsidianComponent, Editor, MarkdownPostProcessorContext, Notice as ObsidianNotice, TFile as ObsidianTFile, WorkspaceLeaf } from "obsidian";
 import type { Occurrence } from "./occurrence-search";
 import { overlayDocumentFor } from "./reader-interactions";
+import { pdfTargetSource } from "./pdf-highlight-targets";
 import type { InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats, ReviewHistoryEvent } from "./types";
 
 type CurveCard = { s?: number | null; due?: string | null; last?: string | null; history?: ReviewHistoryEvent[] };
@@ -343,6 +344,15 @@ function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, da
     const pageElement = span.closest<HTMLElement>("[data-page-number]");
     const pageValue = pageElement?.getAttribute("data-page-number") || "";
     const page = Number.parseInt(pageValue, 10) || undefined;
+    const pdfSource = pdfTargetSource(span);
+    if (pdfSource) {
+      const container = pdfSource.startContainer.parentElement?.closest('.textLayer');
+      if (!container) return { file, sentence: '', page };
+      const before = sourceDocument.createRange();
+      before.selectNodeContents(container);
+      before.setEnd(pdfSource.startContainer, pdfSource.startOffset);
+      return { file, sentence: this.extractSentence(container.textContent || '', before.toString().length), page };
+    }
     const textContainer = span.closest<HTMLElement>("p,li,blockquote,td,th,figcaption,h1,h2,h3,h4,h5,h6,.cm-line,.textLayer") || span.parentElement;
     if (!textContainer) return { file, sentence: "", page };
     try {

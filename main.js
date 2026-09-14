@@ -2268,10 +2268,10 @@ function createHighlightEngine({ Notice: Notice4, boundedSource: boundedSource2,
       const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
       if (!fm) return [];
       const extra = (this.settings.aliasSources || "").split(/[,，\s]+/).map((s) => s.trim()).filter(Boolean);
-      const sources = [.../* @__PURE__ */ new Set(["aliases", "alias", ...extra])];
+      const sources2 = [.../* @__PURE__ */ new Set(["aliases", "alias", ...extra])];
       const seen = /* @__PURE__ */ new Set();
       const results = [];
-      for (const src of sources) {
+      for (const src of sources2) {
         const raw = fm[src];
         if (raw == null || raw === "") continue;
         const values = typeof raw === "string" ? raw.split(/[,，;；]/) : Array.isArray(raw) ? raw : [raw];
@@ -2650,10 +2650,10 @@ function createHighlightEngine({ Notice: Notice4, boundedSource: boundedSource2,
           return NodeFilter.FILTER_ACCEPT;
         }
       });
-      const targets = [];
+      const targets2 = [];
       let n;
-      while (n = walker.nextNode()) if (n.nodeType === Node.TEXT_NODE) targets.push(n);
-      for (const node of targets) {
+      while (n = walker.nextNode()) if (n.nodeType === Node.TEXT_NODE) targets2.push(n);
+      for (const node of targets2) {
         const text = node.nodeValue || "";
         regex.lastIndex = 0;
         if (!regex.test(text)) continue;
@@ -2745,6 +2745,30 @@ function createHighlightEngine({ Notice: Notice4, boundedSource: boundedSource2,
   }
   const { constructor: _constructor, ...descriptors } = Object.getOwnPropertyDescriptors(HighlightEngine.prototype);
   return descriptors;
+}
+
+// src/pdf-highlight-targets.ts
+var targets = /* @__PURE__ */ new WeakMap();
+var sources = /* @__PURE__ */ new WeakMap();
+function setPdfTargets(layer, items) {
+  targets.set(layer, items);
+  for (const { anchor, source } of items) sources.set(anchor, source);
+}
+function pdfTargetSource(anchor) {
+  return sources.get(anchor);
+}
+function pdfHighlightAt(event) {
+  const node = event.target;
+  const element = node?.nodeType === 1 ? node : node?.parentElement;
+  if (!element || element.closest(".lexis-popover, .annotationLayer, a, button")) return null;
+  const layer = element.closest(".textLayer") || element.closest(".page")?.querySelector(":scope > .textLayer");
+  if (!layer) return null;
+  for (const { anchor } of targets.get(layer) || []) {
+    if (!anchor.isConnected || anchor.closest(".is-geometry-changing, .lexis-page-highlights-hidden")) continue;
+    const rect = anchor.getBoundingClientRect();
+    if (event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom) return anchor;
+  }
+  return null;
 }
 
 // src/document-highlights.ts
@@ -2840,10 +2864,10 @@ function createDocumentHighlights() {
       }
       return { text: text.join(""), map };
     }
-    wrapPdfFragmentMatches(layer) {
-      if (!this._pattern || !this.index.size) return;
+    collectPdfMatches(layer) {
+      if (!this._pattern || !this.index.size) return [];
       const runs = this.pdfTextRuns(layer);
-      if (!runs.length) return;
+      if (!runs.length) return [];
       const streams = runs.map((run) => this.pdfRunStream(run));
       const candidates = [];
       const nodeOrder = /* @__PURE__ */ new WeakMap();
@@ -2880,7 +2904,7 @@ function createDocumentHighlights() {
         }
       };
       for (let i = 0; i < runs.length; i++) {
-        collect(streams[i], (refs) => new Set(refs.map((ref) => ref.node)).size > 1, null);
+        collect(streams[i], () => true, null);
       }
       for (let i = 0; i < runs.length; i++) {
         const current = runs[i];
@@ -2935,34 +2959,9 @@ function createDocumentHighlights() {
         }
         accepted.push(candidate);
       }
-      const rangesByNode = /* @__PURE__ */ new Map();
-      for (const candidate of accepted) {
-        if (!candidate.entry.inline) this.passiveEncounter(candidate.entry.file);
-        for (const segment of candidate.segments) {
-          const ranges = rangesByNode.get(segment.node) || [];
-          ranges.push({ ...segment, key: candidate.key, entry: candidate.entry });
-          rangesByNode.set(segment.node, ranges);
-        }
-      }
-      const doc = layer.ownerDocument || document;
-      for (const [textNode, ranges] of rangesByNode) {
-        ranges.sort((a, b) => b.start - a.start);
-        for (const range of ranges) {
-          textNode.splitText(range.end);
-          const matched = textNode.splitText(range.start);
-          const span = doc.body.createSpan();
-          span.className = "lexis-hl";
-          span.dataset.lexisKey = range.key;
-          span.setAttribute("style", this.inlineStyleForEntry(range.entry, { pdf: true }));
-          matched.parentNode.replaceChild(span, matched);
-          span.appendChild(matched);
-        }
-      }
+      return accepted;
     }
-    // ob 内置 PDF 阅读器 = pdf.js,.textLayer 在主 DOM(无 iframe),文字层文字是透明的、
-    // 仅供选中复制;我们把命中词包成 .lexis-hl(下划线/背景色显式带颜色,所以透明文字上也看得见),
-    // 顺带白嫖现成的 document 级 mouseover/click → 悬浮卡 + 跳转。翻页/缩放时 pdf.js 重建文字层,
-    // 用 MutationObserver 重扫;.lexis-hl 在 rejectSelector 里,重扫不会重复包。
+    // PDF.js 管理文字节点及其绝对定位；Lexis 只读取 Range，单独绘制并按坐标命中。
     setupPdfHighlight(document2 = this._pdfDocument || this.app.workspace.containerEl.ownerDocument) {
       this.teardownPdfHighlight();
       this._pdfDocument = document2;
@@ -3026,6 +3025,8 @@ function createDocumentHighlights() {
         let geometryChanged = false;
         for (const mu of muts) {
           const targetElement = mu.target.nodeType === 1 ? mu.target : mu.target.parentElement;
+          if (targetElement?.closest(".lexis-pdf-hl-layer")) continue;
+          if (mu.type === "childList" && [...mu.addedNodes, ...mu.removedNodes].length && [...mu.addedNodes, ...mu.removedNodes].every((node) => node.nodeType === 1 && node.classList.contains("lexis-pdf-hl-layer"))) continue;
           if (mu.type === "attributes") {
             if (targetElement?.classList.contains("textLayer")) {
               this.markPdfGeometryChanging(targetElement);
@@ -3033,6 +3034,12 @@ function createDocumentHighlights() {
             } else if (targetElement?.matches(".page, .canvasWrapper, canvas")) {
               const page = targetElement.classList.contains("page") ? targetElement : targetElement.closest(".page");
               const layer = page?.querySelector(":scope > .textLayer");
+              if (layer) {
+                this.markPdfGeometryChanging(layer);
+                geometryChanged = true;
+              }
+            } else {
+              const layer = targetElement?.closest(".textLayer");
               if (layer) {
                 this.markPdfGeometryChanging(layer);
                 geometryChanged = true;
@@ -3069,7 +3076,7 @@ function createDocumentHighlights() {
         }
         if (geometryChanged) scheduleFlush(220);
       });
-      this._pdfObserver.observe(document2.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["style"] });
+      this._pdfObserver.observe(document2.body, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ["style"] });
       document2.querySelectorAll(".textLayer").forEach((layer) => this.markPdfGeometryChanging(layer));
       scheduleFlush();
     }
@@ -3093,8 +3100,7 @@ function createDocumentHighlights() {
     scanPdfLayer(layer) {
       if (!this.settings.enablePdfHighlight || !this.settings.enableHighlight) return;
       this.observePdfLayer(layer);
-      this.wrapPdfFragmentMatches(layer);
-      this.wrapMatchesInElement(layer, ".lexis-hl,.lexis-popover", { pdf: true });
+      const matches = this.collectPdfMatches(layer);
       const page = layer.parentElement;
       if (!page) return;
       if (getComputedStyle(page).position === "static") page.setCssStyles({ position: "relative" });
@@ -3103,54 +3109,52 @@ function createDocumentHighlights() {
         hl = page.createDiv({ cls: "lexis-pdf-hl-layer" });
         layer.insertAdjacentElement("beforebegin", hl);
       }
-      const hlBB = layer.getBoundingClientRect();
-      const layerW = layer.offsetWidth || layer.clientWidth || hlBB.width || 1;
-      const layerH = layer.offsetHeight || layer.clientHeight || hlBB.height || 1;
-      const scaleX = hlBB.width ? hlBB.width / layerW : 1;
-      const scaleY = hlBB.height ? hlBB.height / layerH : 1;
       hl.setCssStyles({
         position: "absolute",
-        left: `${layer.offsetLeft}px`,
-        top: `${layer.offsetTop}px`,
-        width: `${layerW}px`,
-        height: `${layerH}px`,
+        inset: "0",
         zIndex: "1",
         pointerEvents: "none"
       });
       hl.empty();
-      const spans = layer.querySelectorAll(".lexis-hl");
-      for (const s of spans) {
-        const key = s.dataset.lexisKey;
-        if (!key) continue;
-        const entry = this.index.get(key);
-        if (!entry) continue;
-        if (entry.archived || !this.highlightVisibleForEntry(entry)) continue;
+      const hlBB = hl.getBoundingClientRect();
+      const scaleX = hlBB.width / (hl.offsetWidth || hlBB.width || 1);
+      const scaleY = hlBB.height / (hl.offsetHeight || hlBB.height || 1);
+      const items = [];
+      for (const { key, entry, segments } of matches) {
+        if (!entry.inline) this.passiveEncounter(entry.file);
         try {
           const color = this.colorForEntry(entry);
           const alpha = Math.max(0.04, Math.min(0.75, this.highlightAlphaForEntry(entry) * 0.65));
           const styleKind = this.styleKindForEntry(entry);
           const paint = this.applyAlpha(color, alpha);
-          const rects = Array.from(s.getClientRects()).filter((rect) => rect.width && rect.height);
-          for (const rect of rects.length ? rects : [s.getBoundingClientRect()]) {
-            const band = pdfHighlightBand(rect.height, styleKind);
-            const d = hl.createDiv({ cls: "lexis-pdf-hl" });
-            d.addClass(`is-${styleKind}`);
-            d.dataset.lexisKey = key;
-            d.setCssStyles({
-              position: "absolute",
-              left: `${(rect.left - hlBB.left) / scaleX}px`,
-              top: `${(rect.top - hlBB.top + band.topOffset) / scaleY}px`,
-              width: `${rect.width / scaleX}px`,
-              height: `${band.height / scaleY}px`,
-              pointerEvents: "none",
-              mixBlendMode: "multiply"
-            });
-            d.style.setProperty("--lexis-pdf-color", paint);
-            hl.appendChild(d);
+          for (const segment of segments) {
+            const source = layer.ownerDocument.createRange();
+            source.setStart(segment.node, segment.start);
+            source.setEnd(segment.node, segment.end);
+            for (const rect of Array.from(source.getClientRects()).filter((rect2) => rect2.width && rect2.height)) {
+              const band = pdfHighlightBand(rect.height, styleKind);
+              const anchor = hl.createDiv({ cls: "lexis-pdf-target" });
+              anchor.dataset.lexisKey = key;
+              anchor.setCssStyles({
+                position: "absolute",
+                left: `${(rect.left - hlBB.left) / scaleX}px`,
+                top: `${(rect.top - hlBB.top) / scaleY}px`,
+                width: `${rect.width / scaleX}px`,
+                height: `${rect.height / scaleY}px`,
+                pointerEvents: "none"
+              });
+              items.push({ anchor, source });
+              if (!entry.archived && this.highlightVisibleForEntry(entry)) {
+                const d = anchor.createDiv({ cls: `lexis-pdf-hl is-${styleKind}` });
+                d.setCssStyles({ position: "absolute", left: "0", top: `${band.topOffset / scaleY}px`, width: "100%", height: `${band.height / scaleY}px` });
+                d.style.setProperty("--lexis-pdf-color", paint);
+              }
+            }
           }
         } catch {
         }
       }
+      setPdfTargets(layer, items);
     }
     teardownPdfHighlight() {
       const document2 = this._pdfDocument;
@@ -3184,18 +3188,11 @@ function createDocumentHighlights() {
       this._pdfDocument = null;
       this._pdfWindow = null;
     }
-    // 词库/配色变化后,清掉 PDF 里旧高亮再重扫(.lexis-hl 拆回纯文本)
+    // 词库/配色变化只重建独立图层；不得 normalize 或替换 PDF.js 的文本节点。
     rescanPdfLayers() {
       const document2 = this._pdfDocument || this.app.workspace.containerEl.ownerDocument;
-      document2.querySelectorAll(".textLayer .lexis-hl").forEach((span) => {
-        const text = document2.createTextNode(span.textContent || "");
-        span.parentNode?.replaceChild(text, span);
-      });
       document2.querySelectorAll(".lexis-pdf-hl-layer").forEach((layer) => layer.remove());
-      document2.querySelectorAll(".textLayer").forEach((layer) => {
-        layer.normalize();
-        this.markPdfGeometryChanging(layer);
-      });
+      document2.querySelectorAll(".textLayer").forEach((layer) => this.markPdfGeometryChanging(layer));
       this._pdfScheduleFlush?.();
     }
     // ---------- 第三方 EPUB 阅读器高亮 ----------
@@ -3308,7 +3305,18 @@ function createReaderInteractions({ openAliasPicker }) {
         const highlight = closestHighlight(target);
         if (highlight) return highlight;
       }
-      return closestHighlight(event.target);
+      return closestHighlight(event.target) || pdfHighlightAt(event);
+    }
+    onMouseMove(event) {
+      const target = pdfHighlightAt(event);
+      if (target === this._pdfHoverTarget) return;
+      if (this._pdfHoverTarget) {
+        window.clearTimeout(this._showTimer);
+        this._showTarget = null;
+        if (!eventElement(event.target)?.closest(".lexis-popover")) this.scheduleHide();
+      }
+      this._pdfHoverTarget = target;
+      if (target) this.onMouseOver(event);
     }
     onMouseOver(e) {
       const t = this.highlightTarget(e);
@@ -3797,10 +3805,10 @@ ${line}---` + data.slice(fm.index + fm[0].length);
     boldMatchesInPlace(el, word) {
       const re = new RegExp(boundedSource2(word), "ig");
       const walker = el.ownerDocument.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-      const targets = [];
+      const targets2 = [];
       let n;
-      while (n = walker.nextNode()) if (n.nodeType === Node.TEXT_NODE) targets.push(n);
-      for (const node of targets) {
+      while (n = walker.nextNode()) if (n.nodeType === Node.TEXT_NODE) targets2.push(n);
+      for (const node of targets2) {
         const text = node.nodeValue || "";
         re.lastIndex = 0;
         if (!re.test(text)) continue;
@@ -3884,6 +3892,15 @@ ${line}---` + data.slice(fm.index + fm[0].length);
       const pageElement = span.closest("[data-page-number]");
       const pageValue = pageElement?.getAttribute("data-page-number") || "";
       const page = Number.parseInt(pageValue, 10) || void 0;
+      const pdfSource = pdfTargetSource(span);
+      if (pdfSource) {
+        const container = pdfSource.startContainer.parentElement?.closest(".textLayer");
+        if (!container) return { file, sentence: "", page };
+        const before = sourceDocument.createRange();
+        before.selectNodeContents(container);
+        before.setEnd(pdfSource.startContainer, pdfSource.startOffset);
+        return { file, sentence: this.extractSentence(container.textContent || "", before.toString().length), page };
+      }
       const textContainer = span.closest("p,li,blockquote,td,th,figcaption,h1,h2,h3,h4,h5,h6,.cm-line,.textLayer") || span.parentElement;
       if (!textContainer) return { file, sentence: "", page };
       try {
@@ -5786,6 +5803,7 @@ var WorkspaceDocuments = class {
   bind(document2) {
     if (this.documents.has(document2)) return;
     this.documents.add(document2);
+    this.plugin.registerDomEvent(document2, "mousemove", (event) => this.callbacks.mousemove(event));
     this.plugin.registerDomEvent(document2, "mouseover", (event) => this.callbacks.mouseover(event));
     this.plugin.registerDomEvent(document2, "mouseout", (event) => this.callbacks.mouseout(event));
     this.plugin.registerDomEvent(document2, "click", (event) => this.callbacks.click(event));
@@ -6163,6 +6181,7 @@ var LexisPlugin = class extends import_obsidian8.Plugin {
     this.registerMarkdownCodeBlockProcessor("lexis-home", (src, el) => this.renderHomeBlock(el));
     this.setupLiveExtension();
     this._workspaceDocuments = new WorkspaceDocuments(this, {
+      mousemove: (event) => this.onMouseMove(event),
       mouseover: (event) => this.onMouseOver(event),
       mouseout: (event) => this.onMouseOut(event),
       click: (event) => this.onClick(event),

@@ -113,6 +113,7 @@ class LexisPlugin extends Plugin {
   declare teardownPdfHighlight: () => void;
   declare teardownEpubIframeHighlight: () => void;
   declare onMouseOver: (event: MouseEvent) => void;
+  declare onMouseMove: (event: MouseEvent) => void;
   declare onMouseOut: (event: MouseEvent) => void;
   declare onClick: (event: MouseEvent) => void;
   declare maybeShowSelPill: (event: MouseEvent) => void;
@@ -301,6 +302,7 @@ class LexisPlugin extends Plugin {
     this.registerMarkdownCodeBlockProcessor("lexis-home", (src, el) => this.renderHomeBlock(el));
     this.setupLiveExtension();
     this._workspaceDocuments = new WorkspaceDocuments(this, {
+      mousemove: (event) => this.onMouseMove(event),
       mouseover: (event) => this.onMouseOver(event),
       mouseout: (event) => this.onMouseOut(event),
       click: (event) => this.onClick(event),

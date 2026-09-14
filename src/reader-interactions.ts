@@ -3,6 +3,7 @@
 import * as obsidian from "obsidian";
 import type { App, Component as ObsidianComponent, Editor, MarkdownView, TFile as ObsidianTFile } from "obsidian";
 import type { LexisEntry, LexisSettings } from "./types";
+import { pdfHighlightAt } from "./pdf-highlight-targets";
 
 type AddWordOptions = { openExisting?: boolean };
 type TranslationVars = Record<string, string | number | boolean>;
@@ -40,6 +41,7 @@ function createReaderInteractions({ openAliasPicker }: ReaderInteractionDependen
   declare _hideTimer: number;
   declare _showTimer: number | null;
   declare _showTarget: HTMLElement | null;
+  declare _pdfHoverTarget: HTMLElement | null;
   declare _popover: HTMLElement | null;
   declare _popoverComp: ObsidianComponent | null;
   declare _selPill: HTMLElement | null;
@@ -60,7 +62,18 @@ function createReaderInteractions({ openAliasPicker }: ReaderInteractionDependen
       const highlight = closestHighlight(target);
       if (highlight) return highlight;
     }
-    return closestHighlight(event.target);
+    return closestHighlight(event.target) || pdfHighlightAt(event);
+  }
+  onMouseMove(event: MouseEvent): void {
+    const target = pdfHighlightAt(event);
+    if (target === this._pdfHoverTarget) return;
+    if (this._pdfHoverTarget) {
+      window.clearTimeout(this._showTimer);
+      this._showTarget = null;
+      if (!eventElement(event.target)?.closest('.lexis-popover')) this.scheduleHide();
+    }
+    this._pdfHoverTarget = target;
+    if (target) this.onMouseOver(event);
   }
   onMouseOver(e: MouseEvent): void {
     const t = this.highlightTarget(e);

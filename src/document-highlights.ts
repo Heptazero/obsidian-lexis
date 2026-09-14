@@ -2,6 +2,7 @@
 
 import type { App, TFile } from "obsidian";
 import type { HighlightStyle, LexisEntry, LexisSettings } from "./types";
+import { setPdfTargets } from "./pdf-highlight-targets";
 
 type HighlightStyleOptions = { external?: boolean; pdf?: boolean };
 type PdfPart = { node: Text; text: string; rect: DOMRect };
@@ -136,10 +137,10 @@ function createDocumentHighlights(): PropertyDescriptorMap {
     return { text: text.join(""), map };
   }
 
-  wrapPdfFragmentMatches(layer: HTMLElement): void {
-    if (!this._pattern || !this.index.size) return;
+  collectPdfMatches(layer: HTMLElement): PdfCandidate[] {
+    if (!this._pattern || !this.index.size) return [];
     const runs = this.pdfTextRuns(layer);
-    if (!runs.length) return;
+    if (!runs.length) return [];
     const streams = runs.map((run) => this.pdfRunStream(run));
     const candidates: PdfCandidate[] = [];
     const nodeOrder = new WeakMap<Text, number>();
@@ -175,9 +176,9 @@ function createDocumentHighlights(): PropertyDescriptorMap {
       }
     };
 
-    // 先处理同一视觉行内被多个 span 拆开的词。
+    // 单节点和跨节点统一匹配，读取期间绝不改变 PDF.js 的文本树。
     for (let i = 0; i < runs.length; i++) {
-      collect(streams[i], (refs) => new Set(refs.map((ref) => ref.node)).size > 1, null);
+      collect(streams[i], () => true, null);
     }
 
     // 再连接真正相邻的上下行。只在同一栏、相邻行距内找下一行，避免双栏串接。
@@ -217,7 +218,7 @@ function createDocumentHighlights(): PropertyDescriptorMap {
       }
     }
 
-    // 同一物理字符只接受最长命中，防止短词覆盖跨行长词；随后从后往前切文本节点。
+    // 同一物理字符只接受最长命中，防止短词覆盖跨行长词。
     candidates.sort((a, b) => b.length - a.length || a.segments[0].start - b.segments[0].start);
     const used = new WeakMap<Text, PdfSegment[]>();
     const accepted: PdfCandidate[] = [];
@@ -235,35 +236,10 @@ function createDocumentHighlights(): PropertyDescriptorMap {
       accepted.push(candidate);
     }
 
-    const rangesByNode = new Map<Text, (PdfSegment & { key: string; entry: LexisEntry })[]>();
-    for (const candidate of accepted) {
-      if (!candidate.entry.inline) this.passiveEncounter(candidate.entry.file);
-      for (const segment of candidate.segments) {
-        const ranges = rangesByNode.get(segment.node) || [];
-        ranges.push({ ...segment, key: candidate.key, entry: candidate.entry });
-        rangesByNode.set(segment.node, ranges);
-      }
-    }
-    const doc = layer.ownerDocument || document;
-    for (const [textNode, ranges] of rangesByNode) {
-      ranges.sort((a, b) => b.start - a.start);
-      for (const range of ranges) {
-        textNode.splitText(range.end);
-        const matched = textNode.splitText(range.start);
-        const span = doc.body.createSpan();
-        span.className = "lexis-hl";
-        span.dataset.lexisKey = range.key;
-        span.setAttribute("style", this.inlineStyleForEntry(range.entry, { pdf: true }));
-        matched.parentNode.replaceChild(span, matched);
-        span.appendChild(matched);
-      }
-    }
+    return accepted;
   }
 
-  // ob 内置 PDF 阅读器 = pdf.js,.textLayer 在主 DOM(无 iframe),文字层文字是透明的、
-  // 仅供选中复制;我们把命中词包成 .lexis-hl(下划线/背景色显式带颜色,所以透明文字上也看得见),
-  // 顺带白嫖现成的 document 级 mouseover/click → 悬浮卡 + 跳转。翻页/缩放时 pdf.js 重建文字层,
-  // 用 MutationObserver 重扫;.lexis-hl 在 rejectSelector 里,重扫不会重复包。
+  // PDF.js 管理文字节点及其绝对定位；Lexis 只读取 Range，单独绘制并按坐标命中。
   setupPdfHighlight(document: Document = this._pdfDocument || this.app.workspace.containerEl.ownerDocument) {
     this.teardownPdfHighlight();
     this._pdfDocument = document;
@@ -327,6 +303,9 @@ function createDocumentHighlights(): PropertyDescriptorMap {
       let geometryChanged = false;
       for (const mu of muts) {
         const targetElement = mu.target.nodeType === 1 ? mu.target as Element : mu.target.parentElement;
+        if (targetElement?.closest('.lexis-pdf-hl-layer')) continue;
+        if (mu.type === 'childList' && [...mu.addedNodes, ...mu.removedNodes].length &&
+            [...mu.addedNodes, ...mu.removedNodes].every((node) => node.nodeType === 1 && (node as Element).classList.contains('lexis-pdf-hl-layer'))) continue;
         if (mu.type === "attributes") {
           if (targetElement?.classList.contains("textLayer")) {
             this.markPdfGeometryChanging(targetElement as HTMLElement);
@@ -334,6 +313,9 @@ function createDocumentHighlights(): PropertyDescriptorMap {
           } else if (targetElement?.matches(".page, .canvasWrapper, canvas")) {
             const page = targetElement.classList.contains("page") ? targetElement : targetElement.closest(".page");
             const layer = page?.querySelector<HTMLElement>(":scope > .textLayer");
+            if (layer) { this.markPdfGeometryChanging(layer); geometryChanged = true; }
+          } else {
+            const layer = targetElement?.closest<HTMLElement>('.textLayer');
             if (layer) { this.markPdfGeometryChanging(layer); geometryChanged = true; }
           }
           continue;
@@ -361,7 +343,7 @@ function createDocumentHighlights(): PropertyDescriptorMap {
       }
       if (geometryChanged) scheduleFlush(220);
     });
-    this._pdfObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["style"] });
+    this._pdfObserver.observe(document.body, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ["style"] });
     // 已打开的 PDF 分帧扫描，插件启动和交互监听不等待整份文档处理完。
     document.querySelectorAll<HTMLElement>(".textLayer").forEach((layer) => this.markPdfGeometryChanging(layer));
     scheduleFlush();
@@ -385,11 +367,7 @@ function createDocumentHighlights(): PropertyDescriptorMap {
   scanPdfLayer(layer: HTMLElement): void {
     if (!this.settings.enablePdfHighlight || !this.settings.enableHighlight) return;
     this.observePdfLayer(layer);
-    // 1. PDF 专属跨片段匹配先抢占长词，再用通用匹配器补单节点命中。
-    this.wrapPdfFragmentMatches(layer);
-    // 2. 在 textLayer 里注入隐形 .lexis-hl(仅事件代理,无视觉样式)
-    this.wrapMatchesInElement(layer, ".lexis-hl,.lexis-popover", { pdf: true });
-    // 3. 建独立高亮 overlay,叠在 Canvas 上、textLayer 下(不沾 textLayer 的 opacity)
+    const matches = this.collectPdfMatches(layer);
     const page = layer.parentElement;
     if (!page) return;
     // pdf.js 的 canvas 实际包在 .canvasWrapper 里,插到 canvas 后面会落进那层容器,
@@ -400,54 +378,52 @@ function createDocumentHighlights(): PropertyDescriptorMap {
       hl = page.createDiv({ cls: "lexis-pdf-hl-layer" });
       layer.insertAdjacentElement("beforebegin", hl);
     }
-    const hlBB = layer.getBoundingClientRect();
-    const layerW = layer.offsetWidth || layer.clientWidth || hlBB.width || 1;
-    const layerH = layer.offsetHeight || layer.clientHeight || hlBB.height || 1;
-    const scaleX = hlBB.width ? hlBB.width / layerW : 1;
-    const scaleY = hlBB.height ? hlBB.height / layerH : 1;
     hl.setCssStyles({
       position: "absolute",
-      left: `${layer.offsetLeft}px`,
-      top: `${layer.offsetTop}px`,
-      width: `${layerW}px`,
-      height: `${layerH}px`,
+      inset: "0",
       zIndex: "1",
       pointerEvents: "none",
     });
     hl.empty();
-    // 4. 遍历内联 .lexis-hl,在 overlay 层画出对应荧光笔矩形
-    const spans = layer.querySelectorAll<HTMLElement>(".lexis-hl");
-    for (const s of spans) {
-      const key = s.dataset.lexisKey;
-      if (!key) continue;
-      const entry = this.index.get(key);
-      if (!entry) continue;
-      if (entry.archived || !this.highlightVisibleForEntry(entry)) continue; // 保留 hover 代理，只不画可视高亮
+    // 坐标以实际绘制容器为基准；页面 CSS 缩放不会被重复换算。
+    const hlBB = hl.getBoundingClientRect();
+    const scaleX = hlBB.width / (hl.offsetWidth || hlBB.width || 1);
+    const scaleY = hlBB.height / (hl.offsetHeight || hlBB.height || 1);
+    const items: { anchor: HTMLElement; source: Range }[] = [];
+    for (const { key, entry, segments } of matches) {
+      if (!entry.inline) this.passiveEncounter(entry.file);
       try {
         const color = this.colorForEntry(entry);
         const alpha = Math.max(0.04, Math.min(0.75, this.highlightAlphaForEntry(entry) * 0.65));
         const styleKind = this.styleKindForEntry(entry);
         const paint = this.applyAlpha(color, alpha);
-        const rects = Array.from(s.getClientRects()).filter((rect) => rect.width && rect.height);
-        for (const rect of rects.length ? rects : [s.getBoundingClientRect()]) {
-          const band = pdfHighlightBand(rect.height, styleKind);
-          const d = hl.createDiv({ cls: "lexis-pdf-hl" });
-          d.addClass(`is-${styleKind}`);
-          d.dataset.lexisKey = key;
-          d.setCssStyles({
-            position: "absolute",
-            left: `${(rect.left - hlBB.left) / scaleX}px`,
-            top: `${(rect.top - hlBB.top + band.topOffset) / scaleY}px`,
-            width: `${rect.width / scaleX}px`,
-            height: `${band.height / scaleY}px`,
-            pointerEvents: "none",
-            mixBlendMode: "multiply",
-          });
-          d.style.setProperty("--lexis-pdf-color", paint);
-          hl.appendChild(d);
+        for (const segment of segments) {
+          const source = layer.ownerDocument.createRange();
+          source.setStart(segment.node, segment.start);
+          source.setEnd(segment.node, segment.end);
+          for (const rect of Array.from(source.getClientRects()).filter((rect) => rect.width && rect.height)) {
+            const band = pdfHighlightBand(rect.height, styleKind);
+            const anchor = hl.createDiv({ cls: "lexis-pdf-target" });
+            anchor.dataset.lexisKey = key;
+            anchor.setCssStyles({
+              position: "absolute",
+              left: `${(rect.left - hlBB.left) / scaleX}px`,
+              top: `${(rect.top - hlBB.top) / scaleY}px`,
+              width: `${rect.width / scaleX}px`,
+              height: `${rect.height / scaleY}px`,
+              pointerEvents: "none",
+            });
+            items.push({ anchor, source });
+            if (!entry.archived && this.highlightVisibleForEntry(entry)) {
+              const d = anchor.createDiv({ cls: `lexis-pdf-hl is-${styleKind}` });
+              d.setCssStyles({ position: 'absolute', left: '0', top: `${band.topOffset / scaleY}px`, width: '100%', height: `${band.height / scaleY}px` });
+              d.style.setProperty("--lexis-pdf-color", paint);
+            }
+          }
         }
       } catch { /* PDF.js may replace page geometry between measurements. */ }
     }
+    setPdfTargets(layer, items);
   }
   teardownPdfHighlight() {
     const document = this._pdfDocument;
@@ -469,15 +445,11 @@ function createDocumentHighlights(): PropertyDescriptorMap {
     this._pdfDocument = null;
     this._pdfWindow = null;
   }
-  // 词库/配色变化后,清掉 PDF 里旧高亮再重扫(.lexis-hl 拆回纯文本)
+  // 词库/配色变化只重建独立图层；不得 normalize 或替换 PDF.js 的文本节点。
   rescanPdfLayers() {
     const document = this._pdfDocument || this.app.workspace.containerEl.ownerDocument;
-    document.querySelectorAll(".textLayer .lexis-hl").forEach((span) => {
-      const text = document.createTextNode(span.textContent || "");
-      span.parentNode?.replaceChild(text, span);
-    });
     document.querySelectorAll(".lexis-pdf-hl-layer").forEach((layer) => layer.remove());
-    document.querySelectorAll<HTMLElement>(".textLayer").forEach((layer) => { layer.normalize(); this.markPdfGeometryChanging(layer); });
+    document.querySelectorAll<HTMLElement>(".textLayer").forEach((layer) => this.markPdfGeometryChanging(layer));
     this._pdfScheduleFlush?.();
   }
 

@@ -1,6 +1,7 @@
 import type { Plugin, WorkspaceLeaf } from "obsidian";
 
 interface WorkspaceDocumentCallbacks {
+  mousemove(event: MouseEvent): void;
   mouseover(event: MouseEvent): void;
   mouseout(event: MouseEvent): void;
   click(event: MouseEvent): void;
@@ -51,6 +52,7 @@ export class WorkspaceDocuments {
   private bind(document: Document): void {
     if (this.documents.has(document)) return;
     this.documents.add(document);
+    this.plugin.registerDomEvent(document, "mousemove", (event) => this.callbacks.mousemove(event));
     this.plugin.registerDomEvent(document, "mouseover", (event) => this.callbacks.mouseover(event));
     this.plugin.registerDomEvent(document, "mouseout", (event) => this.callbacks.mouseout(event));
     this.plugin.registerDomEvent(document, "click", (event) => this.callbacks.click(event));
