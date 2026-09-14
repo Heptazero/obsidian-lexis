@@ -1,7 +1,7 @@
 "use strict";
 
 import type { App, TFile } from "obsidian";
-import type { LexisEntry, LexisSettings } from "./types";
+import type { HighlightStyle, LexisEntry, LexisSettings } from "./types";
 
 type HighlightStyleOptions = { external?: boolean; pdf?: boolean };
 type PdfPart = { node: Text; text: string; rect: DOMRect };
@@ -16,6 +16,15 @@ type ObserverWindow = Window & { MutationObserver: typeof MutationObserver; Resi
 function selectionTouchesLayer(layer: Pick<Node, "contains">, selection: Pick<Selection, "isCollapsed" | "anchorNode" | "focusNode"> | null): boolean {
   if (!selection || selection.isCollapsed) return false;
   return !!((selection.anchorNode && layer.contains(selection.anchorNode)) || (selection.focusNode && layer.contains(selection.focusNode)));
+}
+
+function pdfHighlightBand(lineHeight: number, style: HighlightStyle): { topOffset: number; height: number } {
+  const height = style === "background"
+    ? Math.max(3, Math.min(6, lineHeight * 0.3))
+    : style === "underline"
+      ? Math.max(1.2, Math.min(2, lineHeight * 0.1))
+      : Math.max(2, Math.min(3, lineHeight * 0.15));
+  return { topOffset: Math.max(0, lineHeight - height + 1), height };
 }
 
 function createDocumentHighlights(): PropertyDescriptorMap {
@@ -42,6 +51,7 @@ function createDocumentHighlights(): PropertyDescriptorMap {
   declare colorForEntry: (entry: LexisEntry) => string;
   declare highlightAlphaForEntry: (entry: LexisEntry) => number;
   declare highlightVisibleForEntry: (entry: LexisEntry) => boolean;
+  declare styleKindForEntry: (entry: LexisEntry) => HighlightStyle;
   declare inlineStyleForEntry: (entry: LexisEntry | undefined, options?: HighlightStyleOptions) => string;
   declare maybeShowSelPill: (event: MouseEvent, fromEpubIframe?: boolean) => void;
   declare onClick: (event: MouseEvent) => void;
@@ -416,21 +426,24 @@ function createDocumentHighlights(): PropertyDescriptorMap {
       try {
         const color = this.colorForEntry(entry);
         const alpha = Math.max(0.04, Math.min(0.75, this.highlightAlphaForEntry(entry) * 0.65));
+        const styleKind = this.styleKindForEntry(entry);
+        const paint = this.applyAlpha(color, alpha);
         const rects = Array.from(s.getClientRects()).filter((rect) => rect.width && rect.height);
         for (const rect of rects.length ? rects : [s.getBoundingClientRect()]) {
+          const band = pdfHighlightBand(rect.height, styleKind);
           const d = hl.createDiv({ cls: "lexis-pdf-hl" });
+          d.addClass(`is-${styleKind}`);
           d.dataset.lexisKey = key;
           d.setCssStyles({
             position: "absolute",
             left: `${(rect.left - hlBB.left) / scaleX}px`,
-            top: `${(rect.top - hlBB.top) / scaleY}px`,
+            top: `${(rect.top - hlBB.top + band.topOffset) / scaleY}px`,
             width: `${rect.width / scaleX}px`,
-            height: `${rect.height / scaleY}px`,
-            background: this.applyAlpha(color, alpha),
-            borderRadius: "2px",
+            height: `${band.height / scaleY}px`,
             pointerEvents: "none",
             mixBlendMode: "multiply",
           });
+          d.style.setProperty("--lexis-pdf-color", paint);
           hl.appendChild(d);
         }
       } catch { /* PDF.js may replace page geometry between measurements. */ }
@@ -548,4 +561,4 @@ function createDocumentHighlights(): PropertyDescriptorMap {
   return descriptors;
 }
 
-export { createDocumentHighlights, selectionTouchesLayer };
+export { createDocumentHighlights, pdfHighlightBand, selectionTouchesLayer };

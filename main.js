@@ -2752,6 +2752,10 @@ function selectionTouchesLayer(layer, selection) {
   if (!selection || selection.isCollapsed) return false;
   return !!(selection.anchorNode && layer.contains(selection.anchorNode) || selection.focusNode && layer.contains(selection.focusNode));
 }
+function pdfHighlightBand(lineHeight, style) {
+  const height = style === "background" ? Math.max(3, Math.min(6, lineHeight * 0.3)) : style === "underline" ? Math.max(1.2, Math.min(2, lineHeight * 0.1)) : Math.max(2, Math.min(3, lineHeight * 0.15));
+  return { topOffset: Math.max(0, lineHeight - height + 1), height };
+}
 function createDocumentHighlights() {
   class DocumentHighlights {
     // ---------- PDF 高亮(钩 pdf.js 文字层) ----------
@@ -3124,21 +3128,24 @@ function createDocumentHighlights() {
         try {
           const color = this.colorForEntry(entry);
           const alpha = Math.max(0.04, Math.min(0.75, this.highlightAlphaForEntry(entry) * 0.65));
+          const styleKind = this.styleKindForEntry(entry);
+          const paint = this.applyAlpha(color, alpha);
           const rects = Array.from(s.getClientRects()).filter((rect) => rect.width && rect.height);
           for (const rect of rects.length ? rects : [s.getBoundingClientRect()]) {
+            const band = pdfHighlightBand(rect.height, styleKind);
             const d = hl.createDiv({ cls: "lexis-pdf-hl" });
+            d.addClass(`is-${styleKind}`);
             d.dataset.lexisKey = key;
             d.setCssStyles({
               position: "absolute",
               left: `${(rect.left - hlBB.left) / scaleX}px`,
-              top: `${(rect.top - hlBB.top) / scaleY}px`,
+              top: `${(rect.top - hlBB.top + band.topOffset) / scaleY}px`,
               width: `${rect.width / scaleX}px`,
-              height: `${rect.height / scaleY}px`,
-              background: this.applyAlpha(color, alpha),
-              borderRadius: "2px",
+              height: `${band.height / scaleY}px`,
               pointerEvents: "none",
               mixBlendMode: "multiply"
             });
+            d.style.setProperty("--lexis-pdf-color", paint);
             hl.appendChild(d);
           }
         } catch {

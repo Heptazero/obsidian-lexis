@@ -36,6 +36,16 @@ test("recognizes an active PDF text selection", async () => {
   assert.equal(selectionTouchesLayer(layer, { isCollapsed: false, anchorNode: outsideNode, focusNode: outsideNode }), false);
 });
 
+test("renders PDF highlights as a band below the glyph body", async () => {
+  const { pdfHighlightBand } = await loadHighlights();
+  const background = pdfHighlightBand(20, "background");
+  const underline = pdfHighlightBand(20, "underline");
+  const wavy = pdfHighlightBand(20, "wavy");
+  assert.deepEqual(background, { topOffset: 15, height: 6 });
+  assert.deepEqual(underline, { topOffset: 19, height: 2 });
+  assert.deepEqual(wavy, { topOffset: 18, height: 3 });
+});
+
 test("does not open a highlight while text remains selected", async () => {
   const { hasExpandedSelection } = await loadReaderInteractions();
   const selection = { isCollapsed: false, rangeCount: 1 };
