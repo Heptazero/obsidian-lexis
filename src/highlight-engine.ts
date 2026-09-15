@@ -5,6 +5,7 @@ import { RangeSetBuilder, StateEffect, type Extension, type StateEffectType } fr
 import * as obsidian from "obsidian";
 import type { App, MarkdownPostProcessorContext, Notice as ObsidianNotice, TFile, View, WorkspaceLeaf } from "obsidian";
 import type { OccurrenceSearch } from "./occurrence-search";
+import { rerenderPreservingScroll, type ReadingPreview } from "./reading-scroll";
 import type { DictionarySetting, InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats } from "./types";
 
 type HighlightStyleOptions = { external?: boolean; pdf?: boolean };
@@ -451,9 +452,12 @@ function createHighlightEngine({ Notice, boundedSource, compactMixedScriptSpacin
   }
   refreshAllViews() {
     this.app.workspace.iterateAllLeaves((leaf) => {
-      const view = leaf.view as View & { previewMode?: { rerender(force: boolean): void }; editor?: { cm?: EditorView } };
+      const view = leaf.view as View & { previewMode?: ReadingPreview & { containerEl: HTMLElement }; editor?: { cm?: EditorView } };
       const pm = view.previewMode;
-      if (pm && typeof pm.rerender === "function") pm.rerender(true);
+      if (pm && typeof pm.rerender === "function") {
+        const viewWindow = pm.containerEl.ownerDocument.defaultView || window;
+        rerenderPreservingScroll(pm, (callback) => viewWindow.requestAnimationFrame(callback), () => leaf.view === view && view.previewMode === pm);
+      }
       const cm = view.editor?.cm;
       if (this._liveRefreshEffect && cm?.dispatch) {
         try { cm.dispatch({ effects: this._liveRefreshEffect.of(undefined) }); } catch { /* A closing editor may reject a late refresh. */ }
