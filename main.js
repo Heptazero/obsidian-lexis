@@ -2193,6 +2193,17 @@ ${line}`);
 var import_view = require("@codemirror/view");
 var import_state = require("@codemirror/state");
 var obsidian = __toESM(require("obsidian"));
+
+// src/reading-scroll.ts
+function rerenderPreservingScroll(preview, requestFrame, stillCurrent) {
+  const scroll = preview.getScroll();
+  preview.rerender(true);
+  requestFrame(() => {
+    if (stillCurrent()) preview.applyScroll(scroll);
+  });
+}
+
+// src/highlight-engine.ts
 function createHighlightEngine({ Notice: Notice4, boundedSource: boundedSource2, compactMixedScriptSpacing: compactMixedScriptSpacing2, todayStr }) {
   class HighlightEngine {
     // ---------- 索引 ----------
@@ -2625,7 +2636,10 @@ function createHighlightEngine({ Notice: Notice4, boundedSource: boundedSource2,
       this.app.workspace.iterateAllLeaves((leaf) => {
         const view = leaf.view;
         const pm = view.previewMode;
-        if (pm && typeof pm.rerender === "function") pm.rerender(true);
+        if (pm && typeof pm.rerender === "function") {
+          const viewWindow = pm.containerEl.ownerDocument.defaultView || window;
+          rerenderPreservingScroll(pm, (callback) => viewWindow.requestAnimationFrame(callback), () => leaf.view === view && view.previewMode === pm);
+        }
         const cm = view.editor?.cm;
         if (this._liveRefreshEffect && cm?.dispatch) {
           try {
@@ -5403,6 +5417,12 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
 
 // src/review-state.ts
 var cloneState = (state) => state ? { ...state } : null;
+function persistedSchedule(schedule, round22) {
+  const s = round22(schedule.s);
+  const d = round22(schedule.d);
+  if (!Number.isFinite(s) || s <= 0 || !Number.isFinite(d) || d < 1 || d > 10) throw new Error("Invalid review schedule");
+  return { s, d };
+}
 function createReviewState({ todayStr, round2: round22 }) {
   class ReviewState {
     readSyntaxCardState(id) {
@@ -5419,9 +5439,10 @@ function createReviewState({ todayStr, round2: round22 }) {
       return { syntax };
     }
     async applyReviewItemSchedule(item, schedule) {
+      const { s, d } = persistedSchedule(schedule, round22);
       const state = {
-        s: round22(schedule.s),
-        d: round22(schedule.d),
+        s,
+        d,
         due: schedule.due,
         last: todayStr(),
         reps: schedule.reps,
@@ -5474,12 +5495,13 @@ function createReviewState({ todayStr, round2: round22 }) {
       await this.saveSettings();
     }
     async logReviewItem(item, schedule, grade, retentionBefore) {
+      const { s } = persistedSchedule(schedule, round22);
       const today = todayStr();
       this.settings.reviewLog[today] = (this.settings.reviewLog[today] || 0) + 1;
       const keys = item.type === "note" ? [item.file.path] : (item.syntax?.memberIds || []).map((id) => `syntax:${id}`);
       for (const key of keys) {
         const history = Array.isArray(this.settings.reviewHistory[key]) ? this.settings.reviewHistory[key] : [];
-        history.push({ date: today, s: round22(schedule.s), grade, retention: Math.round(Math.max(0, Math.min(1, retentionBefore)) * 100) });
+        history.push({ date: today, s, grade, retention: Math.round(Math.max(0, Math.min(1, retentionBefore)) * 100) });
         this.settings.reviewHistory[key] = history.slice(-64);
       }
       await this.saveSettings();
@@ -5874,6 +5896,151 @@ function createReviewQueue({ todayStr }) {
   return descriptors;
 }
 
+// src/shared-utils.ts
+var import_obsidian5 = require("obsidian");
+
+// src/match-text.ts
+var ASCII_WORD = /[A-Za-z0-9_]/;
+var EAST_ASIAN = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+var HORIZONTAL_SPACE = /[ \t\u00a0\u3000]/;
+var OPTIONAL_MIXED_SPACE = "[ \\t\\u00a0\\u3000]*";
+var escapeRe = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+var isMixedScriptBoundary = (left, right) => ASCII_WORD.test(left) && EAST_ASIAN.test(right) || EAST_ASIAN.test(left) && ASCII_WORD.test(right);
+function compactMixedScriptSpacing(value) {
+  const characters = [...String(value || "")];
+  let result = "";
+  let previous = "";
+  for (let index = 0; index < characters.length; ) {
+    const character = characters[index];
+    if (!HORIZONTAL_SPACE.test(character)) {
+      result += character;
+      previous = character;
+      index++;
+      continue;
+    }
+    let end = index + 1;
+    while (end < characters.length && HORIZONTAL_SPACE.test(characters[end])) end++;
+    const next = characters[end] || "";
+    if (!isMixedScriptBoundary(previous, next)) result += characters.slice(index, end).join("");
+    index = end;
+  }
+  return result;
+}
+function flexibleMixedScriptSource(value) {
+  const characters = [...String(value || "")];
+  let source = "";
+  let previous = "";
+  let boundaryAlreadyAdded = false;
+  for (let index = 0; index < characters.length; ) {
+    const character = characters[index];
+    if (HORIZONTAL_SPACE.test(character)) {
+      let end = index + 1;
+      while (end < characters.length && HORIZONTAL_SPACE.test(characters[end])) end++;
+      const next = characters[end] || "";
+      boundaryAlreadyAdded = isMixedScriptBoundary(previous, next);
+      source += boundaryAlreadyAdded ? OPTIONAL_MIXED_SPACE : escapeRe(characters.slice(index, end).join(""));
+      index = end;
+      continue;
+    }
+    if (!boundaryAlreadyAdded && previous && isMixedScriptBoundary(previous, character)) source += OPTIONAL_MIXED_SPACE;
+    source += escapeRe(character);
+    previous = character;
+    boundaryAlreadyAdded = false;
+    index++;
+  }
+  return source;
+}
+var boundedSource = (word) => {
+  const leftBoundary = /^[A-Za-z0-9_]/.test(word) ? "\\b" : "";
+  const rightBoundary = /[A-Za-z0-9_]$/.test(word) ? "\\b" : "";
+  return leftBoundary + flexibleMixedScriptSource(word) + rightBoundary;
+};
+
+// src/shared-utils.ts
+var escapeHtml = (value) => String(value == null ? "" : value).replace(
+  /[&<>"]/g,
+  (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[character] || character
+);
+var renderLexisMarkdown = (app, markdown, element, sourcePath, component) => import_obsidian5.MarkdownRenderer.render(app, String(markdown == null ? "" : markdown).replace(/\u00a0/g, " "), element, sourcePath, component);
+var round2 = (value) => Math.round(value * 100) / 100;
+function cssColorToHex(color, document2) {
+  if (!color) return "#888888";
+  if (/^#[0-9a-fA-F]{6}$/.test(color.trim())) return color.trim();
+  const temporary = document2.body.createDiv();
+  temporary.setCssStyles({ color });
+  const rgb = temporary.win.getComputedStyle(temporary).color;
+  temporary.remove();
+  const match = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(rgb);
+  if (!match) return "#888888";
+  return `#${[match[1], match[2], match[3]].map((value) => (+value).toString(16).padStart(2, "0")).join("")}`;
+}
+function formatDate(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+function todayString() {
+  return formatDate(/* @__PURE__ */ new Date());
+}
+function parseDate(value) {
+  const [year, month, day] = String(value).slice(0, 10).split("-").map(Number);
+  return new Date(year, (month || 1) - 1, day || 1);
+}
+function addDaysString(base, days) {
+  const date = base ? parseDate(base) : /* @__PURE__ */ new Date();
+  date.setDate(date.getDate() + days);
+  return formatDate(date);
+}
+function daysBetween(from, to) {
+  return Math.max(0, Math.round((parseDate(to).getTime() - parseDate(from).getTime()) / 864e5));
+}
+
+// src/review-scheduler.ts
+function validState(stability, difficulty) {
+  return Number.isFinite(stability) && stability > 0 && Number.isFinite(difficulty) && difficulty >= 1 && difficulty <= 10;
+}
+function scheduleReviewCard(card, grade, retention, today) {
+  const previousS = Number(card.s);
+  const previousD = Number(card.d);
+  const reps = (Number(card.reps) || 0) + 1;
+  let lapses = Number(card.lapses) || 0;
+  let stability;
+  let difficulty;
+  if (!validState(previousS, previousD)) {
+    stability = FSRS.initStability(grade);
+    difficulty = FSRS.initDifficulty(grade);
+  } else {
+    const elapsed = card.last ? daysBetween(card.last, today) : 0;
+    const retrievability = FSRS.retrievability(elapsed, previousS);
+    difficulty = FSRS.nextDifficulty(previousD, grade);
+    if (grade === 1) {
+      stability = FSRS.nextForgetStability(previousD, previousS, retrievability);
+      lapses++;
+    } else {
+      stability = FSRS.nextRecallStability(previousD, previousS, retrievability, grade);
+    }
+  }
+  if (!Number.isFinite(stability) || stability <= 0) stability = FSRS.initStability(grade);
+  if (!Number.isFinite(difficulty) || difficulty < 1 || difficulty > 10) difficulty = FSRS.initDifficulty(grade);
+  const requestedRetention = Number.isFinite(retention) && retention > 0 && retention < 1 ? retention : 0.9;
+  const interval = FSRS.nextInterval(stability, requestedRetention);
+  return { s: stability, d: difficulty, reps, lapses, interval, due: addDaysString(today, interval) };
+}
+function repairReviewHistory(history) {
+  let changed = false;
+  for (const events of Object.values(history)) {
+    if (!Array.isArray(events)) continue;
+    for (const event of events) {
+      if (!event || typeof event !== "object") continue;
+      const stability = Number(event.s);
+      if (Number.isFinite(stability) && stability > 0) continue;
+      const grade = Number(event.grade);
+      if (!Number.isInteger(grade) || grade < 1 || grade > 4) continue;
+      event.s = round2(FSRS.initStability(grade));
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 // src/settings-migration.ts
 function pluginFolderName(manifestDir, pluginId) {
   return (manifestDir || pluginId).replace(/\/+$/, "").split("/").pop() || pluginId;
@@ -5952,8 +6119,8 @@ var WorkspaceDocuments = class {
 };
 
 // src/restore-modal.ts
-var import_obsidian5 = require("obsidian");
-var LexisRestoreModal = class extends import_obsidian5.Modal {
+var import_obsidian6 = require("obsidian");
+var LexisRestoreModal = class extends import_obsidian6.Modal {
   constructor(app, plugin, file) {
     super(app);
     this.plugin = plugin;
@@ -5969,7 +6136,7 @@ var LexisRestoreModal = class extends import_obsidian5.Modal {
     keepButton.addEventListener("click", () => {
       void (async () => {
         await this.plugin.setArchived(this.file, false);
-        new import_obsidian5.Notice(this.plugin.t("restore.kept", { word: this.file.basename }));
+        new import_obsidian6.Notice(this.plugin.t("restore.kept", { word: this.file.basename }));
         this.close();
       })();
     });
@@ -5988,7 +6155,7 @@ var LexisRestoreModal = class extends import_obsidian5.Modal {
         delete this.plugin.settings.reviewHistory[this.file.path];
         await this.plugin.saveSettings();
         await this.plugin.rebuildIndex(false);
-        new import_obsidian5.Notice(this.plugin.t("restore.resetDone", { word: this.file.basename }));
+        new import_obsidian6.Notice(this.plugin.t("restore.resetDone", { word: this.file.basename }));
         this.close();
       })();
     });
@@ -5999,7 +6166,7 @@ var LexisRestoreModal = class extends import_obsidian5.Modal {
 };
 
 // src/annotation-images.ts
-var import_obsidian6 = require("obsidian");
+var import_obsidian7 = require("obsidian");
 var IMAGE_MIME = {
   avif: "image/avif",
   bmp: "image/bmp",
@@ -6020,7 +6187,7 @@ function attachmentName(file) {
 }
 async function ensureFolder(app, folder) {
   let current = "";
-  for (const part of (0, import_obsidian6.normalizePath)(folder).split("/").filter(Boolean)) {
+  for (const part of (0, import_obsidian7.normalizePath)(folder).split("/").filter(Boolean)) {
     current = current ? `${current}/${part}` : part;
     if (!app.vault.getAbstractFileByPath(current)) await app.vault.createFolder(current);
   }
@@ -6029,9 +6196,9 @@ function uniquePath(app, folder, filename) {
   const dot = filename.lastIndexOf(".");
   const stem = dot > 0 ? filename.slice(0, dot) : filename;
   const extension = dot > 0 ? filename.slice(dot) : "";
-  let path = (0, import_obsidian6.normalizePath)(`${folder}/${filename}`);
+  let path = (0, import_obsidian7.normalizePath)(`${folder}/${filename}`);
   for (let index = 2; app.vault.getAbstractFileByPath(path); index++) {
-    path = (0, import_obsidian6.normalizePath)(`${folder}/${stem} ${index}${extension}`);
+    path = (0, import_obsidian7.normalizePath)(`${folder}/${stem} ${index}${extension}`);
   }
   return path;
 }
@@ -6039,7 +6206,7 @@ async function saveAnnotationImage(app, settings, wordFile, image) {
   const filename = attachmentName(image);
   let path;
   if (settings.annotationImageLocation === "custom") {
-    const folder = (0, import_obsidian6.normalizePath)(settings.annotationImageFolder || "");
+    const folder = (0, import_obsidian7.normalizePath)(settings.annotationImageFolder || "");
     if (!folder) throw new Error("Custom annotation image folder is empty");
     await ensureFolder(app, folder);
     path = uniquePath(app, folder, filename);
@@ -6052,7 +6219,7 @@ async function vaultImageDataUrl(app, linkPath, sourcePath) {
   const target = String(linkPath || "").split("|")[0].trim();
   if (!target) return null;
   const file = app.metadataCache.getFirstLinkpathDest(target, sourcePath);
-  if (!(file instanceof import_obsidian6.TFile)) return null;
+  if (!(file instanceof import_obsidian7.TFile)) return null;
   const mime = IMAGE_MIME[file.extension.toLowerCase()];
   if (!mime) return null;
   const bytes = await app.vault.readBinary(file);
@@ -6062,103 +6229,6 @@ async function vaultImageDataUrl(app, linkPath, sourcePath) {
     binary += String.fromCharCode(...view.subarray(offset, offset + 32768));
   }
   return `data:${mime};base64,${btoa(binary)}`;
-}
-
-// src/shared-utils.ts
-var import_obsidian7 = require("obsidian");
-
-// src/match-text.ts
-var ASCII_WORD = /[A-Za-z0-9_]/;
-var EAST_ASIAN = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
-var HORIZONTAL_SPACE = /[ \t\u00a0\u3000]/;
-var OPTIONAL_MIXED_SPACE = "[ \\t\\u00a0\\u3000]*";
-var escapeRe = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-var isMixedScriptBoundary = (left, right) => ASCII_WORD.test(left) && EAST_ASIAN.test(right) || EAST_ASIAN.test(left) && ASCII_WORD.test(right);
-function compactMixedScriptSpacing(value) {
-  const characters = [...String(value || "")];
-  let result = "";
-  let previous = "";
-  for (let index = 0; index < characters.length; ) {
-    const character = characters[index];
-    if (!HORIZONTAL_SPACE.test(character)) {
-      result += character;
-      previous = character;
-      index++;
-      continue;
-    }
-    let end = index + 1;
-    while (end < characters.length && HORIZONTAL_SPACE.test(characters[end])) end++;
-    const next = characters[end] || "";
-    if (!isMixedScriptBoundary(previous, next)) result += characters.slice(index, end).join("");
-    index = end;
-  }
-  return result;
-}
-function flexibleMixedScriptSource(value) {
-  const characters = [...String(value || "")];
-  let source = "";
-  let previous = "";
-  let boundaryAlreadyAdded = false;
-  for (let index = 0; index < characters.length; ) {
-    const character = characters[index];
-    if (HORIZONTAL_SPACE.test(character)) {
-      let end = index + 1;
-      while (end < characters.length && HORIZONTAL_SPACE.test(characters[end])) end++;
-      const next = characters[end] || "";
-      boundaryAlreadyAdded = isMixedScriptBoundary(previous, next);
-      source += boundaryAlreadyAdded ? OPTIONAL_MIXED_SPACE : escapeRe(characters.slice(index, end).join(""));
-      index = end;
-      continue;
-    }
-    if (!boundaryAlreadyAdded && previous && isMixedScriptBoundary(previous, character)) source += OPTIONAL_MIXED_SPACE;
-    source += escapeRe(character);
-    previous = character;
-    boundaryAlreadyAdded = false;
-    index++;
-  }
-  return source;
-}
-var boundedSource = (word) => {
-  const leftBoundary = /^[A-Za-z0-9_]/.test(word) ? "\\b" : "";
-  const rightBoundary = /[A-Za-z0-9_]$/.test(word) ? "\\b" : "";
-  return leftBoundary + flexibleMixedScriptSource(word) + rightBoundary;
-};
-
-// src/shared-utils.ts
-var escapeHtml = (value) => String(value == null ? "" : value).replace(
-  /[&<>"]/g,
-  (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[character] || character
-);
-var renderLexisMarkdown = (app, markdown, element, sourcePath, component) => import_obsidian7.MarkdownRenderer.render(app, String(markdown == null ? "" : markdown).replace(/\u00a0/g, " "), element, sourcePath, component);
-var round2 = (value) => Math.round(value * 100) / 100;
-function cssColorToHex(color, document2) {
-  if (!color) return "#888888";
-  if (/^#[0-9a-fA-F]{6}$/.test(color.trim())) return color.trim();
-  const temporary = document2.body.createDiv();
-  temporary.setCssStyles({ color });
-  const rgb = temporary.win.getComputedStyle(temporary).color;
-  temporary.remove();
-  const match = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(rgb);
-  if (!match) return "#888888";
-  return `#${[match[1], match[2], match[3]].map((value) => (+value).toString(16).padStart(2, "0")).join("")}`;
-}
-function formatDate(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-function todayString() {
-  return formatDate(/* @__PURE__ */ new Date());
-}
-function parseDate(value) {
-  const [year, month, day] = String(value).slice(0, 10).split("-").map(Number);
-  return new Date(year, (month || 1) - 1, day || 1);
-}
-function addDaysString(base, days) {
-  const date = base ? parseDate(base) : /* @__PURE__ */ new Date();
-  date.setDate(date.getDate() + days);
-  return formatDate(date);
-}
-function daysBetween(from, to) {
-  return Math.max(0, Math.round((parseDate(to).getTime() - parseDate(from).getTime()) / 864e5));
 }
 
 // src/main.ts
@@ -6437,6 +6507,7 @@ var LexisPlugin = class extends import_obsidian8.Plugin {
     if (!this.settings.inlineCategoryOrderByParent || typeof this.settings.inlineCategoryOrderByParent !== "object" || Array.isArray(this.settings.inlineCategoryOrderByParent)) this.settings.inlineCategoryOrderByParent = {};
     if (!this.settings.reviewLog) this.settings.reviewLog = {};
     if (!this.settings.reviewHistory || typeof this.settings.reviewHistory !== "object" || Array.isArray(this.settings.reviewHistory)) this.settings.reviewHistory = {};
+    if (repairReviewHistory(this.settings.reviewHistory)) await this.saveData(this.settings);
     if (!this.settings.syntaxCardStates || typeof this.settings.syntaxCardStates !== "object" || Array.isArray(this.settings.syntaxCardStates)) this.settings.syntaxCardStates = {};
     if (this.settings.vocabFolders == null) this.settings.vocabFolders = this.settings.vocabFolder != null ? this.settings.vocabFolder : "01-word";
     if (this.settings.excludeTags == null) this.settings.excludeTags = this.settings.excludeTag || "";
@@ -6866,26 +6937,7 @@ var LexisPlugin = class extends import_obsidian8.Plugin {
     return FSRS.retrievability(Math.max(0, daysBetween(card.last, date)), s);
   }
   scheduleCard(card, grade) {
-    const R = this.settings.requestRetention || 0.9;
-    let reps = (Number(card.reps) || 0) + 1, lapses = Number(card.lapses) || 0, S, D;
-    const today = todayString();
-    if (card.s == null || isNaN(Number(card.s))) {
-      S = FSRS.initStability(grade);
-      D = FSRS.initDifficulty(grade);
-    } else {
-      const t = card.last ? daysBetween(card.last, today) : 0;
-      const r = FSRS.retrievability(t, Number(card.s));
-      D = FSRS.nextDifficulty(Number(card.d), grade);
-      if (grade === 1) {
-        S = FSRS.nextForgetStability(Number(card.d), Number(card.s), r);
-        lapses++;
-      } else {
-        S = FSRS.nextRecallStability(Number(card.d), Number(card.s), r, grade);
-      }
-    }
-    S = Math.max(0.01, S);
-    const interval = FSRS.nextInterval(S, R);
-    return { s: S, d: D, reps, lapses, interval, due: addDaysString(today, interval) };
+    return scheduleReviewCard(card, grade, this.settings.requestRetention, todayString());
   }
   async getFirstExample(file) {
     try {
