@@ -29,6 +29,7 @@ import { createTemplateProvider } from "./template-provider";
 import { createSettingsTab } from "./settings-tab";
 import { createReviewState } from "./review-state";
 import { createReviewQueue } from "./review-queue";
+import { repairReviewHistory, scheduleReviewCard, type ReviewSchedule } from "./review-scheduler";
 import { migrateLegacySettings, pluginFolderName, type StoredSettings } from "./settings-migration";
 import { WorkspaceDocuments } from "./workspace-documents";
 import { LexisRestoreModal } from "./restore-modal";
@@ -58,8 +59,8 @@ const LexisReviewView = createReviewView({
 const LexisBridge = createBridgeServer({ Notice, Platform });
 
 type TranslationVars = Record<string, string | number | boolean | null | undefined>;
-type ReviewCard = { s?: number | null; d?: number | null; due?: string | null; last?: string | null; reps?: number | null; lapses?: number | null; history?: ReviewHistoryEvent[] };
-type Schedule = { s: number; d: number; due: string; reps: number; lapses: number; interval: number };
+type ReviewCard = ReviewCardState & { history?: ReviewHistoryEvent[] };
+type Schedule = ReviewSchedule;
 type Lifecycle = { archived: boolean; retired: boolean; pinned: boolean };
 type Relation = { path: string; basename: string };
 type RelationBag = Record<string, Relation[]>;
@@ -434,6 +435,7 @@ class LexisPlugin extends Plugin {
     if (!this.settings.inlineCategoryOrderByParent || typeof this.settings.inlineCategoryOrderByParent !== "object" || Array.isArray(this.settings.inlineCategoryOrderByParent)) this.settings.inlineCategoryOrderByParent = {};
     if (!this.settings.reviewLog) this.settings.reviewLog = {};
     if (!this.settings.reviewHistory || typeof this.settings.reviewHistory !== "object" || Array.isArray(this.settings.reviewHistory)) this.settings.reviewHistory = {};
+    if (repairReviewHistory(this.settings.reviewHistory)) await this.saveData(this.settings);
     if (!this.settings.syntaxCardStates || typeof this.settings.syntaxCardStates !== "object" || Array.isArray(this.settings.syntaxCardStates)) this.settings.syntaxCardStates = {};
     // 单值 → 多值迁移(收录文件夹 / 网页排除标签)。旧键不在 DEFAULT_SETTINGS,故能区分"未迁移"。
     if (this.settings.vocabFolders == null) this.settings.vocabFolders = this.settings.vocabFolder != null ? this.settings.vocabFolder : "01-word";
@@ -788,21 +790,7 @@ class LexisPlugin extends Plugin {
     return FSRS.retrievability(Math.max(0, daysBetween(card.last, date)), s);
   }
   scheduleCard(card: ReviewCard, grade: number): Schedule {
-    const R = this.settings.requestRetention || 0.9;
-    let reps = (Number(card.reps) || 0) + 1, lapses = Number(card.lapses) || 0, S, D;
-    const today = todayStr();
-    if (card.s == null || isNaN(Number(card.s))) {
-      S = FSRS.initStability(grade); D = FSRS.initDifficulty(grade);
-    } else {
-      const t = card.last ? daysBetween(card.last, today) : 0;
-      const r = FSRS.retrievability(t, Number(card.s));
-      D = FSRS.nextDifficulty(Number(card.d), grade);
-      if (grade === 1) { S = FSRS.nextForgetStability(Number(card.d), Number(card.s), r); lapses++; }
-      else { S = FSRS.nextRecallStability(Number(card.d), Number(card.s), r, grade); }
-    }
-    S = Math.max(0.01, S);
-    const interval = FSRS.nextInterval(S, R);
-    return { s: S, d: D, reps, lapses, interval, due: addDaysStr(today, interval) };
+    return scheduleReviewCard(card, grade, this.settings.requestRetention, todayStr());
   }
   async getFirstExample(file: TFile): Promise<string> {
     try {

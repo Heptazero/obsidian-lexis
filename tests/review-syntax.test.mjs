@@ -243,3 +243,21 @@ test("restores an existing whole-note schedule without treating zero as a missin
   assert.equal(frontmatter["lexis-s"], 0);
   assert.equal(frontmatter["lexis-reps"], 1);
 });
+
+test("rejects an invalid schedule before writing frontmatter or history", async () => {
+  const { createReviewState } = await loadTypeScript("src/review-state.ts");
+  let writes = 0;
+  const settings = { syntaxCardStates: {}, suspendedReviewItems: {}, reviewHistory: {}, reviewLog: {} };
+  const host = {
+    app: { fileManager: { processFrontMatter: async () => { writes++; } } },
+    settings,
+    saveSettings: async () => {},
+  };
+  Object.defineProperties(host, createReviewState({ todayStr: () => "2026-09-15", round2: (value) => Math.round(value * 100) / 100 }));
+  const item = { type: "note", file: { path: "a.md" }, card: {} };
+  const invalid = { s: Number.NaN, d: 5, due: "NaN-NaN-NaN", reps: 1, lapses: 0 };
+  await assert.rejects(host.applyReviewItemSchedule(item, invalid), /Invalid review schedule/);
+  await assert.rejects(host.logReviewItem(item, invalid, 3, 0), /Invalid review schedule/);
+  assert.equal(writes, 0);
+  assert.deepEqual(settings.reviewHistory, {});
+});

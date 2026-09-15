@@ -23,6 +23,13 @@ interface ReviewStateHost {
 
 const cloneState = (state: ReviewCardState | null | undefined): ReviewCardState | null => state ? { ...state } : null;
 
+function persistedSchedule(schedule: ReviewSchedule, round2: (value: number) => number): Pick<ReviewCardState, "s" | "d"> {
+  const s = round2(schedule.s);
+  const d = round2(schedule.d);
+  if (!Number.isFinite(s) || s <= 0 || !Number.isFinite(d) || d < 1 || d > 10) throw new Error("Invalid review schedule");
+  return { s, d };
+}
+
 export function createReviewState({ todayStr, round2 }: ReviewStateDependencies): PropertyDescriptorMap {
   class ReviewState {
     declare app: ReviewStateHost["app"];
@@ -45,9 +52,10 @@ export function createReviewState({ todayStr, round2 }: ReviewStateDependencies)
     }
 
     async applyReviewItemSchedule(item: ReviewItem, schedule: ReviewSchedule): Promise<void> {
+      const { s, d } = persistedSchedule(schedule, round2);
       const state: ReviewCardState = {
-        s: round2(schedule.s),
-        d: round2(schedule.d),
+        s,
+        d,
         due: schedule.due,
         last: todayStr(),
         reps: schedule.reps,
@@ -103,12 +111,13 @@ export function createReviewState({ todayStr, round2 }: ReviewStateDependencies)
     }
 
     async logReviewItem(item: ReviewItem, schedule: ReviewSchedule, grade: number, retentionBefore: number): Promise<void> {
+      const { s } = persistedSchedule(schedule, round2);
       const today = todayStr();
       this.settings.reviewLog[today] = (this.settings.reviewLog[today] || 0) + 1;
       const keys = item.type === "note" ? [item.file.path] : (item.syntax?.memberIds || []).map((id) => `syntax:${id}`);
       for (const key of keys) {
         const history = Array.isArray(this.settings.reviewHistory[key]) ? this.settings.reviewHistory[key] : [];
-        history.push({ date: today, s: round2(schedule.s), grade, retention: Math.round(Math.max(0, Math.min(1, retentionBefore)) * 100) });
+        history.push({ date: today, s, grade, retention: Math.round(Math.max(0, Math.min(1, retentionBefore)) * 100) });
         this.settings.reviewHistory[key] = history.slice(-64);
       }
       await this.saveSettings();
