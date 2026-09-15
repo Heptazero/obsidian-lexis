@@ -3,6 +3,7 @@
 import type { App, ColorComponent, MetadataCache, Plugin, Setting, SettingDefinitionItem, TextComponent, View } from "obsidian";
 import type { TranslationVars } from "./i18n";
 import type { HighlightStyle, InlineCategoryOccurrence, LexisSettings, LexisStats } from "./types";
+import { addSelectionPillPosition } from "./settings-selection-pill";
 
 interface SettingsRuntime extends Plugin {
   settings: LexisSettings;
@@ -434,8 +435,6 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       new Setting(hlSection).setName(t("settings.enableHighlight")).addToggle((toggle) => toggle.setValue(this.plugin.settings.enableHighlight).onChange(async (v) => { this.plugin.settings.enableHighlight = v; await save(); refresh(); }));
       new Setting(hlSection).setName(t("settings.livePreview")).setDesc(this.plugin.liveAvailable ? "" : t("settings.unsupported"))
         .addToggle((t) => t.setValue(this.plugin.settings.enableLivePreview).setDisabled(!this.plugin.liveAvailable).onChange(async (v) => { this.plugin.settings.enableLivePreview = v; await save(); refresh(); }));
-      new Setting(hlSection).setName(t("settings.selectionPill"))
-        .addToggle((t) => t.setValue(this.plugin.settings.selectionPill).onChange(async (v) => { this.plugin.settings.selectionPill = v; await save(); if (!v) this.plugin.removeSelPill(); }));
       new Setting(hlSection).setName(t("settings.pdfHighlight")).setDesc(t("settings.pdfHighlightDesc"))
         .addToggle((t) => t.setValue(this.plugin.settings.enablePdfHighlight).onChange(async (v) => { this.plugin.settings.enablePdfHighlight = v; await save(); if (v) this.plugin.setupPdfHighlight(); else { this.plugin.teardownPdfHighlight(); this.plugin.rescanPdfLayers(); } }));
       new Setting(hlSection).setName(t("settings.highlightStyle"))
@@ -558,6 +557,9 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
         .addText((input) => input.setPlaceholder(t("settings.wholeVault")).setValue(this.plugin.settings.occurrenceFolders).onChange(async (v) => { this.plugin.settings.occurrenceFolders = v.trim(); await save(); this.plugin._occCache.clear(); }));
 
       const addSection = this.section(containerEl, t("settings.selectionAdd"));
+      new Setting(addSection).setName(t("settings.selectionPill"))
+        .addToggle((toggle) => toggle.setValue(this.plugin.settings.selectionPill).onChange(async (v) => { this.plugin.settings.selectionPill = v; await save(); if (!v) this.plugin.removeSelPill(); }));
+      addSelectionPillPosition(addSection, { Setting, settings: this.plugin.settings, t, save });
       new Setting(addSection).setName(t("settings.emptyNotePreset")).setDesc(t("settings.emptyNotePresetDesc"))
         .addDropdown((dropdown) => dropdown
           .addOption("blank", t("settings.emptyNoteBlank"))

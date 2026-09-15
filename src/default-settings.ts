@@ -68,6 +68,8 @@ export const DEFAULT_SETTINGS: DefaultLexisSettings = {
   bridgePort: LEXIS_BRIDGE_DEFAULT_PORT,
   bridgeToken: "",
   selectionPill: true,
+  selectionPillOffsetX: 0,
+  selectionPillOffsetY: 0,
   lastSelectionFolder: "",
   enablePdfHighlight: true,
 };

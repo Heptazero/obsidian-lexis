@@ -93,6 +93,9 @@ try {
         const error = Math.max(Math.abs(actual.left - expected.left), Math.abs(actual.top - expected.top), Math.abs(actual.width - expected.width));
         maxError = Math.max(maxError, error);
         assert(error < 0.1, `overlay drifted ${error}px at scale ${scale}`);
+        const background = anchor.querySelector<HTMLElement>('.lexis-pdf-hl')!.getBoundingClientRect();
+        assert(Math.abs(background.top - expected.top) < 0.1 && Math.abs(background.height - expected.height) < 0.1,
+          `background was compressed or shifted at scale ${scale}`);
         const point = { target: layer, clientX: actual.left + actual.width / 2, clientY: actual.top + actual.height / 2 } as unknown as MouseEvent;
         assert(pdfHighlightAt(point) === anchor, 'coordinate lookup did not resolve the matching word');
         assert(getComputedStyle(anchor).pointerEvents === 'none', 'overlay intercepts selection');

@@ -137,6 +137,8 @@ var DEFAULT_SETTINGS = {
   bridgePort: LEXIS_BRIDGE_DEFAULT_PORT,
   bridgeToken: "",
   selectionPill: true,
+  selectionPillOffsetX: 0,
+  selectionPillOffsetY: 0,
   lastSelectionFolder: "",
   enablePdfHighlight: true
 };
@@ -720,6 +722,14 @@ var MESSAGES = {
   "settings.occurrenceScopeDesc": { zh: "\u9017\u53F7\u5206\u9694\uFF1B\u7559\u7A7A\u4E3A\u5168\u5E93\u3002", en: "Comma-separated; blank searches the whole vault." },
   "settings.wholeVault": { zh: "\u7559\u7A7A=\u5168\u5E93", en: "Blank = whole vault" },
   "settings.selectionAdd": { zh: "\u5212\u8BCD\u6DFB\u52A0", en: "Add from selection" },
+  "settings.pillPosition": { zh: "\u836F\u4E38\u4F4D\u7F6E", en: "Selection pill position" },
+  "settings.pillPositionDesc": { zh: "\u62D6\u52A8\u9884\u89C8\u836F\u4E38\uFF0C\u6216\u8C03\u6574\u50CF\u7D20\u504F\u79FB\u3002\u8D1F\u503C\u5411\u5DE6\uFF0F\u4E0A\uFF0C\u6B63\u503C\u5411\u53F3\uFF0F\u4E0B\uFF1B\u9760\u8FD1\u5C4F\u5E55\u8FB9\u7F18\u65F6\u81EA\u52A8\u6536\u56DE\u3002", en: "Drag the preview pill or adjust pixel offsets. Negative values move left/up, positive values right/down. The pill stays within screen edges." },
+  "settings.pillPreviewText": { zh: "\u9009\u4E2D\u7684\u6587\u5B57", en: "Selected text" },
+  "settings.pillDrag": { zh: "\u62D6\u52A8\u836F\u4E38", en: "Drag pill" },
+  "settings.pillDragLabel": { zh: "\u62D6\u52A8\u8C03\u6574\u4F4D\u7F6E\uFF0C\u65B9\u5411\u952E\u5FAE\u8C03\uFF0CShift \u52A0\u901F", en: "Drag to reposition, or use arrow keys; hold Shift for larger steps" },
+  "settings.pillOffsetX": { zh: "\u6A2A\u5411\u504F\u79FB (px)", en: "Horizontal offset (px)" },
+  "settings.pillOffsetY": { zh: "\u7EB5\u5411\u504F\u79FB (px)", en: "Vertical offset (px)" },
+  "settings.pillReset": { zh: "\u91CD\u7F6E\u4F4D\u7F6E", en: "Reset position" },
   "settings.emptyNotePreset": { zh: "\u65E0\u6A21\u677F\u65F6", en: "When no template is selected" },
   "settings.emptyNotePresetDesc": { zh: "\u4EC5\u7528\u4E8E\u6CA1\u6709\u9009\u62E9\u6A21\u677F\u6587\u4EF6\u7684\u8BCD\u5178\u3002", en: "Used only for dictionaries without a template file." },
   "settings.emptyNoteBlank": { zh: "\u7EAF\u7A7A\u767D", en: "Blank note" },
@@ -2777,7 +2787,8 @@ function selectionTouchesLayer(layer, selection) {
   return !!(selection.anchorNode && layer.contains(selection.anchorNode) || selection.focusNode && layer.contains(selection.focusNode));
 }
 function pdfHighlightBand(lineHeight, style) {
-  const height = style === "background" ? Math.max(3, Math.min(6, lineHeight * 0.3)) : style === "underline" ? Math.max(1.2, Math.min(2, lineHeight * 0.1)) : Math.max(2, Math.min(3, lineHeight * 0.15));
+  if (style === "background") return { topOffset: 0, height: lineHeight };
+  const height = style === "underline" ? Math.max(1.2, Math.min(2, lineHeight * 0.1)) : Math.max(2, Math.min(3, lineHeight * 0.15));
   return { topOffset: Math.max(0, lineHeight - height + 1), height };
 }
 function createDocumentHighlights() {
@@ -3280,6 +3291,17 @@ function createDocumentHighlights() {
 
 // src/reader-interactions.ts
 var obsidian2 = __toESM(require("obsidian"));
+
+// src/selection-pill-position.ts
+function positionSelectionPill(anchor, pill, viewport, offset) {
+  const clamp = (value, extent, size) => Math.max(6, Math.min(value, extent - size - 6));
+  return {
+    left: clamp(anchor.left + offset.x, viewport.width, pill.width),
+    top: clamp(anchor.bottom + 6 + offset.y, viewport.height, pill.height)
+  };
+}
+
+// src/reader-interactions.ts
 function eventElement(target) {
   if (!target || typeof target !== "object" || !("nodeType" in target)) return null;
   const node = target;
@@ -3525,8 +3547,12 @@ function createReaderInteractions({ openAliasPicker }) {
           openAliasPicker(this.app, this, text, (entry) => this.attachAlias(text, entry.file));
         });
       }
-      const top = Math.min(rect.bottom + 6, overlayWin.innerHeight - 36);
-      const left = Math.max(6, Math.min(rect.left, overlayWin.innerWidth - pill.offsetWidth - 6));
+      const { top, left } = positionSelectionPill(
+        rect,
+        { width: pill.offsetWidth, height: pill.offsetHeight },
+        { width: overlayWin.innerWidth, height: overlayWin.innerHeight },
+        { x: this.settings.selectionPillOffsetX ?? 0, y: this.settings.selectionPillOffsetY ?? 0 }
+      );
       pill.setCssStyles({ top: top + "px", left: left + "px" });
       this._selPill = pill;
     }
@@ -4442,6 +4468,100 @@ function createTemplateProvider({ app, TFile: TFile4, getSettings, normalizeFold
   return { create, lexisPathFor, readLexis, templaterTemplateFor };
 }
 
+// src/settings-selection-pill.ts
+function addSelectionPillPosition(container, { Setting: Setting3, settings, t, save }) {
+  let offset = { x: settings.selectionPillOffsetX ?? 0, y: settings.selectionPillOffsetY ?? 0 };
+  new Setting3(container).setName(t("settings.pillPosition")).setDesc(t("settings.pillPositionDesc")).addExtraButton((button) => button.setIcon("reset").setTooltip(t("settings.pillReset")).onClick(() => {
+    offset = { x: 0, y: 0 };
+    render();
+    void persist();
+  }));
+  const preview = container.createDiv({ cls: "lexis-pill-position-preview" });
+  const selection = preview.createSpan({ cls: "lexis-pill-position-selection", text: t("settings.pillPreviewText") });
+  const handle = preview.createEl("button", { cls: "lexis-pill-position-handle", text: t("settings.pillDrag") });
+  handle.type = "button";
+  handle.setAttribute("aria-label", t("settings.pillDragLabel"));
+  handle.title = t("settings.pillDragLabel");
+  const controls = container.createDiv({ cls: "lexis-pill-position-inputs" });
+  const inputs = {};
+  for (const axis of ["x", "y"]) {
+    const label = controls.createEl("label");
+    label.createSpan({ text: t(axis === "x" ? "settings.pillOffsetX" : "settings.pillOffsetY") });
+    const input = label.createEl("input", { type: "number" });
+    input.step = "1";
+    inputs[axis] = input;
+    input.addEventListener("change", () => {
+      if (Number.isFinite(input.valueAsNumber)) {
+        offset[axis] = Math.round(input.valueAsNumber);
+        void persist();
+      }
+      render();
+    });
+  }
+  function render() {
+    preview.style.setProperty("--lexis-pill-x", `${offset.x}px`);
+    preview.style.setProperty("--lexis-pill-y", `${offset.y}px`);
+    inputs.x.value = String(offset.x);
+    inputs.y.value = String(offset.y);
+  }
+  async function persist() {
+    settings.selectionPillOffsetX = offset.x;
+    settings.selectionPillOffsetY = offset.y;
+    await save();
+  }
+  let drag = null;
+  handle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || drag) return;
+    event.preventDefault();
+    handle.focus({ preventScroll: true });
+    drag = { id: event.pointerId, x: event.clientX, y: event.clientY, left: handle.offsetLeft, top: handle.offsetTop, initial: { ...offset } };
+    handle.setPointerCapture(event.pointerId);
+  });
+  handle.addEventListener("pointermove", (event) => {
+    if (!drag || drag.id !== event.pointerId) return;
+    const anchor = { left: selection.offsetLeft, bottom: selection.offsetTop + selection.offsetHeight };
+    const position = positionSelectionPill(
+      anchor,
+      { width: handle.offsetWidth, height: handle.offsetHeight },
+      { width: preview.clientWidth, height: preview.clientHeight },
+      { x: drag.left + event.clientX - drag.x - anchor.left, y: drag.top + event.clientY - drag.y - anchor.bottom - 6 }
+    );
+    offset = { x: Math.round(position.left - anchor.left), y: Math.round(position.top - anchor.bottom - 6) };
+    render();
+  });
+  handle.addEventListener("pointerup", (event) => {
+    if (!drag || drag.id !== event.pointerId) return;
+    drag = null;
+    handle.releasePointerCapture(event.pointerId);
+    void persist();
+  });
+  const cancelDrag = (event) => {
+    if (!drag || drag.id !== event.pointerId) return;
+    offset = drag.initial;
+    drag = null;
+    render();
+  };
+  handle.addEventListener("pointercancel", cancelDrag);
+  handle.addEventListener("lostpointercapture", cancelDrag);
+  handle.addEventListener("keydown", (event) => {
+    if (drag) return;
+    const directions = {
+      ArrowLeft: { x: -1, y: 0 },
+      ArrowRight: { x: 1, y: 0 },
+      ArrowUp: { x: 0, y: -1 },
+      ArrowDown: { x: 0, y: 1 }
+    };
+    const delta = directions[event.key];
+    if (!delta) return;
+    event.preventDefault();
+    const step = event.shiftKey ? 10 : 1;
+    offset = { x: offset.x + delta.x * step, y: offset.y + delta.y * step };
+    render();
+    void persist();
+  });
+  render();
+}
+
 // src/settings-tab.ts
 var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingTab2, Setting: Setting3, Notice: Notice4, TFolder: TFolder2, DEFAULT_SETTINGS: DEFAULT_SETTINGS2, cssColorToHex: cssColorToHex2, addAppearanceButton: addAppearanceButton2, createReorderController: createReorderController2, moveItem: moveItem2, LEXIS_HOME_VIEW: LEXIS_HOME_VIEW2, LEXIS_REVIEW_VIEW: LEXIS_REVIEW_VIEW2 }) => {
   class PathSuggest extends obsidian5.AbstractInputSuggest {
@@ -4898,11 +5018,6 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
         await save();
         refresh();
       }));
-      new Setting3(hlSection).setName(t("settings.selectionPill")).addToggle((t2) => t2.setValue(this.plugin.settings.selectionPill).onChange(async (v) => {
-        this.plugin.settings.selectionPill = v;
-        await save();
-        if (!v) this.plugin.removeSelPill();
-      }));
       new Setting3(hlSection).setName(t("settings.pdfHighlight")).setDesc(t("settings.pdfHighlightDesc")).addToggle((t2) => t2.setValue(this.plugin.settings.enablePdfHighlight).onChange(async (v) => {
         this.plugin.settings.enablePdfHighlight = v;
         await save();
@@ -5111,6 +5226,12 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
         this.plugin._occCache.clear();
       }));
       const addSection = this.section(containerEl, t("settings.selectionAdd"));
+      new Setting3(addSection).setName(t("settings.selectionPill")).addToggle((toggle) => toggle.setValue(this.plugin.settings.selectionPill).onChange(async (v) => {
+        this.plugin.settings.selectionPill = v;
+        await save();
+        if (!v) this.plugin.removeSelPill();
+      }));
+      addSelectionPillPosition(addSection, { Setting: Setting3, settings: this.plugin.settings, t, save });
       new Setting3(addSection).setName(t("settings.emptyNotePreset")).setDesc(t("settings.emptyNotePresetDesc")).addDropdown((dropdown) => dropdown.addOption("blank", t("settings.emptyNoteBlank")).addOption("occ", t("settings.emptyNoteOccurrences")).setValue(this.plugin.settings.emptyNotePreset || "blank").onChange(async (value) => {
         this.plugin.settings.emptyNotePreset = value === "occ" ? "occ" : "blank";
         await save();

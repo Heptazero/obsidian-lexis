@@ -149,6 +149,8 @@ export interface LexisSettings {
   bridgePort: number;
   bridgeToken: string;
   selectionPill: boolean;
+  selectionPillOffsetX: number;
+  selectionPillOffsetY: number;
   lastSelectionFolder: string;
   enablePdfHighlight: boolean;
   dicts: DictionarySetting[];

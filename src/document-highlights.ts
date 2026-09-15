@@ -20,11 +20,10 @@ function selectionTouchesLayer(layer: Pick<Node, "contains">, selection: Pick<Se
 }
 
 function pdfHighlightBand(lineHeight: number, style: HighlightStyle): { topOffset: number; height: number } {
-  const height = style === "background"
-    ? Math.max(3, Math.min(6, lineHeight * 0.3))
-    : style === "underline"
-      ? Math.max(1.2, Math.min(2, lineHeight * 0.1))
-      : Math.max(2, Math.min(3, lineHeight * 0.15));
+  if (style === "background") return { topOffset: 0, height: lineHeight };
+  const height = style === "underline"
+    ? Math.max(1.2, Math.min(2, lineHeight * 0.1))
+    : Math.max(2, Math.min(3, lineHeight * 0.15));
   return { topOffset: Math.max(0, lineHeight - height + 1), height };
 }
 

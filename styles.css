@@ -1137,6 +1137,55 @@ body.is-phone .workspace-leaf-content[data-type="lexis-review-view"] .lexis-rv-r
     background: color-mix(in srgb, var(--text-on-accent) 18%, transparent);
 }
 
+.lexis-pill-position-preview {
+    position: relative;
+    height: 220px;
+    overflow: hidden;
+    border: 1px dashed var(--background-modifier-border);
+    border-radius: var(--radius-m);
+}
+.lexis-pill-position-selection {
+    position: absolute;
+    left: 45%;
+    top: 80px;
+    height: 24px;
+    line-height: 24px;
+    white-space: nowrap;
+    background: var(--text-selection);
+}
+.lexis-pill-position-preview .lexis-pill-position-handle {
+    position: absolute;
+    left: clamp(6px, calc(45% + var(--lexis-pill-x)), calc(100% - 102px));
+    top: clamp(6px, calc(110px + var(--lexis-pill-y)), 178px);
+    width: 96px;
+    height: 36px;
+    padding: 0;
+    border-radius: 999px;
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+}
+.lexis-pill-position-preview .lexis-pill-position-handle:active {
+    cursor: grabbing;
+}
+.lexis-pill-position-inputs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-block: 12px;
+}
+.lexis-pill-position-inputs label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--font-ui-small);
+}
+.lexis-pill-position-inputs input {
+    width: 80px;
+}
+
 /* PDF 高亮独立层:叠在 Canvas 上、textLayer 下,不沾 textLayer 的 opacity */
 .lexis-pdf-hl-layer {
     pointer-events: none;

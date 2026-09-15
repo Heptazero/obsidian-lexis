@@ -4,6 +4,7 @@ import * as obsidian from "obsidian";
 import type { App, Component as ObsidianComponent, Editor, MarkdownView, TFile as ObsidianTFile } from "obsidian";
 import type { LexisEntry, LexisSettings } from "./types";
 import { pdfHighlightAt } from "./pdf-highlight-targets";
+import { positionSelectionPill } from "./selection-pill-position";
 
 type AddWordOptions = { openExisting?: boolean };
 type TranslationVars = Record<string, string | number | boolean>;
@@ -242,9 +243,10 @@ function createReaderInteractions({ openAliasPicker }: ReaderInteractionDependen
         openAliasPicker(this.app, this, text, (entry) => this.attachAlias(text, entry.file));
       });
     }
-    // 定位:选区下方略偏左;贴边时夹回视口
-    const top = Math.min(rect.bottom + 6, overlayWin.innerHeight - 36);
-    const left = Math.max(6, Math.min(rect.left, overlayWin.innerWidth - pill.offsetWidth - 6));
+    const { top, left } = positionSelectionPill(rect,
+      { width: pill.offsetWidth, height: pill.offsetHeight },
+      { width: overlayWin.innerWidth, height: overlayWin.innerHeight },
+      { x: this.settings.selectionPillOffsetX ?? 0, y: this.settings.selectionPillOffsetY ?? 0 });
     pill.setCssStyles({ top: top + "px", left: left + "px" });
     this._selPill = pill;
   }
