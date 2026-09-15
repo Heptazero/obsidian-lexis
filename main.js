@@ -2194,13 +2194,18 @@ var import_view = require("@codemirror/view");
 var import_state = require("@codemirror/state");
 var obsidian = __toESM(require("obsidian"));
 
-// src/reading-scroll.ts
-function rerenderPreservingScroll(preview, requestFrame, stillCurrent) {
-  const scroll = preview.getScroll();
-  preview.rerender(true);
-  requestFrame(() => {
-    if (stillCurrent()) preview.applyScroll(scroll);
-  });
+// src/reading-highlights.ts
+function refreshReadingHighlightsInPlace(root, applyHighlights) {
+  const parents = /* @__PURE__ */ new Set();
+  const highlights = Array.from(root.querySelectorAll(".lexis-hl"));
+  for (const highlight of highlights) {
+    if (highlight.closest(".lexis-popover")) continue;
+    const parent = highlight.parentNode;
+    if (parent) parents.add(parent);
+    highlight.replaceWith(...Array.from(highlight.childNodes));
+  }
+  for (const parent of parents) parent.normalize();
+  applyHighlights(root);
 }
 
 // src/highlight-engine.ts
@@ -2636,9 +2641,16 @@ function createHighlightEngine({ Notice: Notice4, boundedSource: boundedSource2,
       this.app.workspace.iterateAllLeaves((leaf) => {
         const view = leaf.view;
         const pm = view.previewMode;
-        if (pm && typeof pm.rerender === "function") {
-          const viewWindow = pm.containerEl.ownerDocument.defaultView || window;
-          rerenderPreservingScroll(pm, (callback) => viewWindow.requestAnimationFrame(callback), () => leaf.view === view && view.previewMode === pm);
+        if (pm?.containerEl) {
+          refreshReadingHighlightsInPlace(pm.containerEl, (root) => {
+            if (!this.settings.enableHighlight || !this._pattern || !this.index.size) return;
+            const selfKeys = this.selfKeysFor(view.file?.path || "");
+            const sections = Array.from(root.querySelectorAll(".markdown-preview-section"));
+            const targets2 = sections.length ? sections.filter((section) => !section.parentElement?.closest(".markdown-preview-section")) : [root];
+            for (const target of targets2) {
+              this.wrapMatchesInElement(target, "code,pre,a,.lexis-hl,.lexis-popover,.math,.tag", {}, selfKeys);
+            }
+          });
         }
         const cm = view.editor?.cm;
         if (this._liveRefreshEffect && cm?.dispatch) {

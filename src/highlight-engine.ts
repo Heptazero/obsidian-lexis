@@ -5,7 +5,7 @@ import { RangeSetBuilder, StateEffect, type Extension, type StateEffectType } fr
 import * as obsidian from "obsidian";
 import type { App, MarkdownPostProcessorContext, Notice as ObsidianNotice, TFile, View, WorkspaceLeaf } from "obsidian";
 import type { OccurrenceSearch } from "./occurrence-search";
-import { rerenderPreservingScroll, type ReadingPreview } from "./reading-scroll";
+import { refreshReadingHighlightsInPlace } from "./reading-highlights";
 import type { DictionarySetting, InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats } from "./types";
 
 type HighlightStyleOptions = { external?: boolean; pdf?: boolean };
@@ -452,11 +452,18 @@ function createHighlightEngine({ Notice, boundedSource, compactMixedScriptSpacin
   }
   refreshAllViews() {
     this.app.workspace.iterateAllLeaves((leaf) => {
-      const view = leaf.view as View & { previewMode?: ReadingPreview & { containerEl: HTMLElement }; editor?: { cm?: EditorView } };
+      const view = leaf.view as View & { file?: TFile; previewMode?: { containerEl: HTMLElement }; editor?: { cm?: EditorView } };
       const pm = view.previewMode;
-      if (pm && typeof pm.rerender === "function") {
-        const viewWindow = pm.containerEl.ownerDocument.defaultView || window;
-        rerenderPreservingScroll(pm, (callback) => viewWindow.requestAnimationFrame(callback), () => leaf.view === view && view.previewMode === pm);
+      if (pm?.containerEl) {
+        refreshReadingHighlightsInPlace(pm.containerEl, (root) => {
+          if (!this.settings.enableHighlight || !this._pattern || !this.index.size) return;
+          const selfKeys = this.selfKeysFor(view.file?.path || "");
+          const sections = Array.from(root.querySelectorAll<HTMLElement>(".markdown-preview-section"));
+          const targets = sections.length ? sections.filter((section) => !section.parentElement?.closest(".markdown-preview-section")) : [root];
+          for (const target of targets) {
+            this.wrapMatchesInElement(target, "code,pre,a,.lexis-hl,.lexis-popover,.math,.tag", {}, selfKeys);
+          }
+        });
       }
       const cm = view.editor?.cm;
       if (this._liveRefreshEffect && cm?.dispatch) {
