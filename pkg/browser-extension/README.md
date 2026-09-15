@@ -1,4 +1,4 @@
-# Lexis Web(Chrome 扩展)
+# Lexis Web（Chrome / Firefox 扩展）
 
 在任意网页上高亮你 Obsidian **Lexis** 词库里的单词、悬停看释义。和本机的 Lexis 桥接通信,数据始终在你的 vault 里、不出本机。
 

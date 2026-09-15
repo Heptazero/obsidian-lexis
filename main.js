@@ -1538,6 +1538,24 @@ function createBridgeServer({ Notice: Notice4, Platform: Platform2 }) {
   return LexisBridge2;
 }
 
+// src/bridge-render.ts
+function containsMath(markdown) {
+  return markdown.includes("$$") || markdown.includes("\\(") || markdown.includes("\\[") || /\$[^\s$]/.test(markdown);
+}
+async function withTimeout(promise, milliseconds) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_resolve, reject) => {
+        timer = window.setTimeout(() => reject(new Error("render-timeout")), milliseconds);
+      })
+    ]);
+  } finally {
+    if (timer !== void 0) window.clearTimeout(timer);
+  }
+}
+
 // src/bridge-api.ts
 function errorMessage2(error) {
   if (error instanceof Error) return error.message;
@@ -2044,7 +2062,7 @@ ${line}`);
       const comp = new Component4();
       comp.load();
       try {
-        await renderLexisMarkdown2(this.app, raw, div, file.path || "", comp);
+        await withTimeout(renderLexisMarkdown2(this.app, raw, div, file.path || "", comp), 5e3);
       } catch {
       }
       for (let i = 0; i < blocks.length; i++) {
@@ -2087,9 +2105,11 @@ ${line}`);
         }
         for (const h of rm) h.remove();
       })(div);
-      try {
-        await finishRenderMath2();
-      } catch {
+      if (containsMath(raw)) {
+        try {
+          await withTimeout(finishRenderMath2(), 3e3);
+        } catch {
+        }
       }
       await this.bridgePostProcess(div, file.path);
       const out = div.innerHTML;

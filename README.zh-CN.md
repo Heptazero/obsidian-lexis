@@ -53,7 +53,7 @@ Obsidian 中每个词典都有独立高亮开关。Lexis Web 则按网站单独�
 
 ### 浏览器插件
 
-1. [下载 Lexis Web 1.2.1（`lexis-web-1.2.1.zip`）](https://github.com/Heptazero/obsidian-lexis/releases/download/browser-v1.2.1/lexis-web-1.2.1.zip)并解压。
+1. 下载 [Chrome 版 Lexis Web 1.2.2](https://github.com/Heptazero/obsidian-lexis/releases/download/browser-v1.2.2/lexis-web-1.2.2.zip)或 [Firefox 版 Lexis Web 1.2.2](https://github.com/Heptazero/obsidian-lexis/releases/download/browser-v1.2.2/lexis-web-firefox-1.2.2.zip)，然后解压。
 2. 打开 `chrome://extensions`，启用“开发者模式”，选择“加载已解压的扩展程序”。
 3. 在 Lexis 设置中启用“本机桥接”，把端口和访问令牌填入 Lexis Web。
 

@@ -494,7 +494,7 @@
     pop = document.createElement("div");
     pop.className = "lexis-web-pop";
     pop.dataset.k = key;
-    pop.innerHTML = `<div class="lexis-web-pop-scroll"><div class="lexis-web-pop-title">${span.textContent}</div><div class="lexis-web-pop-corner"></div><div class="lexis-web-pop-meta"></div><div class="lexis-web-pop-body">加载中…</div></div>`;
+    pop.innerHTML = `<div class="lexis-web-pop-scroll"><div class="lexis-web-pop-title">${span.textContent}</div><div class="lexis-web-pop-corner"></div><div class="lexis-web-pop-meta"></div><div class="lexis-web-pop-body"></div></div>`;
     pop.addEventListener("mouseenter", () => clearTimeout(hideTimer));
     pop.addEventListener("mouseleave", scheduleHide);
     shadow.appendChild(pop);
@@ -511,11 +511,15 @@
     position(popHost, span);
 
     let data = detailCache.get(key);
+    const loadingTimer = data ? null : setTimeout(() => {
+      if (pop?.dataset.k === key) pop.querySelector(".lexis-web-pop-body").textContent = "加载中…";
+    }, 180);
     if (!data) {
       try { data = await chrome.runtime.sendMessage({ type: "detail", key }); }
-      catch (e) { data = { ok: false, error: "扩展未连接" }; }
+      catch (e) { data = { ok: false, error: "扩展未连接", offline: true }; }
       if (data && data.ok) detailCache.set(key, data);
     }
+    if (loadingTimer !== null) clearTimeout(loadingTimer);
     if (!pop || pop.dataset.k !== key) return;
     renderDetail(pop, data);
     position(popHost, span);
@@ -536,7 +540,8 @@
     body.innerHTML = "";
     box.classList.toggle("has-corner-actions", !!(data && data.ok && !data.inline));
     if (!data || !data.ok) {
-      body.textContent = data && data.offline ? "Obsidian 未连接(开着且桥接已启用?)" : "未找到这个词";
+      if (data?.error === "request-timeout") body.textContent = "加载超时，请重新悬浮";
+      else body.textContent = data?.offline ? "Obsidian 未连接(开着且桥接已启用?)" : "未找到这个词";
       return;
     }
     installMathCss(box.getRootNode(), data.mathCss);

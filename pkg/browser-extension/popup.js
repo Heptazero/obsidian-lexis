@@ -153,7 +153,7 @@ function status(text, cls) {
 // Chrome 下权限装完就有,此调用静默通过。必须在没有其他 await 的情况下最先调用,否则用户手势失效。
 function ensureLocalPermission() {
   if (!chrome.permissions) return Promise.resolve(true);
-  const origin = `http://${$("host").value.trim() || "127.0.0.1"}:${normalizePort($("port").value)}/`;
+  const origin = `http://${$("host").value.trim() || "127.0.0.1"}/*`;
   return chrome.permissions.request({ origins: [origin] }).then(() => true, () => false);
 }
 

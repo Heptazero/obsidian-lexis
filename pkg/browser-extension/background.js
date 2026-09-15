@@ -3,6 +3,7 @@
 if (typeof importScripts === "function") importScripts("config.js");
 const { defaultConnection, normalizePort } = globalThis.LexisWebConfig;
 const DEFAULT_CFG = { ...defaultConnection, token: "", highlight: true, showMemoryCurve: true, color: "#7c5cff", style: "wavy" };
+const REQUEST_TIMEOUT_MS = 8000;
 
 async function getCfg() {
   const { cfg } = await chrome.storage.local.get("cfg");
@@ -12,19 +13,32 @@ async function getCfg() {
 }
 function base(cfg) { return `http://${cfg.host}:${cfg.port}`; }
 
+async function fetchJson(url, options = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    return await response.json();
+  } catch (error) {
+    if (error && error.name === "AbortError") throw new Error("request-timeout");
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function api(cfg, path, { query, method = "GET", body } = {}) {
   const u = new URL(base(cfg) + path);
   if (query) for (const k in query) u.searchParams.set(k, query[k]);
   const headers = {};
   if (cfg.token) headers["X-Lexis-Token"] = cfg.token;
   if (body != null) headers["Content-Type"] = "application/json";
-  const r = await fetch(u.toString(), {
+  return fetchJson(u.toString(), {
     method,
     headers,
     body: body == null ? undefined : JSON.stringify(body),
     cache: "no-store",
   });
-  return r.json();
 }
 
 async function flushPending(cfg) {
@@ -45,8 +59,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     try { cfg = await getCfg(); } catch (e) { sendResponse({ ok: false, error: "no-config" }); return; }
     try {
       if (msg.type === "ping") {
-        const r = await fetch(`${base(cfg)}/ping`, { cache: "no-store" });
-        sendResponse(await r.json());
+        sendResponse(await fetchJson(`${base(cfg)}/ping`, { cache: "no-store" }));
         return;
       }
       if (msg.type === "sync") {
