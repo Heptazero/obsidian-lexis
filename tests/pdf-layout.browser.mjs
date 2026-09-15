@@ -14,8 +14,9 @@ try {
   // The span rules mirror the PDF.js text layer bundled in Obsidian's app.css.
   const html = `<style>${css}
     .page { position:relative; width:800px; height:150px; transform-origin:0 0; }
-    .textLayer { position:absolute; inset:0; line-height:1; font:16px monospace; }
+    .textLayer { position:absolute; inset:0; line-height:1; font:16px Arial,sans-serif; }
     .textLayer span,.textLayer br { color:transparent; position:absolute; white-space:pre; transform-origin:0% 0%; }
+    .theme-spacing .textLayer { letter-spacing:5px; word-spacing:7px; }
   </style><body><script>${bundle.outputFiles[0].text}</script></body>`;
   const fixture = join(dir, 'index.html');
   await writeFile(fixture, html);

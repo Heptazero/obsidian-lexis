@@ -19,8 +19,11 @@ function selectionTouchesLayer(layer: Pick<Node, "contains">, selection: Pick<Se
   return !!((selection.anchorNode && layer.contains(selection.anchorNode)) || (selection.focusNode && layer.contains(selection.focusNode)));
 }
 
-function pdfHighlightBand(lineHeight: number, style: HighlightStyle): { topOffset: number; height: number } {
-  if (style === "background") return { topOffset: 0, height: lineHeight };
+function pdfHighlightBand(lineHeight: number, style: HighlightStyle, text = ""): { topOffset: number; height: number } {
+  if (style === "background") {
+    const height = lineHeight * (/\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}/u.test(text) ? 0.8 : 0.7);
+    return { topOffset: (lineHeight - height) / 2, height };
+  }
   const height = style === "underline"
     ? Math.max(1.2, Math.min(2, lineHeight * 0.1))
     : Math.max(2, Math.min(3, lineHeight * 0.15));
@@ -366,6 +369,9 @@ function createDocumentHighlights(): PropertyDescriptorMap {
   scanPdfLayer(layer: HTMLElement): void {
     if (!this.settings.enablePdfHighlight || !this.settings.enableHighlight) return;
     this.observePdfLayer(layer);
+    // PDF.js measures text without view-local typography. Themes that add spacing to the
+    // transparent text layer make proportional Latin text drift away from the canvas.
+    layer.classList.add("lexis-pdf-source-layer");
     const matches = this.collectPdfMatches(layer);
     const page = layer.parentElement;
     if (!page) return;
@@ -393,15 +399,16 @@ function createDocumentHighlights(): PropertyDescriptorMap {
       if (!entry.inline) this.passiveEncounter(entry.file);
       try {
         const color = this.colorForEntry(entry);
-        const alpha = Math.max(0.04, Math.min(0.75, this.highlightAlphaForEntry(entry) * 0.65));
         const styleKind = this.styleKindForEntry(entry);
+        const alphaFactor = styleKind === "background" ? 0.45 : 0.65;
+        const alpha = Math.max(0.04, Math.min(0.75, this.highlightAlphaForEntry(entry) * alphaFactor));
         const paint = this.applyAlpha(color, alpha);
         for (const segment of segments) {
           const source = layer.ownerDocument.createRange();
           source.setStart(segment.node, segment.start);
           source.setEnd(segment.node, segment.end);
           for (const rect of Array.from(source.getClientRects()).filter((rect) => rect.width && rect.height)) {
-            const band = pdfHighlightBand(rect.height, styleKind);
+            const band = pdfHighlightBand(rect.height, styleKind, source.toString());
             const anchor = hl.createDiv({ cls: "lexis-pdf-target" });
             anchor.dataset.lexisKey = key;
             anchor.setCssStyles({
@@ -436,6 +443,7 @@ function createDocumentHighlights(): PropertyDescriptorMap {
     this._pdfObservedSizes = null;
     if (document) {
       document.querySelectorAll(".lexis-pdf-hl-layer").forEach((layer) => layer.remove());
+      document.querySelectorAll(".textLayer.lexis-pdf-source-layer").forEach((layer) => layer.classList.remove("lexis-pdf-source-layer"));
       document.querySelectorAll(".textLayer .lexis-hl").forEach((span) => {
         const text = document.createTextNode(span.textContent || "");
         span.parentNode?.replaceChild(text, span);

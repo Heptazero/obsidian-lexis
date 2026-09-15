@@ -2786,8 +2786,11 @@ function selectionTouchesLayer(layer, selection) {
   if (!selection || selection.isCollapsed) return false;
   return !!(selection.anchorNode && layer.contains(selection.anchorNode) || selection.focusNode && layer.contains(selection.focusNode));
 }
-function pdfHighlightBand(lineHeight, style) {
-  if (style === "background") return { topOffset: 0, height: lineHeight };
+function pdfHighlightBand(lineHeight, style, text = "") {
+  if (style === "background") {
+    const height2 = lineHeight * (/\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}/u.test(text) ? 0.8 : 0.7);
+    return { topOffset: (lineHeight - height2) / 2, height: height2 };
+  }
   const height = style === "underline" ? Math.max(1.2, Math.min(2, lineHeight * 0.1)) : Math.max(2, Math.min(3, lineHeight * 0.15));
   return { topOffset: Math.max(0, lineHeight - height + 1), height };
 }
@@ -3111,6 +3114,7 @@ function createDocumentHighlights() {
     scanPdfLayer(layer) {
       if (!this.settings.enablePdfHighlight || !this.settings.enableHighlight) return;
       this.observePdfLayer(layer);
+      layer.classList.add("lexis-pdf-source-layer");
       const matches = this.collectPdfMatches(layer);
       const page = layer.parentElement;
       if (!page) return;
@@ -3135,15 +3139,16 @@ function createDocumentHighlights() {
         if (!entry.inline) this.passiveEncounter(entry.file);
         try {
           const color = this.colorForEntry(entry);
-          const alpha = Math.max(0.04, Math.min(0.75, this.highlightAlphaForEntry(entry) * 0.65));
           const styleKind = this.styleKindForEntry(entry);
+          const alphaFactor = styleKind === "background" ? 0.45 : 0.65;
+          const alpha = Math.max(0.04, Math.min(0.75, this.highlightAlphaForEntry(entry) * alphaFactor));
           const paint = this.applyAlpha(color, alpha);
           for (const segment of segments) {
             const source = layer.ownerDocument.createRange();
             source.setStart(segment.node, segment.start);
             source.setEnd(segment.node, segment.end);
             for (const rect of Array.from(source.getClientRects()).filter((rect2) => rect2.width && rect2.height)) {
-              const band = pdfHighlightBand(rect.height, styleKind);
+              const band = pdfHighlightBand(rect.height, styleKind, source.toString());
               const anchor = hl.createDiv({ cls: "lexis-pdf-target" });
               anchor.dataset.lexisKey = key;
               anchor.setCssStyles({
@@ -3191,6 +3196,7 @@ function createDocumentHighlights() {
       this._pdfObservedSizes = null;
       if (document2) {
         document2.querySelectorAll(".lexis-pdf-hl-layer").forEach((layer) => layer.remove());
+        document2.querySelectorAll(".textLayer.lexis-pdf-source-layer").forEach((layer) => layer.classList.remove("lexis-pdf-source-layer"));
         document2.querySelectorAll(".textLayer .lexis-hl").forEach((span) => {
           const text = document2.createTextNode(span.textContent || "");
           span.parentNode?.replaceChild(text, span);

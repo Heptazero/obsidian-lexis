@@ -36,12 +36,14 @@ test("recognizes an active PDF text selection", async () => {
   assert.equal(selectionTouchesLayer(layer, { isCollapsed: false, anchorNode: outsideNode, focusNode: outsideNode }), false);
 });
 
-test("keeps PDF backgrounds full height and line styles thin", async () => {
+test("uses compact PDF backgrounds and keeps line styles thin", async () => {
   const { pdfHighlightBand } = await loadHighlights();
-  const background = pdfHighlightBand(20, "background");
+  const latinBackground = pdfHighlightBand(20, "background", "alpha");
+  const cjkBackground = pdfHighlightBand(20, "background", "中文");
   const underline = pdfHighlightBand(20, "underline");
   const wavy = pdfHighlightBand(20, "wavy");
-  assert.deepEqual(background, { topOffset: 0, height: 20 });
+  assert.deepEqual(latinBackground, { topOffset: 3, height: 14 });
+  assert.deepEqual(cjkBackground, { topOffset: 2, height: 16 });
   assert.deepEqual(underline, { topOffset: 19, height: 2 });
   assert.deepEqual(wavy, { topOffset: 18, height: 3 });
 });

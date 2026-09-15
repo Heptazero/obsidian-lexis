@@ -1187,6 +1187,10 @@ body.is-phone .workspace-leaf-content[data-type="lexis-review-view"] .lexis-rv-r
 }
 
 /* PDF 高亮独立层:叠在 Canvas 上、textLayer 下,不沾 textLayer 的 opacity */
+.textLayer.lexis-pdf-source-layer > span {
+    letter-spacing: normal;
+    word-spacing: normal;
+}
 .lexis-pdf-hl-layer {
     pointer-events: none;
 }

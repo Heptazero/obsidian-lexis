@@ -46,13 +46,16 @@ function characters(layer: HTMLElement) {
   }
   return result;
 }
-function makePage(scale: number) {
+function makePage(scale: number, className = '') {
   const page = document.createElement('div');
-  page.className = 'page';
+  page.className = `page ${className}`;
   page.style.transform = `scale(${scale})`;
   page.innerHTML = '<div class="textLayer"><span style="left:24px;top:20px;transform:scaleX(1.17)">alpha gap beta gap gamma gap alpha</span><span style="left:24px;top:60px">ener</span><span style="left:62.5px;top:60px">gy</span></div>';
   document.body.appendChild(page);
-  return page.querySelector<HTMLElement>('.textLayer')!;
+  const layer = page.querySelector<HTMLElement>('.textLayer')!;
+  const fragments = layer.querySelectorAll<HTMLElement>(':scope > span');
+  fragments[2].style.left = `${(fragments[1].getBoundingClientRect().right - page.getBoundingClientRect().left) / scale}px`;
+  return layer;
 }
 
 try {
@@ -94,8 +97,9 @@ try {
         maxError = Math.max(maxError, error);
         assert(error < 0.1, `overlay drifted ${error}px at scale ${scale}`);
         const background = anchor.querySelector<HTMLElement>('.lexis-pdf-hl')!.getBoundingClientRect();
-        assert(Math.abs(background.top - expected.top) < 0.1 && Math.abs(background.height - expected.height) < 0.1,
-          `background was compressed or shifted at scale ${scale}`);
+        const expectedBand = { top: expected.top + expected.height * 0.15, height: expected.height * 0.7 };
+        assert(Math.abs(background.top - expectedBand.top) < 0.1 && Math.abs(background.height - expectedBand.height) < 0.1,
+          `background height or centering was wrong at scale ${scale}`);
         const point = { target: layer, clientX: actual.left + actual.width / 2, clientY: actual.top + actual.height / 2 } as unknown as MouseEvent;
         assert(pdfHighlightAt(point) === anchor, 'coordinate lookup did not resolve the matching word');
         assert(getComputedStyle(anchor).pointerEvents === 'none', 'overlay intercepts selection');
@@ -105,6 +109,14 @@ try {
     selection.removeAllRanges();
     layer.parentElement!.remove();
   }
+
+  const themed = makePage(1, 'theme-spacing');
+  const themedSpan = themed.querySelector<HTMLElement>(':scope > span')!;
+  assert(getComputedStyle(themedSpan).letterSpacing !== 'normal', 'fixture must inject view-local letter spacing');
+  host.scanPdfLayer(themed);
+  assert(getComputedStyle(themedSpan).letterSpacing === 'normal', 'Lexis did not isolate PDF.js text metrics from theme spacing');
+  assert(['normal', '0px'].includes(getComputedStyle(themedSpan).wordSpacing), 'Lexis did not isolate PDF.js word metrics from theme spacing');
+  themed.parentElement!.remove();
   document.body.textContent = JSON.stringify({ ok: true, legacyError, results });
 } catch (error) {
   document.body.textContent = JSON.stringify({ ok: false, error: String(error) });
