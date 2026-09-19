@@ -4,6 +4,7 @@ if (typeof importScripts === "function") importScripts("config.js");
 const { defaultConnection, normalizePort } = globalThis.LexisWebConfig;
 const DEFAULT_CFG = { ...defaultConnection, token: "", highlight: true, showMemoryCurve: true, color: "#7c5cff", style: "wavy" };
 const REQUEST_TIMEOUT_MS = 8000;
+let activeDetailController = null;
 
 async function getCfg() {
   const { cfg } = await chrome.storage.local.get("cfg");
@@ -13,21 +14,21 @@ async function getCfg() {
 }
 function base(cfg) { return `http://${cfg.host}:${cfg.port}`; }
 
-async function fetchJson(url, options = {}) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+async function fetchJson(url, options = {}, controller = new AbortController()) {
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, REQUEST_TIMEOUT_MS);
   try {
     const response = await fetch(url, { ...options, signal: controller.signal });
     return await response.json();
   } catch (error) {
-    if (error && error.name === "AbortError") throw new Error("request-timeout");
+    if (error && error.name === "AbortError") throw new Error(timedOut ? "request-timeout" : "request-cancelled");
     throw error;
   } finally {
     clearTimeout(timer);
   }
 }
 
-async function api(cfg, path, { query, method = "GET", body } = {}) {
+async function api(cfg, path, { query, method = "GET", body, controller } = {}) {
   const u = new URL(base(cfg) + path);
   if (query) for (const k in query) u.searchParams.set(k, query[k]);
   const headers = {};
@@ -38,7 +39,7 @@ async function api(cfg, path, { query, method = "GET", body } = {}) {
     headers,
     body: body == null ? undefined : JSON.stringify(body),
     cache: "no-store",
-  });
+  }, controller);
 }
 
 async function flushPending(cfg) {
@@ -66,8 +67,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         const data = await api(cfg, "/words");
         if (data && data.ok) {
           const folderOf = (p) => { if (!p) return ""; const i = p.lastIndexOf("/"); return i > 0 ? p.slice(0, i) : ""; };
-          const words = (data.words || []).map((x) => ({ k: x.key, w: x.word, t: x.tags || [], f: folderOf(x.file), c: x.color, o: x.opacity, v: x.visible !== false, s: x.wstyle }));
-          const meta = { count: words.length, syncedAt: Date.now(), version: data.version };
+          const words = (data.words || []).map((x) => ({ k: x.key, w: x.word, a: !!x.alias, i: !!x.inline, p: x.file || "", t: x.tags || [], f: folderOf(x.file), c: x.color, o: x.opacity, v: x.visible !== false, s: x.wstyle }));
+          const meta = { count: words.length, syncedAt: Date.now(), version: data.version, schema: 2 };
           const styleConfig = data.styleConfig || null;
           await chrome.storage.local.set({ words, meta, styleConfig });
           // 同步成功后重放离线队列
@@ -77,7 +78,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         return;
       }
       if (msg.type === "detail") {
-        sendResponse(await api(cfg, "/word", { query: { key: msg.key } }));
+        activeDetailController?.abort();
+        const controller = new AbortController();
+        activeDetailController = controller;
+        try {
+          sendResponse(await api(cfg, "/word", { query: { key: msg.key }, controller }));
+        } finally {
+          if (activeDetailController === controller) activeDetailController = null;
+        }
         return;
       }
       if (msg.type === "delete") {

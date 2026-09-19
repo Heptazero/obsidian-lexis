@@ -92,7 +92,7 @@ async function autoSyncIfStale(meta) {
   let ping;
   try { ping = await chrome.runtime.sendMessage({ type: "ping" }); } catch (e) { return; }
   if (!ping || !ping.ok) return;
-  if (meta && meta.version === ping.version && meta.count != null) return;
+  if (meta && meta.version === ping.version && meta.count != null && meta.schema === 2) return;
   const r = await chrome.runtime.sendMessage({ type: "sync" }).catch(() => null);
   if (r && r.ok) {
     const data = await chrome.storage.local.get(["meta", "pendingAdds", "styleConfig"]);

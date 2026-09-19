@@ -1136,6 +1136,52 @@ body.is-phone .workspace-leaf-content[data-type="lexis-review-view"] .lexis-rv-r
 .lexis-sel-pill-btn:hover {
     background: color-mix(in srgb, var(--text-on-accent) 18%, transparent);
 }
+.lexis-alias-search {
+    position: fixed;
+    z-index: var(--layer-popover, 50);
+    padding: 6px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m);
+    background: var(--background-primary);
+    color: var(--text-normal);
+    box-shadow: var(--shadow-s);
+}
+.lexis-alias-search-input {
+    box-sizing: border-box;
+    width: 100%;
+    margin: 0 0 5px;
+}
+.lexis-alias-search-results {
+    max-height: 220px;
+    overflow-y: auto;
+}
+.lexis-alias-search-result {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: var(--radius-s);
+    background: transparent;
+    color: var(--text-normal);
+    text-align: left;
+}
+.lexis-alias-search-result:hover,
+.lexis-alias-search-result.is-active {
+    background: var(--background-modifier-hover);
+}
+.lexis-alias-search-result small {
+    overflow: hidden;
+    color: var(--text-muted);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.lexis-alias-search-empty {
+    padding: 8px;
+    color: var(--text-muted);
+}
 
 .lexis-pill-position-preview {
     position: relative;

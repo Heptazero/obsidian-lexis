@@ -9,7 +9,6 @@
 
 import * as obsidian from "obsidian";
 import { Plugin, PluginSettingTab, Setting, Notice, Platform, TFolder, TFile, Component, finishRenderMath } from "obsidian";
-import { LexisAliasPicker } from "./alias-picker";
 import { LEXIS_HOME_VIEW, LEXIS_REVIEW_VIEW } from "./constants";
 import { DEFAULT_SETTINGS } from "./default-settings";
 import { FSRS } from "./fsrs";
@@ -993,9 +992,7 @@ Object.defineProperties(LexisPlugin.prototype, createHighlightEngine({
   todayStr,
 }));
 Object.defineProperties(LexisPlugin.prototype, createDocumentHighlights());
-Object.defineProperties(LexisPlugin.prototype, createReaderInteractions({
-  openAliasPicker: (app, plugin, text, select) => new LexisAliasPicker(app, plugin as LexisPlugin, text, (entry) => { void select(entry); }).open(),
-}));
+Object.defineProperties(LexisPlugin.prototype, createReaderInteractions());
 Object.defineProperties(LexisPlugin.prototype, createReaderUi({
   buildCurveSVG,
   recentReviewDates,

@@ -74,6 +74,44 @@
 .lexis-web-selinput::placeholder { color: rgba(255, 255, 255, .45); }
 .lexis-web-selfolder { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+.lexis-web-alias-results {
+  position: absolute;
+  z-index: 2147483647;
+  box-sizing: border-box;
+  max-height: 220px;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 8px;
+  background: #2a2a30;
+  color: #e6e6e6;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .35);
+}
+.lexis-web-alias-result {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+.lexis-web-alias-result:hover,
+.lexis-web-alias-result.is-active { background: rgba(255, 255, 255, .12); }
+.lexis-web-alias-result small {
+  overflow: hidden;
+  color: #aaa;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lexis-web-alias-empty { padding: 7px 8px; color: #aaa; font-size: 12px; }
+
 .lexis-web-folderlist {
   position: absolute;
   z-index: 2147483647;

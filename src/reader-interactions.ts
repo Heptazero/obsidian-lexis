@@ -2,16 +2,14 @@
 
 import * as obsidian from "obsidian";
 import type { App, Component as ObsidianComponent, Editor, MarkdownView, TFile as ObsidianTFile } from "obsidian";
+import { openAliasCombobox, type AliasComboboxController } from "./alias-combobox";
+import { collectAliasTargets } from "./alias-search";
 import type { LexisEntry, LexisSettings } from "./types";
 import { pdfHighlightAt } from "./pdf-highlight-targets";
 import { positionSelectionPill } from "./selection-pill-position";
 
 type AddWordOptions = { openExisting?: boolean };
 type TranslationVars = Record<string, string | number | boolean>;
-
-interface ReaderInteractionDependencies {
-  openAliasPicker: (app: App, plugin: object, text: string, select: (entry: LexisEntry) => Promise<void>) => void;
-}
 
 function eventElement(target: EventTarget | null): HTMLElement | null {
   if (!target || typeof target !== "object" || !("nodeType" in target)) return null;
@@ -34,7 +32,7 @@ function hasExpandedSelection(element: Element): boolean {
   return !!selection && !selection.isCollapsed && selection.rangeCount > 0;
 }
 
-function createReaderInteractions({ openAliasPicker }: ReaderInteractionDependencies): PropertyDescriptorMap {
+function createReaderInteractions(): PropertyDescriptorMap {
   class ReaderInteractions {
   declare app: App;
   declare settings: LexisSettings;
@@ -46,6 +44,7 @@ function createReaderInteractions({ openAliasPicker }: ReaderInteractionDependen
   declare _popover: HTMLElement | null;
   declare _popoverComp: ObsidianComponent | null;
   declare _selPill: HTMLElement | null;
+  declare _aliasSearch: AliasComboboxController | null;
   declare addWordFromSelection: (text: string, editor: Editor | null, view: MarkdownView | null, folder?: string, options?: AddWordOptions) => Promise<void>;
   declare attachAlias: (aliasText: string, file: ObsidianTFile) => Promise<void>;
   declare dictFolders: () => string[];
@@ -177,7 +176,11 @@ function createReaderInteractions({ openAliasPicker }: ReaderInteractionDependen
     });
   }
   // ---------- 划词添加药丸(普通笔记,阅读/编辑两种模式) ----------
-  removeSelPill() { if (this._selPill) { this._selPill.remove(); this._selPill = null; } }
+  removeSelPill() {
+    this._aliasSearch?.close();
+    this._aliasSearch = null;
+    if (this._selPill) { this._selPill.remove(); this._selPill = null; }
+  }
   maybeShowSelPill(e: MouseEvent, fromEpubIframe = false): void {
     if (!this.settings.selectionPill) return;
     const tgt = eventElement(e.target);
@@ -239,8 +242,16 @@ function createReaderInteractions({ openAliasPicker }: ReaderInteractionDependen
       aliasB.setAttribute("aria-label", this.t("selection.alias"));
       aliasB.addEventListener("click", (ev) => {
         ev.preventDefault(); ev.stopPropagation();
-        this.removeSelPill();
-        openAliasPicker(this.app, this, text, (entry) => this.attachAlias(text, entry.file));
+        this._aliasSearch?.close();
+        this._aliasSearch = openAliasCombobox({
+          document: overlayDoc,
+          anchor: aliasB,
+          targets: collectAliasTargets(this.index),
+          placeholder: this.t("selection.aliasSearch"),
+          emptyText: this.t("selection.aliasNoResults"),
+          onPick: (target) => { this.removeSelPill(); void this.attachAlias(text, target.file); },
+          onClose: () => { this._aliasSearch = null; },
+        });
       });
     }
     const { top, left } = positionSelectionPill(rect,

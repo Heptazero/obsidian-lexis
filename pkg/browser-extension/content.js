@@ -1,6 +1,7 @@
 // Lexis Web —— 内容脚本:在网页上高亮词库里的词,悬停显示释义
 (() => {
   const { isDictionaryVisible, hasExpandedSelection, selectionIntersectsNode } = globalThis.LexisWebConfig;
+  const { collectAliasTargets, rankAliasTargets } = globalThis.LexisAliasSearch;
   const HL = "lexis-web-hl";
   const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "INPUT", "CODE", "PRE", "SELECT", "OPTION", "KBD", "SAMP"]);
   const DEFAULT_CFG = { highlight: true, showMemoryCurve: true, color: "#7c5cff", style: "wavy", useObsidianStyle: true, opacity: 100 };
@@ -829,7 +830,8 @@
     if (hoverTarget === t) return;
     clearTimeout(hoverTimer);
     hoverTarget = t;
-    const delay = Math.max(0, Number(styleCfg && styleCfg.hoverDelayMs) || 0);
+    // 快速掠过高亮时不启动详情渲染；用户真正停住后再请求。
+    const delay = Math.max(120, Number(styleCfg && styleCfg.hoverDelayMs) || 0);
     const open = () => { hoverTimer = null; if (hoverTarget === t && t.isConnected) showPop(t); };
     if (delay) hoverTimer = setTimeout(open, delay); else open();
   });
@@ -842,7 +844,10 @@
 
   // ---- 划词添加:选中文本 → 浮动 pill([＋] [词典] [🔗]) ----
   let selBtn = null;
-  function hideSelBtn() { if (selBtn) { selBtn.remove(); selBtn = null; } document.querySelectorAll(".lexis-web-folderlist").forEach((el) => el.remove()); }
+  function hideSelBtn() {
+    if (selBtn) { selBtn.remove(); selBtn = null; }
+    document.querySelectorAll(".lexis-web-folderlist,.lexis-web-alias-results").forEach((element) => element.remove());
+  }
   function hasWordContent(text) { return /[\p{L}\p{N}]/u.test(text); }
   function isSelectionCandidate(text) {
     if (!text || text.length > 60 || !hasWordContent(text)) return false;
@@ -965,21 +970,73 @@
       const input = document.createElement("input");
       input.type = "text";
       input.className = "lexis-web-selinput";
-      input.value = text;
-      input.placeholder = "原形单词";
+      input.placeholder = "搜索目标词条";
       input.addEventListener("mousedown", (e) => e.stopPropagation());
-      const submit = async () => {
-        const real = input.value.trim();
-        if (!hasWordContent(real)) return;
+      const results = document.createElement("div");
+      results.className = "lexis-web-alias-results";
+      results.setAttribute("role", "listbox");
+      document.body.appendChild(results);
+      const targets = collectAliasTargets(allWords);
+      let matches = [];
+      let activeIndex = 0;
+
+      const placeResults = () => {
+        const rect = input.getBoundingClientRect();
+        const width = Math.min(280, Math.max(220, document.documentElement.clientWidth - 16));
+        results.style.width = width + "px";
+        results.style.left = Math.max(8, Math.min(rect.left + window.scrollX, window.scrollX + document.documentElement.clientWidth - width - 8)) + "px";
+        const below = rect.bottom + window.scrollY + 5;
+        const height = results.offsetHeight || 220;
+        results.style.top = (below + height <= window.scrollY + document.documentElement.clientHeight - 8 ? below : Math.max(8, rect.top + window.scrollY - height - 5)) + "px";
+      };
+      const choose = async (target) => {
         input.disabled = true;
-        await doAdd(real, sentence, text, selFolder);
+        results.remove();
+        await doAdd(target.title, sentence, text, selFolder);
         hideSelBtn();
       };
-      input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } if (e.key === "Escape") hideSelBtn(); });
+      const render = () => {
+        matches = rankAliasTargets(targets, input.value);
+        activeIndex = Math.min(activeIndex, Math.max(0, matches.length - 1));
+        results.replaceChildren();
+        if (!matches.length) {
+          const empty = document.createElement("div");
+          empty.className = "lexis-web-alias-empty";
+          empty.textContent = "没有匹配词条";
+          results.appendChild(empty);
+        } else {
+          matches.forEach((match, index) => {
+            const row = document.createElement("button");
+            row.type = "button";
+            row.className = "lexis-web-alias-result" + (index === activeIndex ? " is-active" : "");
+            row.setAttribute("role", "option");
+            row.setAttribute("aria-selected", index === activeIndex ? "true" : "false");
+            const title = document.createElement("span");
+            title.textContent = match.title;
+            row.appendChild(title);
+            if (String(match.matched).normalize("NFKC").toLowerCase() !== String(match.title).normalize("NFKC").toLowerCase()) {
+              const alias = document.createElement("small");
+              alias.textContent = match.matched;
+              row.appendChild(alias);
+            }
+            row.addEventListener("mousedown", (event) => event.preventDefault());
+            row.addEventListener("click", () => { void choose(match); });
+            results.appendChild(row);
+          });
+        }
+        placeResults();
+      };
+      input.addEventListener("input", () => { activeIndex = 0; render(); });
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "ArrowDown" && matches.length) { e.preventDefault(); activeIndex = (activeIndex + 1) % matches.length; render(); }
+        else if (e.key === "ArrowUp" && matches.length) { e.preventDefault(); activeIndex = (activeIndex - 1 + matches.length) % matches.length; render(); }
+        else if (e.key === "Enter" && matches[activeIndex]) { e.preventDefault(); void choose(matches[activeIndex]); }
+        else if (e.key === "Escape") { e.preventDefault(); hideSelBtn(); }
+      });
       input.addEventListener("blur", () => setTimeout(() => { if (document.body.contains(input)) hideSelBtn(); }, 150));
       aliasBtn.replaceWith(input);
       input.focus();
-      input.select();
+      render();
     });
     pill.appendChild(aliasBtn);
 
@@ -1041,6 +1098,9 @@
     popoverSize = savedPopoverSize && typeof savedPopoverSize === "object" ? savedPopoverSize : null;
     applyTheme();
     build(words || []);
+    if ((words || []).length && !(words || []).some((word) => Object.prototype.hasOwnProperty.call(word, "p"))) {
+      void chrome.runtime.sendMessage({ type: "sync" }).catch(() => null);
+    }
     if (cfg.highlight) { scan(document.body); startObserver(); }
   }
 

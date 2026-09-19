@@ -11,6 +11,8 @@ test("keeps Chrome and Firefox packages on one version", async () => {
   assert.deepEqual(firefoxManifest.optional_host_permissions, ["http://127.0.0.1/*", "http://localhost/*"]);
   assert.equal("host_permissions" in firefoxManifest, false);
   assert.deepEqual(firefoxManifest.background.scripts, ["config.js", "background.js"]);
+  assert.deepEqual(chromeManifest.content_scripts[0].js, ["config.js", "alias-search.js", "content.js"]);
+  assert.deepEqual(firefoxManifest.content_scripts[0].js, chromeManifest.content_scripts[0].js);
 });
 
 test("bounds browser detail requests and delays the loading label", async () => {
@@ -18,6 +20,8 @@ test("bounds browser detail requests and delays the loading label", async () => 
   const content = await readFile(`${extensionRoot}/content.js`, "utf8");
   assert.match(background, /AbortController/);
   assert.match(background, /request-timeout/);
+  assert.match(background, /request-cancelled/);
+  assert.match(content, /Math\.max\(120,/);
   assert.match(content, /}, 180\);/);
   assert.match(content, /加载超时，请重新悬浮/);
   assert.doesNotMatch(content, /lexis-web-pop-body">加载中/);

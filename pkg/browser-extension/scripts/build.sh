@@ -7,7 +7,7 @@ DIST_DIR="$EXT_DIR/dist"
 VERSION=$(sed -n 's/.*"version": "\([^"]*\)".*/\1/p' "$EXT_DIR/manifest.json" | head -n 1)
 
 # 两个目标共享同一份源码,只有 manifest 不同
-SHARED_FILES="config.js background.js content.js content.css popover.css popup.html popup.js"
+SHARED_FILES="config.js alias-search.js background.js content.js content.css popover.css popup.html popup.js"
 
 mkdir -p "$DIST_DIR"
 

@@ -26,7 +26,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["config.js", "content.js"],
+      "js": ["config.js", "alias-search.js", "content.js"],
       "css": ["content.css"],
       "run_at": "document_idle",
       "all_frames": false
