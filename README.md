@@ -53,7 +53,7 @@ Install **Lexis** from *Settings → Community plugins → Browse*. For manual i
 
 ### Browser companion
 
-1. Download [Lexis Web 1.2.2 for Chrome](https://github.com/Heptazero/obsidian-lexis/releases/download/browser-v1.2.2/lexis-web-1.2.2.zip) or [Lexis Web 1.2.2 for Firefox](https://github.com/Heptazero/obsidian-lexis/releases/download/browser-v1.2.2/lexis-web-firefox-1.2.2.zip).
+1. Download [Lexis Web 1.2.3 for Chrome](https://github.com/Heptazero/obsidian-lexis/releases/download/browser-v1.2.3/lexis-web-1.2.3.zip) or [Lexis Web 1.2.3 for Firefox](https://github.com/Heptazero/obsidian-lexis/releases/download/browser-v1.2.3/lexis-web-firefox-1.2.3.zip).
 2. Extract it, open `chrome://extensions`, enable **Developer mode**, and choose **Load unpacked**.
 3. Enable *Local bridge* in Lexis settings, then copy its port and access token into Lexis Web.
 
