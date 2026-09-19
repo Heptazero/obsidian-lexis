@@ -59,6 +59,14 @@ export function collectAliasTargets(index: Map<string, LexisEntry>): AliasTarget
   return [...targets.values()].map(({ termSet: _termSet, ...target }) => target);
 }
 
+export function findExactAliasTarget(targets: AliasTarget[], query: string): AliasTarget | null {
+  const needle = normalized(query);
+  if (!needle) return null;
+  return targets.find((target) => normalized(target.title) === needle)
+    || targets.find((target) => target.terms.some((term) => normalized(term) === needle))
+    || null;
+}
+
 export function rankAliasTargets(targets: AliasTarget[], query: string, limit = 8): AliasMatch[] {
   return targets
     .map((target) => {

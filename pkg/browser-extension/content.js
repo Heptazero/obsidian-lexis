@@ -1,7 +1,7 @@
 // Lexis Web —— 内容脚本:在网页上高亮词库里的词,悬停显示释义
 (() => {
   const { isDictionaryVisible, hasExpandedSelection, selectionIntersectsNode } = globalThis.LexisWebConfig;
-  const { collectAliasTargets, rankAliasTargets } = globalThis.LexisAliasSearch;
+  const { collectAliasTargets, findExactAliasTarget, rankAliasTargets } = globalThis.LexisAliasSearch;
   const HL = "lexis-web-hl";
   const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "INPUT", "CODE", "PRE", "SELECT", "OPTION", "KBD", "SAMP"]);
   const DEFAULT_CFG = { highlight: true, showMemoryCurve: true, color: "#7c5cff", style: "wavy", useObsidianStyle: true, opacity: 100 };
@@ -970,13 +970,16 @@
       const input = document.createElement("input");
       input.type = "text";
       input.className = "lexis-web-selinput";
-      input.placeholder = "搜索目标词条";
+      input.value = text;
+      input.placeholder = "输入原形或搜索已有词条";
       input.addEventListener("mousedown", (e) => e.stopPropagation());
       const results = document.createElement("div");
       results.className = "lexis-web-alias-results";
       results.setAttribute("role", "listbox");
       document.body.appendChild(results);
       const targets = collectAliasTargets(allWords);
+      let primaryValue = input.value.trim();
+      let exactTarget = findExactAliasTarget(targets, primaryValue);
       let matches = [];
       let activeIndex = 0;
 
@@ -995,22 +998,58 @@
         await doAdd(target.title, sentence, text, selFolder);
         hideSelBtn();
       };
+      const chooseAt = async (index) => {
+        const hasPrimary = hasWordContent(primaryValue);
+        if (hasPrimary && index === 0) {
+          if (exactTarget) return choose(exactTarget);
+          input.disabled = true;
+          results.remove();
+          const sameAsSelection = primaryValue.normalize("NFKC").toLowerCase() === text.normalize("NFKC").toLowerCase();
+          await doAdd(primaryValue, sentence, sameAsSelection ? undefined : text, selFolder);
+          hideSelBtn();
+          return;
+        }
+        const target = matches[index - (hasPrimary ? 1 : 0)];
+        if (target) await choose(target);
+      };
       const render = () => {
-        matches = rankAliasTargets(targets, input.value);
-        activeIndex = Math.min(activeIndex, Math.max(0, matches.length - 1));
+        primaryValue = input.value.trim();
+        exactTarget = findExactAliasTarget(targets, primaryValue);
+        const hasPrimary = hasWordContent(primaryValue);
+        matches = rankAliasTargets(targets, primaryValue, 9).filter((target) => target.id !== exactTarget?.id).slice(0, 7);
+        const optionCount = matches.length + (hasPrimary ? 1 : 0);
+        activeIndex = Math.min(activeIndex, Math.max(0, optionCount - 1));
         results.replaceChildren();
-        if (!matches.length) {
+        if (hasPrimary) {
+          const row = document.createElement("button");
+          row.type = "button";
+          row.className = "lexis-web-alias-result is-primary" + (activeIndex === 0 ? " is-active" : "");
+          row.setAttribute("role", "option");
+          row.setAttribute("aria-selected", activeIndex === 0 ? "true" : "false");
+          const title = document.createElement("span");
+          title.textContent = primaryValue;
+          row.appendChild(title);
+          const action = document.createElement("small");
+          action.textContent = exactTarget ? `归入「${exactTarget.title}」` : "新建词条";
+          row.appendChild(action);
+          row.addEventListener("mousedown", (event) => event.preventDefault());
+          row.addEventListener("click", () => { void chooseAt(0); });
+          results.appendChild(row);
+        }
+        if (!hasPrimary && !matches.length) {
           const empty = document.createElement("div");
           empty.className = "lexis-web-alias-empty";
           empty.textContent = "没有匹配词条";
           results.appendChild(empty);
         } else {
+          const offset = hasPrimary ? 1 : 0;
           matches.forEach((match, index) => {
+            const optionIndex = index + offset;
             const row = document.createElement("button");
             row.type = "button";
-            row.className = "lexis-web-alias-result" + (index === activeIndex ? " is-active" : "");
+            row.className = "lexis-web-alias-result" + (optionIndex === activeIndex ? " is-active" : "");
             row.setAttribute("role", "option");
-            row.setAttribute("aria-selected", index === activeIndex ? "true" : "false");
+            row.setAttribute("aria-selected", optionIndex === activeIndex ? "true" : "false");
             const title = document.createElement("span");
             title.textContent = match.title;
             row.appendChild(title);
@@ -1028,15 +1067,17 @@
       };
       input.addEventListener("input", () => { activeIndex = 0; render(); });
       input.addEventListener("keydown", (e) => {
-        if (e.key === "ArrowDown" && matches.length) { e.preventDefault(); activeIndex = (activeIndex + 1) % matches.length; render(); }
-        else if (e.key === "ArrowUp" && matches.length) { e.preventDefault(); activeIndex = (activeIndex - 1 + matches.length) % matches.length; render(); }
-        else if (e.key === "Enter" && matches[activeIndex]) { e.preventDefault(); void choose(matches[activeIndex]); }
+        const optionCount = matches.length + (hasWordContent(primaryValue) ? 1 : 0);
+        if (e.key === "ArrowDown" && optionCount) { e.preventDefault(); activeIndex = (activeIndex + 1) % optionCount; render(); }
+        else if (e.key === "ArrowUp" && optionCount) { e.preventDefault(); activeIndex = (activeIndex - 1 + optionCount) % optionCount; render(); }
+        else if (e.key === "Enter" && optionCount) { e.preventDefault(); void chooseAt(activeIndex); }
         else if (e.key === "Escape") { e.preventDefault(); hideSelBtn(); }
       });
       input.addEventListener("blur", () => setTimeout(() => { if (document.body.contains(input)) hideSelBtn(); }, 150));
       aliasBtn.replaceWith(input);
       input.focus();
       render();
+      input.select();
     });
     pill.appendChild(aliasBtn);
 

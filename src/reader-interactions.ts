@@ -8,7 +8,13 @@ import type { LexisEntry, LexisSettings } from "./types";
 import { pdfHighlightAt } from "./pdf-highlight-targets";
 import { positionSelectionPill } from "./selection-pill-position";
 
-type AddWordOptions = { openExisting?: boolean };
+type AddWordOptions = {
+  openExisting?: boolean;
+  alias?: string;
+  sentence?: string;
+  sourceFile?: ObsidianTFile | null;
+  page?: number;
+};
 type TranslationVars = Record<string, string | number | boolean>;
 
 function eventElement(target: EventTarget | null): HTMLElement | null {
@@ -47,6 +53,7 @@ function createReaderInteractions(): PropertyDescriptorMap {
   declare _aliasSearch: AliasComboboxController | null;
   declare addWordFromSelection: (text: string, editor: Editor | null, view: MarkdownView | null, folder?: string, options?: AddWordOptions) => Promise<void>;
   declare attachAlias: (aliasText: string, file: ObsidianTFile) => Promise<void>;
+  declare extractSentence: (content: string, index: number) => string;
   declare dictFolders: () => string[];
   declare normalizeFolder: (folder: string) => string;
   declare openInlineEntry: (entry: LexisEntry, newTab: boolean) => Promise<void>;
@@ -205,6 +212,13 @@ function createReaderInteractions(): PropertyDescriptorMap {
     }
     this.removeSelPill();
     const known = this.index.has(this.resolveIndexKey(text));
+    const selectedSourceFile = this.app.workspace.getActiveFile();
+    const selectedSentence = (() => {
+      const selectedNode = sel?.anchorNode;
+      if (!selectedNode) return "";
+      return this.extractSentence(selectedNode.textContent || "", sel?.anchorOffset || 0);
+    })();
+    const selectedPage = Number(host.closest("[data-page-number]")?.getAttribute("data-page-number")) || 0;
     const pill = overlayDoc.body.createDiv({ cls: "lexis-sel-pill" });
     // 阻止 mousedown 收起选区/夺焦(事件冒泡到 pill 即可覆盖子按钮)
     pill.addEventListener("mousedown", (ev) => ev.preventDefault());
@@ -247,8 +261,20 @@ function createReaderInteractions(): PropertyDescriptorMap {
           document: overlayDoc,
           anchor: aliasB,
           targets: collectAliasTargets(this.index),
+          initialValue: text,
           placeholder: this.t("selection.aliasSearch"),
+          createLabel: this.t("selection.aliasCreate"),
+          existingLabel: (target) => this.t("selection.aliasExisting", { word: target.title }),
           emptyText: this.t("selection.aliasNoResults"),
+          onCreate: (targetText) => {
+            this.removeSelPill();
+            void this.addWordFromSelection(targetText, null, null, selectedFolder, {
+              alias: text,
+              sentence: selectedSentence,
+              sourceFile: selectedSourceFile,
+              page: selectedPage,
+            });
+          },
           onPick: (target) => { this.removeSelPill(); void this.attachAlias(text, target.file); },
           onClose: () => { this._aliasSearch = null; },
         });

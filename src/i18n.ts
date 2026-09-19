@@ -193,7 +193,9 @@ const MESSAGES: Record<string, TranslationPair> = {
   "selection.add": { zh: "加入词库", en: "Add to dictionary" },
   "selection.chooseDictionary": { zh: "选择词典", en: "Choose dictionary" },
   "selection.alias": { zh: "设为别名", en: "Add as alias" },
-  "selection.aliasSearch": { zh: "搜索目标词条", en: "Search target entry" },
+  "selection.aliasSearch": { zh: "输入原形或搜索已有词条", en: "Enter a headword or search entries" },
+  "selection.aliasCreate": { zh: "新建词条", en: "Create entry" },
+  "selection.aliasExisting": { zh: "归入「{word}」", en: "Use “{word}”" },
   "selection.aliasNoResults": { zh: "没有匹配词条", en: "No matching entry" },
 
   "restore.title": { zh: "恢复「{word}」", en: "Restore “{word}”" },

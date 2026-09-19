@@ -65,7 +65,13 @@ type Relation = { path: string; basename: string };
 type RelationBag = Record<string, Relation[]>;
 type Encounter = { hoverCount: number; encounterCount: number; lastEncounter: string };
 type BridgeRuntime = { running: boolean; generateToken(): string; start(): void; stop(): void; restart(): void };
-type AddSelectionOptions = { openExisting?: boolean };
+type AddSelectionOptions = {
+  openExisting?: boolean;
+  alias?: string;
+  sentence?: string;
+  sourceFile?: TFile | null;
+  page?: number;
+};
 type HighlightPage = { leaf: obsidian.WorkspaceLeaf; container: HTMLElement; key: string };
 type MenuItemWithSubmenu = obsidian.MenuItem & { setSubmenu(): obsidian.Menu };
 
@@ -149,6 +155,8 @@ class LexisPlugin extends Plugin {
   declare bridgeAnnotate: (payload: Record<string, unknown>) => Promise<unknown>;
   declare bridgeMoveWord: (payload: Record<string, unknown>) => Promise<unknown>;
   declare bridgeEncounter: (payload: Record<string, unknown>) => Promise<unknown>;
+  declare addAliasToFile: (file: TFile, alias: string) => Promise<void>;
+  declare attachAlias: (aliasText: string, file: TFile) => Promise<void>;
   declare readSyntaxCardState: (id: string) => ReviewCardState;
   declare snapshotReviewItem: (item: ReviewItem) => ReviewStateSnapshot;
   declare applyReviewItemSchedule: (item: ReviewItem, schedule: Schedule) => Promise<void>;
@@ -918,8 +926,10 @@ class LexisPlugin extends Plugin {
     if (!word) { new Notice(this.t("notice.selectWord")); return; }
     void this.addWordFromSelection(word, editor, view);
   }
-  async addWordFromSelection(word: string, editor: obsidian.Editor | null = null, view: obsidian.MarkdownFileInfo | obsidian.MarkdownView | null = null, targetFolder = "", { openExisting = false }: AddSelectionOptions = {}): Promise<void> {
+  async addWordFromSelection(word: string, editor: obsidian.Editor | null = null, view: obsidian.MarkdownFileInfo | obsidian.MarkdownView | null = null, targetFolder = "", options: AddSelectionOptions = {}): Promise<void> {
     const clean = (word || "").trim();
+    const aliasText = (options.alias || "").trim();
+    const alias = aliasText && aliasText.normalize("NFKC").toLowerCase() !== clean.normalize("NFKC").toLowerCase() ? aliasText : "";
     const fileName = this.sanitizeName(clean);
     if (!fileName) { new Notice(this.t("notice.invalidWord")); return; }
     const reqFolder = this.normalizeFolder(targetFolder || "");
@@ -932,13 +942,17 @@ class LexisPlugin extends Plugin {
       const hit = this.index.get(this.resolveIndexKey(clean));
       if (hit && hit.file instanceof TFile) existing = hit.file;
     }
-    const srcFile = (view && view.file) || this.app.workspace.getActiveFile();
-    const sentence = editor ? this.getSelectionSentence(editor) : this.getReadingSentence();
+    const srcFile = options.sourceFile !== undefined ? options.sourceFile : (view && view.file) || this.app.workspace.getActiveFile();
+    const sentence = options.sentence !== undefined ? options.sentence : editor ? this.getSelectionSentence(editor) : this.getReadingSentence();
     // 从 PDF 划词加词时,新词笔记开到新标签页,免得把正在读的 PDF 顶掉
     const fromPdf = srcFile && srcFile.extension === "pdf" && !editor;
     if (existing) {
-      new Notice(this.t(openExisting ? "notice.exists" : "notice.existsNoOpen", { word: existing.basename }));
-      if (openExisting) void this.app.workspace.getLeaf(fromPdf ? "tab" : false).openFile(existing);
+      if (alias) {
+        await this.attachAlias(alias, existing);
+        return;
+      }
+      new Notice(this.t(options.openExisting ? "notice.exists" : "notice.existsNoOpen", { word: existing.basename }));
+      if (options.openExisting) void this.app.workspace.getLeaf(fromPdf ? "tab" : false).openFile(existing);
       return;
     }
     try {
@@ -952,7 +966,7 @@ class LexisPlugin extends Plugin {
         // PDF 出处带上页码,链接可直接跳到那一页
         let sub = "", disp = srcFile ? srcFile.basename : "";
         if (fromPdf) {
-          const pg = this.currentPdfPage();
+          const pg = options.page || this.currentPdfPage();
           if (pg) { sub = `#page=${pg}`; disp = `${srcFile.basename} p.${pg}`; }
         }
         const sourceTarget = this.sourceLinkTarget(srcFile);
@@ -961,10 +975,14 @@ class LexisPlugin extends Plugin {
         return next;
       };
       const file = await this.createEntryFile(targetPath, folder, content, addOccurrence);
+      if (alias) await this.addAliasToFile(file, alias);
       this.recordEncounter(file, "add");
       // 划词添加只写入并留在原文；"添加"不再暗含一次页面跳转。
-      new Notice(this.t(fromPdf ? "notice.addedPdf" : "notice.created", { word: fileName }));
       await this.rebuildIndex(false);
+      if (alias && !this.index.has(this.resolveIndexKey(alias))) this.index.set(this.resolveIndexKey(alias), { display: alias, file, isAlias: true, tags: this.getTags(file) });
+      new Notice(alias
+        ? this.t("notice.aliasAdded", { alias, word: file.basename })
+        : this.t(fromPdf ? "notice.addedPdf" : "notice.created", { word: fileName }));
     } catch (err) { new Notice(this.t("notice.createFailed", { error: errorMessage(err) })); }
   }
 };

@@ -609,7 +609,9 @@ var MESSAGES = {
   "selection.add": { zh: "\u52A0\u5165\u8BCD\u5E93", en: "Add to dictionary" },
   "selection.chooseDictionary": { zh: "\u9009\u62E9\u8BCD\u5178", en: "Choose dictionary" },
   "selection.alias": { zh: "\u8BBE\u4E3A\u522B\u540D", en: "Add as alias" },
-  "selection.aliasSearch": { zh: "\u641C\u7D22\u76EE\u6807\u8BCD\u6761", en: "Search target entry" },
+  "selection.aliasSearch": { zh: "\u8F93\u5165\u539F\u5F62\u6216\u641C\u7D22\u5DF2\u6709\u8BCD\u6761", en: "Enter a headword or search entries" },
+  "selection.aliasCreate": { zh: "\u65B0\u5EFA\u8BCD\u6761", en: "Create entry" },
+  "selection.aliasExisting": { zh: "\u5F52\u5165\u300C{word}\u300D", en: "Use \u201C{word}\u201D" },
   "selection.aliasNoResults": { zh: "\u6CA1\u6709\u5339\u914D\u8BCD\u6761", en: "No matching entry" },
   "restore.title": { zh: "\u6062\u590D\u300C{word}\u300D", en: "Restore \u201C{word}\u201D" },
   "restore.question": { zh: "\u4FDD\u7559\u539F\u6709\u590D\u4E60\u8FDB\u5EA6\uFF0C\u8FD8\u662F\u91CD\u7F6E\u4E3A\u65B0\u8BCD\uFF1F", en: "Keep its review history or reset it as new?" },
@@ -3358,6 +3360,11 @@ function collectAliasTargets(index) {
   }
   return [...targets2.values()].map(({ termSet: _termSet, ...target }) => target);
 }
+function findExactAliasTarget(targets2, query) {
+  const needle = normalized(query);
+  if (!needle) return null;
+  return targets2.find((target) => normalized(target.title) === needle) || targets2.find((target) => target.terms.some((term) => normalized(term) === needle)) || null;
+}
 function rankAliasTargets(targets2, query, limit = 8) {
   return targets2.map((target) => {
     let score = Number.POSITIVE_INFINITY;
@@ -3379,13 +3386,16 @@ function openAliasCombobox(options) {
   const panel = doc.body.createDiv({ cls: "lexis-alias-search" });
   panel.setAttribute("role", "combobox");
   const input = panel.createEl("input", { cls: "lexis-alias-search-input" });
+  input.value = options.initialValue;
   input.placeholder = options.placeholder;
   input.setAttribute("aria-autocomplete", "list");
   const list = panel.createDiv({ cls: "lexis-alias-search-results" });
   list.setAttribute("role", "listbox");
   let closed = false;
   let activeIndex = 0;
-  let matches = rankAliasTargets(targets2, "");
+  let primaryValue = input.value.trim();
+  let exactTarget = findExactAliasTarget(targets2, primaryValue);
+  let matches = rankAliasTargets(targets2, primaryValue, 9).filter((target) => target.id !== exactTarget?.id).slice(0, 7);
   const place = () => {
     const win = doc.defaultView || window;
     const rect = anchor.getBoundingClientRect();
@@ -3400,19 +3410,45 @@ function openAliasCombobox(options) {
     controller.close();
     options.onPick(target);
   };
+  const chooseAt = (index) => {
+    const hasPrimary = !!primaryValue;
+    if (hasPrimary && index === 0) {
+      controller.close();
+      if (exactTarget) options.onPick(exactTarget);
+      else options.onCreate(primaryValue);
+      return;
+    }
+    const target = matches[index - (hasPrimary ? 1 : 0)];
+    if (target) choose(target);
+  };
   const render = () => {
-    matches = rankAliasTargets(targets2, input.value);
-    activeIndex = Math.min(activeIndex, Math.max(0, matches.length - 1));
+    primaryValue = input.value.trim();
+    exactTarget = findExactAliasTarget(targets2, primaryValue);
+    matches = rankAliasTargets(targets2, primaryValue, 9).filter((target) => target.id !== exactTarget?.id).slice(0, 7);
+    const optionCount = matches.length + (primaryValue ? 1 : 0);
+    activeIndex = Math.min(activeIndex, Math.max(0, optionCount - 1));
     list.replaceChildren();
-    if (!matches.length) {
+    if (primaryValue) {
+      const primary = list.createEl("button", { cls: "lexis-alias-search-result is-primary", attr: { type: "button" } });
+      primary.classList.toggle("is-active", activeIndex === 0);
+      primary.setAttribute("role", "option");
+      primary.setAttribute("aria-selected", activeIndex === 0 ? "true" : "false");
+      primary.createSpan({ text: primaryValue });
+      primary.createEl("small", { text: exactTarget ? options.existingLabel(exactTarget) : options.createLabel });
+      primary.addEventListener("pointerdown", (event) => event.preventDefault());
+      primary.addEventListener("click", () => chooseAt(0));
+    }
+    if (!primaryValue && !matches.length) {
       const empty = list.createDiv({ cls: "lexis-alias-search-empty" });
       empty.textContent = options.emptyText;
     } else {
+      const offset = primaryValue ? 1 : 0;
       matches.forEach((match, index) => {
+        const optionIndex = index + offset;
         const row = list.createEl("button", { cls: "lexis-alias-search-result", attr: { type: "button" } });
-        row.classList.toggle("is-active", index === activeIndex);
+        row.classList.toggle("is-active", optionIndex === activeIndex);
         row.setAttribute("role", "option");
-        row.setAttribute("aria-selected", index === activeIndex ? "true" : "false");
+        row.setAttribute("aria-selected", optionIndex === activeIndex ? "true" : "false");
         const title = row.createSpan();
         title.textContent = match.title;
         if (normalizedLabel(match.matched) !== normalizedLabel(match.title)) {
@@ -3443,17 +3479,18 @@ function openAliasCombobox(options) {
     render();
   });
   input.addEventListener("keydown", (event) => {
-    if (event.key === "ArrowDown" && matches.length) {
+    const optionCount = matches.length + (primaryValue ? 1 : 0);
+    if (event.key === "ArrowDown" && optionCount) {
       event.preventDefault();
-      activeIndex = (activeIndex + 1) % matches.length;
+      activeIndex = (activeIndex + 1) % optionCount;
       render();
-    } else if (event.key === "ArrowUp" && matches.length) {
+    } else if (event.key === "ArrowUp" && optionCount) {
       event.preventDefault();
-      activeIndex = (activeIndex - 1 + matches.length) % matches.length;
+      activeIndex = (activeIndex - 1 + optionCount) % optionCount;
       render();
-    } else if (event.key === "Enter" && matches[activeIndex]) {
+    } else if (event.key === "Enter" && optionCount) {
       event.preventDefault();
-      choose(matches[activeIndex]);
+      chooseAt(activeIndex);
     } else if (event.key === "Escape") {
       event.preventDefault();
       controller.close();
@@ -3462,6 +3499,7 @@ function openAliasCombobox(options) {
   doc.addEventListener("pointerdown", onOutside, true);
   render();
   input.focus();
+  input.select();
   return controller;
 }
 function normalizedLabel(value) {
@@ -3679,6 +3717,13 @@ function createReaderInteractions() {
       }
       this.removeSelPill();
       const known = this.index.has(this.resolveIndexKey(text));
+      const selectedSourceFile = this.app.workspace.getActiveFile();
+      const selectedSentence = (() => {
+        const selectedNode = sel?.anchorNode;
+        if (!selectedNode) return "";
+        return this.extractSentence(selectedNode.textContent || "", sel?.anchorOffset || 0);
+      })();
+      const selectedPage = Number(host.closest("[data-page-number]")?.getAttribute("data-page-number")) || 0;
       const pill = overlayDoc.body.createDiv({ cls: "lexis-sel-pill" });
       pill.addEventListener("mousedown", (ev) => ev.preventDefault());
       if (known) {
@@ -3726,8 +3771,20 @@ function createReaderInteractions() {
             document: overlayDoc,
             anchor: aliasB,
             targets: collectAliasTargets(this.index),
+            initialValue: text,
             placeholder: this.t("selection.aliasSearch"),
+            createLabel: this.t("selection.aliasCreate"),
+            existingLabel: (target) => this.t("selection.aliasExisting", { word: target.title }),
             emptyText: this.t("selection.aliasNoResults"),
+            onCreate: (targetText) => {
+              this.removeSelPill();
+              void this.addWordFromSelection(targetText, null, null, selectedFolder, {
+                alias: text,
+                sentence: selectedSentence,
+                sourceFile: selectedSourceFile,
+                page: selectedPage
+              });
+            },
             onPick: (target) => {
               this.removeSelPill();
               void this.attachAlias(text, target.file);
@@ -7311,8 +7368,10 @@ var LexisPlugin = class extends import_obsidian7.Plugin {
     }
     void this.addWordFromSelection(word, editor, view);
   }
-  async addWordFromSelection(word, editor = null, view = null, targetFolder = "", { openExisting = false } = {}) {
+  async addWordFromSelection(word, editor = null, view = null, targetFolder = "", options = {}) {
     const clean = (word || "").trim();
+    const aliasText = (options.alias || "").trim();
+    const alias = aliasText && aliasText.normalize("NFKC").toLowerCase() !== clean.normalize("NFKC").toLowerCase() ? aliasText : "";
     const fileName = this.sanitizeName(clean);
     if (!fileName) {
       new import_obsidian7.Notice(this.t("notice.invalidWord"));
@@ -7327,12 +7386,16 @@ var LexisPlugin = class extends import_obsidian7.Plugin {
       const hit = this.index.get(this.resolveIndexKey(clean));
       if (hit && hit.file instanceof import_obsidian7.TFile) existing = hit.file;
     }
-    const srcFile = view && view.file || this.app.workspace.getActiveFile();
-    const sentence = editor ? this.getSelectionSentence(editor) : this.getReadingSentence();
+    const srcFile = options.sourceFile !== void 0 ? options.sourceFile : view && view.file || this.app.workspace.getActiveFile();
+    const sentence = options.sentence !== void 0 ? options.sentence : editor ? this.getSelectionSentence(editor) : this.getReadingSentence();
     const fromPdf = srcFile && srcFile.extension === "pdf" && !editor;
     if (existing) {
-      new import_obsidian7.Notice(this.t(openExisting ? "notice.exists" : "notice.existsNoOpen", { word: existing.basename }));
-      if (openExisting) void this.app.workspace.getLeaf(fromPdf ? "tab" : false).openFile(existing);
+      if (alias) {
+        await this.attachAlias(alias, existing);
+        return;
+      }
+      new import_obsidian7.Notice(this.t(options.openExisting ? "notice.exists" : "notice.existsNoOpen", { word: existing.basename }));
+      if (options.openExisting) void this.app.workspace.getLeaf(fromPdf ? "tab" : false).openFile(existing);
       return;
     }
     try {
@@ -7344,7 +7407,7 @@ var LexisPlugin = class extends import_obsidian7.Plugin {
         if (!(sentence || srcFile)) return next;
         let sub = "", disp = srcFile ? srcFile.basename : "";
         if (fromPdf) {
-          const pg = this.currentPdfPage();
+          const pg = options.page || this.currentPdfPage();
           if (pg) {
             sub = `#page=${pg}`;
             disp = `${srcFile.basename} p.${pg}`;
@@ -7356,9 +7419,11 @@ var LexisPlugin = class extends import_obsidian7.Plugin {
         return next;
       };
       const file = await this.createEntryFile(targetPath, folder, content, addOccurrence);
+      if (alias) await this.addAliasToFile(file, alias);
       this.recordEncounter(file, "add");
-      new import_obsidian7.Notice(this.t(fromPdf ? "notice.addedPdf" : "notice.created", { word: fileName }));
       await this.rebuildIndex(false);
+      if (alias && !this.index.has(this.resolveIndexKey(alias))) this.index.set(this.resolveIndexKey(alias), { display: alias, file, isAlias: true, tags: this.getTags(file) });
+      new import_obsidian7.Notice(alias ? this.t("notice.aliasAdded", { alias, word: file.basename }) : this.t(fromPdf ? "notice.addedPdf" : "notice.created", { word: fileName }));
     } catch (err) {
       new import_obsidian7.Notice(this.t("notice.createFailed", { error: errorMessage4(err) }));
     }

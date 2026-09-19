@@ -50,4 +50,19 @@ test("Obsidian and browser rank one target per file with aliases as search terms
   );
   assert.equal(obsidian.rankAliasTargets(obsidianTargets, "联想")[0].matched, "联想记忆");
   assert.equal(browser.rankAliasTargets(browserTargets, "联想")[0].matched, "联想记忆");
+  assert.equal(obsidian.findExactAliasTarget(obsidianTargets, "联想记忆")?.title, "Hopfield network");
+  assert.equal(browser.findExactAliasTarget(browserTargets, "联想记忆")?.title, "Hopfield network");
+  assert.equal(obsidian.findExactAliasTarget(obsidianTargets, "new entry"), null);
+  assert.equal(browser.findExactAliasTarget(browserTargets, "new entry"), null);
+});
+
+test("exact title wins over the same text used as another entry alias", async () => {
+  const obsidian = await loadObsidianSearch();
+  const browser = await loadBrowserSearch();
+  const targets = [
+    { id: "alias", title: "Long form", terms: ["Long form", "Network"] },
+    { id: "title", title: "Network", terms: ["Network"] },
+  ];
+  assert.equal(obsidian.findExactAliasTarget(targets, "network")?.id, "title");
+  assert.equal(browser.findExactAliasTarget(targets, "network")?.id, "title");
 });

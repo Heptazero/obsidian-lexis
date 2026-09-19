@@ -47,6 +47,14 @@
     return [...targets.values()].map(({ termSet: _termSet, ...target }) => target);
   }
 
+  function findExactAliasTarget(targets, query) {
+    const needle = normalized(query);
+    if (!needle) return null;
+    return (targets || []).find((target) => normalized(target.title) === needle)
+      || (targets || []).find((target) => (target.terms || []).some((term) => normalized(term) === needle))
+      || null;
+  }
+
   function rankAliasTargets(targets, query, limit = 8) {
     return (targets || [])
       .map((target) => {
@@ -62,5 +70,5 @@
       .slice(0, limit);
   }
 
-  globalThis.LexisAliasSearch = Object.freeze({ collectAliasTargets, fuzzyScore, rankAliasTargets });
+  globalThis.LexisAliasSearch = Object.freeze({ collectAliasTargets, findExactAliasTarget, fuzzyScore, rankAliasTargets });
 })();
