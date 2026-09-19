@@ -114,6 +114,8 @@ Lexis does not promise faster reading or learning without effort.
 - The browser and Zotero companions do not become separate databases.
 - Scanned PDFs without a text layer cannot be highlighted.
 
+See the full [Lexis Privacy Policy](./PRIVACY.md).
+
 ## Development
 
 The repository contains all three clients:
