@@ -45,6 +45,27 @@ test("supports a custom separator on its own line", async () => {
   assert.equal(cards[0].back, "- A\n- B");
 });
 
+test("masks configured answers while preserving the note around them", async () => {
+  const { maskSyntaxAnswers } = await loadTypeScript("src/flashcard-syntax.ts");
+  const markdown = [
+    "术语::解释",
+    "问题一??",
+    "- 答案一",
+    "- 答案二",
+    "",
+    "光合作用发生在 ==叶绿体==。",
+    "",
+    "```js",
+    "fake::card",
+    "```",
+  ].join("\n");
+  const masked = maskSyntaxAnswers(markdown, templates);
+  assert.match(masked, /术语::<span class="lexis-rv-answer-mask">解释<\/span>/);
+  assert.match(masked, /- <span class="lexis-rv-answer-mask">答案一<\/span>/);
+  assert.match(masked, /==<span class="lexis-rv-answer-mask">叶绿体<\/span>==/);
+  assert.match(masked, /```js\nfake::card\n```/);
+});
+
 test("groups multiple clozes so reveal mode can be chosen on the card", async () => {
   const { createReviewQueue } = await loadTypeScript("src/review-queue.ts");
   const { chooseClozeRevealMode } = await loadTypeScript("src/review-item.ts");
@@ -145,6 +166,31 @@ test("reviews notes or syntax cards directly linked by one selected file", async
   host.settings.suspendedReviewItems = { [`note:${linkedA.path}`]: true };
   const unsuspended = await host.buildQueue({ scope: "links", linkSource: hub.path, content: "notes" });
   assert.deepEqual(unsuspended.map((item) => item.file.path), [linkedB.path]);
+});
+
+test("limits dictionary review to the selected configured folder", async () => {
+  const { createReviewQueue } = await loadTypeScript("src/review-queue.ts");
+  const files = [
+    { path: "10_atom/a.md", extension: "md", stat: { ctime: 1, mtime: 1 } },
+    { path: "20_people/b.md", extension: "md", stat: { ctime: 1, mtime: 1 } },
+  ];
+  const host = {
+    app: { vault: { getMarkdownFiles: () => files, cachedRead: async () => "" } },
+    settings: { syntaxCardStates: {}, suspendedReviewItems: {}, reviewHistory: {}, newPerDay: 20, maxReviewsPerSession: 200 },
+    inVocabFolder: () => true,
+    readLifecycle: () => ({ archived: false, retired: false }),
+    normalizeFolder: (value) => value,
+    inScope: (path, folders) => folders.some((folder) => path === folder || path.startsWith(`${folder}/`)),
+    getTags: () => new Set(),
+    readCard: () => ({}),
+    readSyntaxCardState: () => ({}),
+    freqVal: () => 1,
+    saveSettings: async () => {},
+  };
+  Object.defineProperties(host, createReviewQueue({ todayStr: () => "2026-09-20" }));
+  const queue = await host.buildQueue({ scope: "vocab", folder: "20_people", content: "context" });
+  assert.deepEqual(queue.map((item) => item.file.path), ["20_people/b.md"]);
+  assert.ok(queue.every((item) => item.type === "note"));
 });
 
 test("does not rebuild a card already reviewed today unless it was graded again", async () => {

@@ -1,5 +1,6 @@
 import { ItemView, Setting, TFile, type WorkspaceLeaf } from "obsidian";
 import { LEXIS_HOME_VIEW } from "./constants";
+import { FolderSuggest } from "./folder-suggest";
 import type { TranslationVars } from "./i18n";
 import { MarkdownFileSuggest } from "./markdown-file-suggest";
 import type { LexisSettings, ReviewContentMode, ReviewOptions, ReviewScopeMode, ReviewSortDirection, ReviewSortKey } from "./types";
@@ -35,6 +36,7 @@ interface HomeViewHost {
 export class LexisHomeView extends ItemView {
   private retireRenderTimer: number | undefined;
   private fileSuggest: MarkdownFileSuggest | null = null;
+  private folderSuggest: FolderSuggest | null = null;
   sourceFilePath = "";
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: HomeViewHost) {
@@ -59,12 +61,14 @@ export class LexisHomeView extends ItemView {
     this.plugin.renderHeatmap(container.createDiv({ cls: "lexis-hm-wrap" }));
 
     const folders = this.plugin.collectReviewFolders();
+    const dictionaries = this.plugin.dictFolders();
     const tags = this.plugin.collectReviewTags();
     const markdownFiles = this.app.vault.getMarkdownFiles().sort((left, right) => left.path.localeCompare(right.path));
     const activeFile = this.app.workspace.getActiveFile();
     const rememberedFile = this.sourceFilePath ? this.app.vault.getAbstractFileByPath(this.sourceFilePath) : null;
     const currentFile = activeFile || (rememberedFile instanceof TFile ? rememberedFile : null);
     let selectedScope: ReviewScopeMode = "vocab";
+    let selectedDictionary = "";
     let selectedFolder = "";
     let selectedLinkSource = this.app.vault.getFileByPath(this.plugin.settings.lastReviewLinkSource || this.plugin.settings.lastReviewHub || "")?.path || "";
     let selectedTag = "";
@@ -89,6 +93,8 @@ export class LexisHomeView extends ItemView {
     renderControls = () => {
       this.fileSuggest?.close();
       this.fileSuggest = null;
+      this.folderSuggest?.close();
+      this.folderSuggest = null;
       controls.empty();
       let updateStartState = () => {};
       new Setting(controls).setName(this.plugin.t("home.reviewScope")).addDropdown((dropdown) => dropdown
@@ -102,11 +108,21 @@ export class LexisHomeView extends ItemView {
           if (["vocab", "folder", "links", "tag", "current"].includes(value)) selectedScope = value as ReviewScopeMode;
           rerenderControls();
         }));
+      if (selectedScope === "vocab") {
+        new Setting(controls).setName(this.plugin.t("home.reviewDictionary")).addDropdown((dropdown) => {
+          dropdown.addOption("", this.plugin.t("home.scopeAllDictionaries"));
+          for (const dictionary of dictionaries) dropdown.addOption(dictionary, dictionary);
+          dropdown.setValue(selectedDictionary).onChange((value) => { selectedDictionary = value; });
+        });
+      }
       if (selectedScope === "folder") {
-        new Setting(controls).setName(this.plugin.t("home.reviewFolder")).addDropdown((dropdown) => {
-          dropdown.addOption("", this.plugin.t("home.scopeAllFiles"));
-          for (const folder of folders) dropdown.addOption(folder, folder);
-          dropdown.setValue(selectedFolder).onChange((value) => { selectedFolder = value; });
+        new Setting(controls).setName(this.plugin.t("home.reviewFolder")).addSearch((search) => {
+          const applyFolder = (value: string) => { selectedFolder = value.trim().replace(/^\/+|\/+$/g, ""); };
+          search.setPlaceholder(this.plugin.t("home.chooseFolder")).setValue(selectedFolder).onChange(applyFolder);
+          this.folderSuggest = new FolderSuggest(this.app, search.inputEl, () => folders, (folder) => {
+            search.setValue(folder);
+            applyFolder(folder);
+          });
         });
       }
       if (selectedScope === "links") {
@@ -140,6 +156,7 @@ export class LexisHomeView extends ItemView {
       const contentSetting = new Setting(controls).setName(this.plugin.t("home.reviewContent"));
       addSegments(contentSetting, [
         ["notes", this.plugin.t("home.contentNotes")],
+        ["context", this.plugin.t("home.contentContext")],
         ["syntax", this.plugin.t("home.contentSyntax")],
         ["both", this.plugin.t("home.contentBoth")],
       ], selectedContent, (value) => { selectedContent = value; rerenderControls(); });
@@ -165,6 +182,7 @@ export class LexisHomeView extends ItemView {
         ], selectedDirection, (value) => { selectedDirection = value; rerenderControls(); });
       }
       const startSetting = new Setting(controls);
+      startSetting.settingEl.addClass("lexis-review-start");
       startSetting.addButton((button) => {
         updateStartState = () => {
           button.setDisabled(
@@ -178,7 +196,7 @@ export class LexisHomeView extends ItemView {
           .setCta()
           .onClick(() => this.plugin.openReview({
             scope: selectedScope,
-            folder: selectedFolder,
+            folder: selectedScope === "vocab" ? selectedDictionary : selectedFolder,
             linkSource: selectedLinkSource,
             tag: selectedTag,
             file: currentFile?.path,

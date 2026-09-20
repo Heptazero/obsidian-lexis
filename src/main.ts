@@ -74,6 +74,7 @@ type AddSelectionOptions = {
 };
 type HighlightPage = { leaf: obsidian.WorkspaceLeaf; container: HTMLElement; key: string };
 type MenuItemWithSubmenu = obsidian.MenuItem & { setSubmenu(): obsidian.Menu };
+type HomeOpenLocation = "center" | "sidebar";
 
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : typeof error === "string" ? error : "Unknown error";
 
@@ -226,7 +227,8 @@ class LexisPlugin extends Plugin {
     this.addCommand({ id: "rebuild-index", name: this.t("command.rebuild"), callback: () => this.rebuildIndex(true) });
     this.addCommand({ id: "open-review", name: this.t("command.review"), callback: () => this.openHome() });
     this.addCommand({ id: "add-selected-word", name: this.t("command.addSelection"), callback: () => this.addSelectedWordCommand() });
-    this.addCommand({ id: "open-home", name: this.t("command.home"), callback: () => this.openHome() });
+    this.addCommand({ id: "open-home", name: this.t("command.home"), callback: () => this.openHome("center") });
+    this.addCommand({ id: "open-home-sidebar", name: this.t("command.homeSidebar"), callback: () => this.openHome("sidebar") });
     this.addCommand({
       id: "toggle-current-page-highlights",
       name: this.t("command.toggleHighlights"),
@@ -872,11 +874,17 @@ class LexisPlugin extends Plugin {
     this._reviewSessions.delete(leaf);
     return state;
   }
-  async openHome(): Promise<void> {
+  async openHome(location: HomeOpenLocation = "center"): Promise<void> {
     const sourceFile = this.app.workspace.getActiveFile();
-    let leaf = this.app.workspace.getLeavesOfType(LEXIS_HOME_VIEW)[0];
-    if (!leaf) { leaf = this.app.workspace.getRightLeaf(false); await leaf.setViewState({ type: LEXIS_HOME_VIEW, active: true }); }
-    await this.app.workspace.revealLeaf(leaf);
+    const workspace = this.app.workspace;
+    let leaf = location === "sidebar"
+      ? await workspace.ensureSideLeaf(LEXIS_HOME_VIEW, "right", { active: true, reveal: true })
+      : workspace.getLeavesOfType(LEXIS_HOME_VIEW).find((candidate) => candidate.getRoot() === workspace.rootSplit);
+    if (!leaf) {
+      leaf = workspace.getLeaf("tab");
+      await leaf.setViewState({ type: LEXIS_HOME_VIEW, active: true });
+    }
+    await workspace.revealLeaf(leaf);
     if (leaf.view instanceof LexisHomeView) {
       if (sourceFile) leaf.view.sourceFilePath = sourceFile.path;
       leaf.view.render();

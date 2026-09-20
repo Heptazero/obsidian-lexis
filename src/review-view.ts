@@ -43,7 +43,7 @@ interface ReviewRuntime {
   openReview(options?: ReviewOptions): Promise<void>;
   scheduleCard(card: ReviewCardState, grade: number): ReviewSchedule;
   humanInterval(days: number): string;
-  renderNoteInto(container: HTMLElement, file: TFile, component: Component, reviewMode?: boolean): Promise<void>;
+  renderNoteInto(container: HTMLElement, file: TFile, component: Component, reviewMode?: boolean, maskAnswers?: boolean): Promise<void>;
   cardRetrievability(card: ReviewCardState): number;
   snapshotReviewItem(item: ReviewItem): ReviewStateSnapshot;
   applyReviewItemSchedule(item: ReviewItem, schedule: ReviewSchedule): Promise<void>;
@@ -82,6 +82,10 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
   _comp: Component | null = null;
   _frontComp: Component | null = null;
   _imagePreview: HTMLElement | null = null;
+
+  isContextCard(item: ReviewItem | null): boolean {
+    return !!item && item.type === "note" && this.options.content === "context";
+  }
 
   constructor(leaf: WorkspaceLeaf, plugin: ReviewRuntime) { super(leaf); this.plugin = plugin; this.queue = []; this.pos = 0; this.reviewed = 0; this.revealed = false; this.undoStack = []; this.options = {}; }
   getViewType() { return reviewViewType; }
@@ -133,7 +137,13 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
       this.openImagePreview(image);
     }, { capture: true });
     let wordEl: HTMLElement;
-    if (item.type === "syntax" && item.syntax) {
+    if (this.isContextCard(item)) {
+      const source = card.createEl("button", { cls: "lexis-rv-source", text: item.file.basename, attr: { type: "button" } });
+      source.setAttribute("title", this.plugin.t("review.openSource"));
+      source.addEventListener("click", () => { void this.openSource(item); });
+      wordEl = card.createDiv({ cls: "lexis-rv-word is-context is-masked" });
+      void this.renderContextFront(wordEl, item);
+    } else if (item.type === "syntax" && item.syntax) {
       const source = card.createEl("button", { cls: "lexis-rv-source", text: `${item.file.basename} · L${item.syntax.line + 1}`, attr: { type: "button" } });
       source.setAttribute("title", this.plugin.t("review.openSource"));
       source.addEventListener("click", () => { void this.openSource(item); });
@@ -213,7 +223,12 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
       if (this._comp) this._comp.unload();
       this._comp = new Component(); this._comp.load();
       const item = this.currentItem;
-      if (item.type === "syntax" && item.syntax) {
+      if (!item) return;
+      if (this.isContextCard(item)) {
+        this.wordEl?.removeClass("is-masked");
+        this.backEl.empty();
+        this.backEl.setCssStyles({ display: "none" });
+      } else if (item.type === "syntax" && item.syntax) {
         this.backEl.empty();
         await renderLexisMarkdown(this.app, item.syntax.back, this.backEl, item.file.path, this._comp);
       } else {
@@ -311,24 +326,88 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
     this._frontComp = new Component(); this._frontComp.load();
     await renderLexisMarkdown(this.app, item.syntax.front, wordEl, item.file.path, this._frontComp);
   }
+  async renderContextFront(wordEl: HTMLElement, item: ReviewItem) {
+    if (!this.isContextCard(item) || this.currentItem !== item) return;
+    wordEl.empty();
+    if (this._frontComp) this._frontComp.unload();
+    this._frontComp = new Component(); this._frontComp.load();
+    await this.plugin.renderNoteInto(wordEl, item.file, this._frontComp, true, true);
+  }
   openImagePreview(source: HTMLImageElement) {
     this.closeImagePreview();
     const overlay = this.containerEl.doc.body.createDiv({ cls: "lexis-rv-image-preview" });
     const image = overlay.createEl("img");
     image.src = source.currentSrc || source.src;
     image.alt = source.alt || "";
-    image.className = "is-fit";
-    image.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const fit = image.classList.toggle("is-fit");
-      overlay.classList.toggle("is-actual", !fit);
+    const pointers = new Map<number, { x: number; y: number }>();
+    let scale = 1, translateX = 0, translateY = 0;
+    let startScale = 1, startTranslateX = 0, startTranslateY = 0, startDistance = 0;
+    let startCenter = { x: 0, y: 0 };
+    let startPan = { x: 0, y: 0 };
+    const clampScale = (value: number) => Math.max(1, Math.min(5, value));
+    const point = (event: PointerEvent) => ({ x: event.clientX, y: event.clientY });
+    const pair = () => [...pointers.values()].slice(0, 2);
+    const distance = (points: Array<{ x: number; y: number }>) => Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y);
+    const center = (points: Array<{ x: number; y: number }>) => ({ x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 });
+    const applyTransform = () => {
+      if (scale === 1) { translateX = 0; translateY = 0; }
+      image.setCssStyles({ transform: `translate3d(${translateX}px, ${translateY}px, 0) scale(${scale})` });
+      overlay.classList.toggle("is-zoomed", scale > 1);
+    };
+    const beginPinch = () => {
+      const points = pair();
+      if (points.length < 2) return;
+      startDistance = distance(points);
+      startCenter = center(points);
+      startScale = scale;
+      startTranslateX = translateX;
+      startTranslateY = translateY;
+    };
+    image.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      image.setPointerCapture(event.pointerId);
+      pointers.set(event.pointerId, point(event));
+      if (pointers.size === 1) {
+        startPan = point(event);
+        startTranslateX = translateX;
+        startTranslateY = translateY;
+      } else if (pointers.size === 2) beginPinch();
     });
+    image.addEventListener("pointermove", (event) => {
+      if (!pointers.has(event.pointerId)) return;
+      event.preventDefault();
+      pointers.set(event.pointerId, point(event));
+      if (pointers.size >= 2) {
+        const points = pair();
+        const currentCenter = center(points);
+        scale = clampScale(startScale * (distance(points) / Math.max(1, startDistance)));
+        translateX = startTranslateX + currentCenter.x - startCenter.x;
+        translateY = startTranslateY + currentCenter.y - startCenter.y;
+      } else if (scale > 1) {
+        translateX = startTranslateX + event.clientX - startPan.x;
+        translateY = startTranslateY + event.clientY - startPan.y;
+      }
+      applyTransform();
+    });
+    const endPointer = (event: PointerEvent) => {
+      if (!pointers.delete(event.pointerId)) return;
+      if (pointers.size === 1) {
+        const remaining = [...pointers.values()][0];
+        startPan = remaining;
+        startTranslateX = translateX;
+        startTranslateY = translateY;
+      }
+    };
+    image.addEventListener("pointerup", endPointer);
+    image.addEventListener("pointercancel", endPointer);
+    image.addEventListener("click", (event) => event.stopPropagation());
     const close = overlay.createEl("button", { cls: "lexis-rv-image-close" });
     close.type = "button";
     close.textContent = "×";
     close.setAttribute("aria-label", this.plugin.t("review.closeImage"));
     close.addEventListener("click", () => this.closeImagePreview());
-    overlay.addEventListener("click", () => this.closeImagePreview());
+    overlay.addEventListener("click", (event) => { if (event.target === overlay) this.closeImagePreview(); });
     this._imagePreview = overlay;
   }
   closeImagePreview() {

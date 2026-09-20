@@ -636,6 +636,36 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
 .lexis-rv-word.is-syntax:hover {
     box-shadow: none;
 }
+.lexis-rv-word.is-context {
+    width: 100%;
+    cursor: default;
+    font-size: var(--font-text-size);
+    font-weight: var(--font-normal);
+    line-height: var(--line-height-normal);
+    text-align: left;
+    user-select: text;
+}
+.lexis-rv-word.is-context:hover {
+    box-shadow: none;
+}
+.lexis-rv-answer-mask {
+    padding: 0 0.12em;
+    border-radius: 0.22em;
+    background: color-mix(in srgb, var(--interactive-accent) 22%, var(--background-modifier-hover));
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+    transition: color 120ms ease, background-color 120ms ease;
+}
+.lexis-rv-word.is-context.is-masked .lexis-rv-answer-mask,
+.lexis-rv-word.is-context.is-masked .lexis-rv-answer-mask * {
+    color: transparent;
+    text-shadow: none;
+    user-select: none;
+}
+.lexis-rv-word.is-context.is-masked .lexis-rv-answer-mask img,
+.lexis-rv-word.is-context.is-masked .lexis-rv-answer-mask svg {
+    opacity: 0;
+}
 .lexis-rv-source {
     align-self: flex-start;
     height: auto;
@@ -730,7 +760,7 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     display: block;
 }
 
-/* 复习答案图片：点开后可在适应屏幕/原始尺寸之间切换。 */
+/* 复习答案图片：移动端双指缩放，放大后单指拖动。 */
 .lexis-rv-image-preview {
     position: fixed;
     inset: 0;
@@ -738,25 +768,24 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     display: flex;
     align-items: center;
     justify-content: center;
-    overflow: auto;
+    overflow: hidden;
     padding: max(18px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
     background: rgba(0, 0, 0, 0.88);
-    touch-action: pan-x pan-y pinch-zoom;
+    touch-action: none;
 }
 .lexis-rv-image-preview img {
     flex: 0 0 auto;
-    max-width: none;
-    max-height: none;
-    cursor: zoom-out;
-}
-.lexis-rv-image-preview.is-actual {
-    align-items: flex-start;
-    justify-content: flex-start;
-}
-.lexis-rv-image-preview img.is-fit {
     max-width: 96vw;
     max-height: 88vh;
     cursor: zoom-in;
+    transform-origin: center center;
+    will-change: transform;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+.lexis-rv-image-preview.is-zoomed img {
+    cursor: grab;
 }
 .lexis-rv-image-close {
     position: fixed;
@@ -829,6 +858,7 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
 }
 .lexis-segments {
     display: inline-flex;
+    flex-wrap: wrap;
     padding: 2px;
     border-radius: 8px;
     background: var(--background-secondary);
@@ -845,6 +875,25 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
 .lexis-segment.is-active {
     background: var(--interactive-accent);
     color: var(--text-on-accent);
+}
+.lexis-review-start {
+    margin-top: 12px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+}
+.lexis-review-start .setting-item-info {
+    display: none;
+}
+.lexis-review-start .setting-item-control {
+    width: 100%;
+    justify-content: stretch;
+}
+.lexis-review-start .setting-item-control > button.mod-cta {
+    flex: 1;
+    min-height: 50px;
+    font-size: 16px;
+    font-weight: 650;
 }
 
 /* ```lexis-home``` 笔记内嵌主页摘要块 */
@@ -1008,8 +1057,13 @@ body.is-phone
         var(--lexis-mobile-rate-height, 72px) +
         12px
     );
-    padding-bottom: var(--lexis-mobile-review-clearance);
+    padding-bottom: 0;
     scroll-padding-bottom: var(--lexis-mobile-review-clearance);
+}
+body.is-phone
+    .workspace-leaf-content[data-type="lexis-review-view"]
+    .lexis-review {
+    padding-bottom: var(--lexis-mobile-review-clearance);
 }
 body.is-phone
     .workspace-leaf-content[data-type="lexis-home-view"]

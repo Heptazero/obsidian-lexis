@@ -5,6 +5,7 @@ import type { App, Component as ObsidianComponent, Editor, MarkdownPostProcessor
 import type { Occurrence } from "./occurrence-search";
 import { overlayDocumentFor } from "./reader-interactions";
 import { pdfTargetSource } from "./pdf-highlight-targets";
+import { maskSyntaxAnswers } from "./flashcard-syntax";
 import type { InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats, ReviewHistoryEvent } from "./types";
 
 type CurveCard = { s?: number | null; due?: string | null; last?: string | null; history?: ReviewHistoryEvent[] };
@@ -299,10 +300,16 @@ function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, da
   stripForPreview(content: string): string {
     return content.replace(/^---\n[\s\S]*?\n---\n?/, "").replace(/```dataviewjs[\s\S]*?```/g, "").replace(/```dataview[\s\S]*?```/g, "").replace(/```lexis[\s\S]*?```/g, "").trim();
   }
-  async renderNoteInto(el: HTMLElement, file: ObsidianTFile, comp: ObsidianComponent, keepLexis = false): Promise<void> {
+  async renderNoteInto(el: HTMLElement, file: ObsidianTFile, comp: ObsidianComponent, keepLexis = false, maskAnswers = false): Promise<void> {
     const raw = await this.app.vault.cachedRead(file);
     let stripped = raw.replace(/^---\n[\s\S]*?\n---\n?/, "").replace(/```dataviewjs[\s\S]*?```/g, "").replace(/```dataview[\s\S]*?```/g, "");
     if (!keepLexis) stripped = stripped.replace(/```lexis[\s\S]*?```/g, "");
+    if (maskAnswers) stripped = maskSyntaxAnswers(stripped, {
+      inline: this.settings.flashcardInlineTemplate,
+      bidirectional: this.settings.flashcardBidirectionalTemplate,
+      block: this.settings.flashcardBlockTemplate,
+      cloze: this.settings.flashcardClozeTemplate,
+    });
     const md = this.compactSections(stripped.trim()) || "*(空)*";
     el.empty();
     await renderLexisMarkdown(this.app, md, el, file.path, comp);

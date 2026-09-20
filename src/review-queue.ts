@@ -97,7 +97,11 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
     reviewScopeFiles(options: ReviewOptions): TFile[] {
       const scope = options.scope || "vocab";
       let files = this.app.vault.getMarkdownFiles();
-      if (scope === "vocab") files = files.filter((file) => this.inVocabFolder(file.path));
+      if (scope === "vocab") {
+        files = files.filter((file) => this.inVocabFolder(file.path));
+        const dictionary = this.normalizeFolder(options.folder || "");
+        if (dictionary) files = files.filter((file) => this.inScope(file.path, [dictionary]));
+      }
       if (scope === "folder") {
         const folder = this.normalizeFolder(options.folder || "");
         if (folder) files = files.filter((file) => this.inScope(file.path, [folder]));
@@ -197,7 +201,7 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
         }));
       }
       const candidates: ReviewItem[] = [];
-      if (content === "notes" || content === "both") {
+      if (content === "notes" || content === "context" || content === "both") {
         for (const file of files) {
           const card = this.readCard(file);
           if (!this.settings.suspendedReviewItems?.[noteSuspensionKey(file.path)] && !reviewedToday(card, today)) {
