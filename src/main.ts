@@ -862,6 +862,11 @@ class LexisPlugin extends Plugin {
     out.sort((a, b) => b.sinceLast - a.sinceLast);
     return out;
   }
+  collectArchivedFiles(): TFile[] {
+    return this.app.vault.getMarkdownFiles()
+      .filter((file) => this.inVocabFolder(file.path) && this.readLifecycle(file).archived)
+      .sort((left, right) => left.path.localeCompare(right.path));
+  }
   async restoreSuspendedReviewItem(key: string): Promise<void> {
     if (!this.settings.suspendedReviewItems?.[key]) return;
     delete this.settings.suspendedReviewItems[key];

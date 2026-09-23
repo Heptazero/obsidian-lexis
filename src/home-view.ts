@@ -27,6 +27,7 @@ interface HomeViewHost {
   collectReviewTags(): string[];
   collectSuspendedReviewItems(): Promise<SuspendedReviewEntry[]>;
   restoreSuspendedReviewItem(key: string): Promise<void>;
+  collectArchivedFiles(): TFile[];
   openReview(options: ReviewOptions): Promise<void>;
   saveSettings(): Promise<void>;
   buildRetireCandidates(): Promise<RetireCandidate[]>;
@@ -216,7 +217,53 @@ export class LexisHomeView extends ItemView {
     renderControls();
 
     void this.renderSuspendedItems(container);
+    this.renderArchivedItems(container);
     void this.renderRetireCandidates(container);
+  }
+
+  private renderArchivedItems(container: HTMLElement): void {
+    const files = this.plugin.collectArchivedFiles();
+    const section = container.createEl("details", { cls: "lexis-home-section lexis-archived-section" });
+    section.open = !this.plugin.settings.homeArchivedCollapsed;
+    const summary = section.createEl("summary", { cls: "lexis-home-section-summary" });
+    const summaryLabel = summary.createSpan({ text: `📦 ${this.plugin.t("home.archived")} (${files.length})` });
+    const body = section.createDiv({ cls: "lexis-home-section-body" });
+    section.addEventListener("toggle", () => {
+      this.plugin.settings.homeArchivedCollapsed = !section.open;
+      void this.plugin.saveSettings();
+    });
+    if (!files.length) {
+      body.createDiv({ cls: "lexis-dim", text: this.plugin.t("home.noArchived") });
+      return;
+    }
+
+    const rows = new Map<string, HTMLElement>();
+    for (const file of files) {
+      const row = body.createDiv({ cls: "lexis-archive-row" });
+      rows.set(file.path, row);
+      const info = row.createDiv({ cls: "lexis-suspended-info" });
+      const name = info.createEl("a", { text: file.basename, href: "#", cls: "lexis-suspended-name" });
+      name.addEventListener("click", (event) => {
+        event.preventDefault();
+        void this.plugin.app.workspace.getLeaf(false).openFile(file);
+      });
+      info.createDiv({ cls: "lexis-suspended-meta", text: this.plugin.t("home.archivedMeta") });
+      const restore = row.createEl("button", { text: this.plugin.t("home.restoreArchived") });
+      restore.addEventListener("click", () => {
+        void (async () => {
+          restore.disabled = true;
+          try {
+            await this.plugin.setArchived(file, false);
+            rows.delete(file.path);
+            row.remove();
+            summaryLabel.setText(`📦 ${this.plugin.t("home.archived")} (${rows.size})`);
+            if (!rows.size) body.createDiv({ cls: "lexis-dim", text: this.plugin.t("home.noArchived") });
+          } catch {
+            restore.disabled = false;
+          }
+        })();
+      });
+    }
   }
 
   private async renderSuspendedItems(container: HTMLElement): Promise<void> {

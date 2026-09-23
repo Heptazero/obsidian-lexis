@@ -78,6 +78,7 @@ var DEFAULT_SETTINGS = {
   retireCandidateDays: 90,
   homeRetireCollapsed: true,
   homeSuspendedCollapsed: true,
+  homeArchivedCollapsed: true,
   tagRules: [],
   showRelated: true,
   showOccurrences: true,
@@ -388,7 +389,51 @@ var LexisHomeView = class extends import_obsidian3.ItemView {
     };
     renderControls();
     void this.renderSuspendedItems(container);
+    this.renderArchivedItems(container);
     void this.renderRetireCandidates(container);
+  }
+  renderArchivedItems(container) {
+    const files = this.plugin.collectArchivedFiles();
+    const section = container.createEl("details", { cls: "lexis-home-section lexis-archived-section" });
+    section.open = !this.plugin.settings.homeArchivedCollapsed;
+    const summary = section.createEl("summary", { cls: "lexis-home-section-summary" });
+    const summaryLabel = summary.createSpan({ text: `\u{1F4E6} ${this.plugin.t("home.archived")} (${files.length})` });
+    const body = section.createDiv({ cls: "lexis-home-section-body" });
+    section.addEventListener("toggle", () => {
+      this.plugin.settings.homeArchivedCollapsed = !section.open;
+      void this.plugin.saveSettings();
+    });
+    if (!files.length) {
+      body.createDiv({ cls: "lexis-dim", text: this.plugin.t("home.noArchived") });
+      return;
+    }
+    const rows = /* @__PURE__ */ new Map();
+    for (const file of files) {
+      const row = body.createDiv({ cls: "lexis-archive-row" });
+      rows.set(file.path, row);
+      const info = row.createDiv({ cls: "lexis-suspended-info" });
+      const name = info.createEl("a", { text: file.basename, href: "#", cls: "lexis-suspended-name" });
+      name.addEventListener("click", (event) => {
+        event.preventDefault();
+        void this.plugin.app.workspace.getLeaf(false).openFile(file);
+      });
+      info.createDiv({ cls: "lexis-suspended-meta", text: this.plugin.t("home.archivedMeta") });
+      const restore = row.createEl("button", { text: this.plugin.t("home.restoreArchived") });
+      restore.addEventListener("click", () => {
+        void (async () => {
+          restore.disabled = true;
+          try {
+            await this.plugin.setArchived(file, false);
+            rows.delete(file.path);
+            row.remove();
+            summaryLabel.setText(`\u{1F4E6} ${this.plugin.t("home.archived")} (${rows.size})`);
+            if (!rows.size) body.createDiv({ cls: "lexis-dim", text: this.plugin.t("home.noArchived") });
+          } catch {
+            restore.disabled = false;
+          }
+        })();
+      });
+    }
   }
   async renderSuspendedItems(container) {
     const section = container.createEl("details", { cls: "lexis-home-section lexis-suspended-section" });
@@ -699,6 +744,10 @@ var MESSAGES = {
   "home.suspendedNote": { zh: "\u7B14\u8BB0\u5361\u7247", en: "Note card" },
   "home.suspendedSyntax": { zh: "\u8BED\u6CD5\u5361", en: "Syntax card" },
   "home.line": { zh: "\u7B2C {line} \u884C", en: "Line {line}" },
+  "home.archived": { zh: "\u5DF2\u5F52\u6863", en: "Archived" },
+  "home.noArchived": { zh: "\u6682\u65E0\u5F52\u6863\u6761\u76EE", en: "No archived entries" },
+  "home.restoreArchived": { zh: "\u6062\u590D", en: "Restore" },
+  "home.archivedMeta": { zh: "\u5DF2\u505C\u6B62\u9AD8\u4EAE\u548C\u590D\u4E60\uFF1B\u4ECD\u53EF\u60AC\u6D6E\u67E5\u770B", en: "Highlighting and review paused; hover remains available" },
   "home.retireThreshold": { zh: "\u5165\u5E93/\u672A\u76F8\u9047\u5929\u6570\u9608\u503C", en: "Added / unseen threshold" },
   "home.retireThresholdDesc": { zh: "\u4E24\u9879\u5747\u8FBE\u5230\u6B64\u5929\u6570\u624D\u5165\u5217\u3002", en: "Both ages must reach this value." },
   "home.calculating": { zh: "\u8BA1\u7B97\u4E2D\u2026", en: "Calculating\u2026" },
@@ -7602,6 +7651,9 @@ var LexisPlugin = class extends import_obsidian8.Plugin {
     }
     out.sort((a, b) => b.sinceLast - a.sinceLast);
     return out;
+  }
+  collectArchivedFiles() {
+    return this.app.vault.getMarkdownFiles().filter((file) => this.inVocabFolder(file.path) && this.readLifecycle(file).archived).sort((left, right) => left.path.localeCompare(right.path));
   }
   async restoreSuspendedReviewItem(key) {
     if (!this.settings.suspendedReviewItems?.[key]) return;

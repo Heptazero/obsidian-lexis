@@ -38,6 +38,7 @@ export const DEFAULT_SETTINGS: DefaultLexisSettings = {
   retireCandidateDays: 90,
   homeRetireCollapsed: true,
   homeSuspendedCollapsed: true,
+  homeArchivedCollapsed: true,
   tagRules: [],
   showRelated: true,
   showOccurrences: true,

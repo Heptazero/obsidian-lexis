@@ -988,7 +988,8 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     padding-top: 10px;
     border-top: 1px solid var(--background-modifier-border);
 }
-.lexis-suspended-row {
+.lexis-suspended-row,
+.lexis-archive-row {
     display: flex;
     align-items: flex-start;
     gap: 8px;

@@ -127,6 +127,7 @@ export interface LexisSettings {
   retireCandidateDays: number;
   homeRetireCollapsed: boolean;
   homeSuspendedCollapsed: boolean;
+  homeArchivedCollapsed: boolean;
   tagRules: TagRule[];
   showRelated: boolean;
   showOccurrences: boolean;
