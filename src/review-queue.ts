@@ -1,7 +1,7 @@
 import type { App, TFile } from "obsidian";
 import { parseSyntaxCards, type FlashcardTemplates, type ParsedSyntaxCard } from "./flashcard-syntax";
 import { noteSuspensionKey, syntaxSuspensionKey } from "./review-item";
-import type { LexisSettings, ReviewCardState, ReviewItem, ReviewOptions, ReviewSortKey } from "./types";
+import type { LexisSettings, ReviewCardState, ReviewItem, ReviewOptions, ReviewSortKey, SuspendedReviewEntry } from "./types";
 
 interface ReviewQueueDependencies {
   todayStr: () => string;
@@ -80,6 +80,46 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
       const tags = new Set<string>();
       for (const file of this.app.vault.getMarkdownFiles()) for (const tag of this.getTags(file)) tags.add(tag);
       return [...tags].sort((left, right) => left.localeCompare(right));
+    }
+
+    async collectSuspendedReviewItems(): Promise<SuspendedReviewEntry[]> {
+      const suspended = Object.entries(this.settings.suspendedReviewItems || {}).filter(([, enabled]) => enabled);
+      const syntaxKeys = new Set(suspended
+        .filter(([key]) => key.startsWith("syntax:"))
+        .map(([key]) => key.slice("syntax:".length)));
+      const syntaxMatches = new Map<string, { file: TFile; card: ParsedSyntaxCard }>();
+      if (syntaxKeys.size) {
+        const templates = syntaxTemplates(this.settings);
+        await Promise.all(this.app.vault.getMarkdownFiles().map(async (file) => {
+          let markdown = "";
+          try { markdown = await this.app.vault.cachedRead(file); } catch { return; }
+          for (const card of parseSyntaxCards(markdown, file.path, templates)) {
+            if (syntaxKeys.has(card.id)) syntaxMatches.set(card.id, { file, card });
+          }
+        }));
+      }
+
+      const entries: SuspendedReviewEntry[] = [];
+      for (const [key] of suspended) {
+        if (key.startsWith("note:")) {
+          const file = this.app.vault.getFileByPath(key.slice("note:".length));
+          if (file?.extension === "md") entries.push({ key, type: "note", file, label: file.basename });
+          continue;
+        }
+        if (key.startsWith("syntax:")) {
+          const match = syntaxMatches.get(key.slice("syntax:".length));
+          if (match) entries.push({
+            key,
+            type: "syntax",
+            file: match.file,
+            label: `${match.file.basename} · ${match.card.front}`,
+            line: match.card.line,
+          });
+        }
+      }
+      return entries.sort((left, right) => left.file.path.localeCompare(right.file.path)
+        || (left.line ?? -1) - (right.line ?? -1)
+        || left.label.localeCompare(right.label));
     }
 
     directLinkedFiles(sourcePath: string): TFile[] {

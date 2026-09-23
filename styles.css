@@ -929,8 +929,22 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
 }
 
 /* 淘汰法庭(主页里的淘汰候选区) */
-.lexis-retire-wrap {
+.lexis-home-section {
     margin-top: 18px;
+}
+.lexis-home-section-summary {
+    cursor: pointer;
+    font-weight: 600;
+    padding: 6px 0;
+}
+.lexis-home-section-summary::marker {
+    color: var(--text-muted);
+}
+.lexis-home-section-body {
+    margin-top: 6px;
+}
+.lexis-retire-wrap {
+    margin-top: 0;
 }
 .lexis-dim {
     opacity: 0.55;
@@ -973,6 +987,29 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     margin-top: 10px;
     padding-top: 10px;
     border-top: 1px solid var(--background-modifier-border);
+}
+.lexis-suspended-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 0;
+    border-top: 1px solid var(--background-modifier-border);
+}
+.lexis-suspended-info {
+    flex: 1;
+    min-width: 0;
+}
+.lexis-suspended-name {
+    display: block;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.lexis-suspended-meta {
+    color: var(--text-muted);
+    font-size: 12px;
+    margin-top: 2px;
 }
 
 /* 复习卡标签 pill */

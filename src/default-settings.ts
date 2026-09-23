@@ -36,6 +36,8 @@ export const DEFAULT_SETTINGS: DefaultLexisSettings = {
   hoverFeedback: true,
   hoverFeedbackDays: 3,
   retireCandidateDays: 90,
+  homeRetireCollapsed: true,
+  homeSuspendedCollapsed: true,
   tagRules: [],
   showRelated: true,
   showOccurrences: true,

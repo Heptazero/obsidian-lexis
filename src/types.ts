@@ -56,6 +56,14 @@ export interface ReviewItem {
   syntax?: SyntaxReviewCard;
 }
 
+export interface SuspendedReviewEntry {
+  key: string;
+  type: "note" | "syntax";
+  file: TFile;
+  label: string;
+  line?: number;
+}
+
 export interface ReviewStateSnapshot {
   note?: ReviewCardState | null;
   syntax?: Record<string, ReviewCardState | null>;
@@ -117,6 +125,8 @@ export interface LexisSettings {
   hoverFeedback: boolean;
   hoverFeedbackDays: number;
   retireCandidateDays: number;
+  homeRetireCollapsed: boolean;
+  homeSuspendedCollapsed: boolean;
   tagRules: TagRule[];
   showRelated: boolean;
   showOccurrences: boolean;

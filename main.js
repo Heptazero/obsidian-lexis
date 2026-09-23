@@ -76,6 +76,8 @@ var DEFAULT_SETTINGS = {
   hoverFeedback: true,
   hoverFeedbackDays: 3,
   retireCandidateDays: 90,
+  homeRetireCollapsed: true,
+  homeSuspendedCollapsed: true,
   tagRules: [],
   showRelated: true,
   showOccurrences: true,
@@ -385,12 +387,77 @@ var LexisHomeView = class extends import_obsidian3.ItemView {
       startSetting.addExtraButton((button) => button.setIcon("refresh-cw").setTooltip(this.plugin.t("common.refresh")).onClick(() => this.render()));
     };
     renderControls();
+    void this.renderSuspendedItems(container);
     void this.renderRetireCandidates(container);
+  }
+  async renderSuspendedItems(container) {
+    const section = container.createEl("details", { cls: "lexis-home-section lexis-suspended-section" });
+    section.open = !this.plugin.settings.homeSuspendedCollapsed;
+    const summary = section.createEl("summary", { cls: "lexis-home-section-summary" });
+    const summaryLabel = summary.createSpan({ text: `\u23F8\uFE0F ${this.plugin.t("home.suspended")}` });
+    const body = section.createDiv({ cls: "lexis-home-section-body" });
+    section.addEventListener("toggle", () => {
+      this.plugin.settings.homeSuspendedCollapsed = !section.open;
+      void this.plugin.saveSettings();
+    });
+    body.setText(this.plugin.t("common.loading"));
+    let entries = [];
+    try {
+      entries = await this.plugin.collectSuspendedReviewItems();
+    } catch {
+      entries = [];
+    }
+    if (!body.isConnected) return;
+    body.empty();
+    summaryLabel.setText(`\u23F8\uFE0F ${this.plugin.t("home.suspended")} (${entries.length})`);
+    if (!entries.length) {
+      body.createDiv({ cls: "lexis-dim", text: this.plugin.t("home.noSuspended") });
+      return;
+    }
+    const rows = /* @__PURE__ */ new Map();
+    const renderEmpty = () => {
+      if (rows.size === 0 && body.isConnected) body.createDiv({ cls: "lexis-dim", text: this.plugin.t("home.noSuspended") });
+    };
+    for (const entry of entries) {
+      const row = body.createDiv({ cls: "lexis-suspended-row" });
+      rows.set(entry.key, row);
+      const info = row.createDiv({ cls: "lexis-suspended-info" });
+      const name = info.createEl("a", { text: entry.label, href: "#", cls: "lexis-suspended-name" });
+      name.addEventListener("click", (event) => {
+        event.preventDefault();
+        void this.plugin.app.workspace.getLeaf(false).openFile(entry.file);
+      });
+      info.createDiv({
+        cls: "lexis-suspended-meta",
+        text: entry.type === "syntax" && entry.line != null ? `${this.plugin.t("home.suspendedSyntax")} \xB7 ${this.plugin.t("home.line", { line: entry.line + 1 })}` : this.plugin.t("home.suspendedNote")
+      });
+      const restore = row.createEl("button", { text: this.plugin.t("home.restoreSuspendedOne") });
+      restore.addEventListener("click", () => {
+        void (async () => {
+          restore.disabled = true;
+          try {
+            await this.plugin.restoreSuspendedReviewItem(entry.key);
+            rows.delete(entry.key);
+            row.remove();
+            summaryLabel.setText(`\u23F8\uFE0F ${this.plugin.t("home.suspended")} (${rows.size})`);
+            renderEmpty();
+          } catch {
+            restore.disabled = false;
+          }
+        })();
+      });
+    }
   }
   async renderRetireCandidates(container) {
     const days = this.plugin.settings.retireCandidateDays ?? 90;
-    const wrapper = container.createDiv({ cls: "lexis-retire-wrap" });
-    wrapper.createEl("h4", { text: `\u{1F5D1}\uFE0F ${this.plugin.t("home.retire")}` });
+    const section = container.createEl("details", { cls: "lexis-home-section lexis-retire-section" });
+    section.open = !this.plugin.settings.homeRetireCollapsed;
+    const summary = section.createEl("summary", { cls: "lexis-home-section-summary", text: `\u{1F5D1}\uFE0F ${this.plugin.t("home.retire")}` });
+    const wrapper = section.createDiv({ cls: "lexis-retire-wrap lexis-home-section-body" });
+    section.addEventListener("toggle", () => {
+      this.plugin.settings.homeRetireCollapsed = !section.open;
+      void this.plugin.saveSettings();
+    });
     new import_obsidian3.Setting(wrapper).setName(this.plugin.t("home.retireThreshold")).setDesc(this.plugin.t("home.retireThresholdDesc")).addSlider((slider) => slider.setLimits(14, 365, 1).setValue(days).onChange((value) => {
       this.plugin.settings.retireCandidateDays = value;
       void this.plugin.saveSettings();
@@ -411,6 +478,7 @@ var LexisHomeView = class extends import_obsidian3.ItemView {
       list.createDiv({ cls: "lexis-dim", text: this.plugin.t("home.noCandidates") });
       return;
     }
+    summary.setText(`\u{1F5D1}\uFE0F ${this.plugin.t("home.retire")} (${candidates.length})`);
     const selected = /* @__PURE__ */ new Set();
     const rows = /* @__PURE__ */ new Map();
     const removeRows = (paths) => {
@@ -625,6 +693,12 @@ var MESSAGES = {
   "home.open": { zh: "\u6253\u5F00\u4E3B\u9875", en: "Open home" },
   "home.openTitle": { zh: "\u70B9\u51FB\u6253\u5F00 Lexis \u4E3B\u9875", en: "Open Lexis home" },
   "home.retire": { zh: "\u6DD8\u6C70\u5019\u9009", en: "Retirement candidates" },
+  "home.suspended": { zh: "\u5DF2\u6401\u7F6E", en: "Suspended" },
+  "home.noSuspended": { zh: "\u6682\u65E0\u6401\u7F6E\u5361\u7247", en: "No suspended cards" },
+  "home.restoreSuspendedOne": { zh: "\u53D6\u6D88\u6401\u7F6E", en: "Restore" },
+  "home.suspendedNote": { zh: "\u7B14\u8BB0\u5361\u7247", en: "Note card" },
+  "home.suspendedSyntax": { zh: "\u8BED\u6CD5\u5361", en: "Syntax card" },
+  "home.line": { zh: "\u7B2C {line} \u884C", en: "Line {line}" },
   "home.retireThreshold": { zh: "\u5165\u5E93/\u672A\u76F8\u9047\u5929\u6570\u9608\u503C", en: "Added / unseen threshold" },
   "home.retireThresholdDesc": { zh: "\u4E24\u9879\u5747\u8FBE\u5230\u6B64\u5929\u6570\u624D\u5165\u5217\u3002", en: "Both ages must reach this value." },
   "home.calculating": { zh: "\u8BA1\u7B97\u4E2D\u2026", en: "Calculating\u2026" },
@@ -6190,6 +6264,44 @@ function createReviewQueue({ todayStr }) {
       for (const file of this.app.vault.getMarkdownFiles()) for (const tag of this.getTags(file)) tags.add(tag);
       return [...tags].sort((left, right) => left.localeCompare(right));
     }
+    async collectSuspendedReviewItems() {
+      const suspended = Object.entries(this.settings.suspendedReviewItems || {}).filter(([, enabled]) => enabled);
+      const syntaxKeys = new Set(suspended.filter(([key]) => key.startsWith("syntax:")).map(([key]) => key.slice("syntax:".length)));
+      const syntaxMatches = /* @__PURE__ */ new Map();
+      if (syntaxKeys.size) {
+        const templates = syntaxTemplates(this.settings);
+        await Promise.all(this.app.vault.getMarkdownFiles().map(async (file) => {
+          let markdown = "";
+          try {
+            markdown = await this.app.vault.cachedRead(file);
+          } catch {
+            return;
+          }
+          for (const card of parseSyntaxCards(markdown, file.path, templates)) {
+            if (syntaxKeys.has(card.id)) syntaxMatches.set(card.id, { file, card });
+          }
+        }));
+      }
+      const entries = [];
+      for (const [key] of suspended) {
+        if (key.startsWith("note:")) {
+          const file = this.app.vault.getFileByPath(key.slice("note:".length));
+          if (file?.extension === "md") entries.push({ key, type: "note", file, label: file.basename });
+          continue;
+        }
+        if (key.startsWith("syntax:")) {
+          const match = syntaxMatches.get(key.slice("syntax:".length));
+          if (match) entries.push({
+            key,
+            type: "syntax",
+            file: match.file,
+            label: `${match.file.basename} \xB7 ${match.card.front}`,
+            line: match.card.line
+          });
+        }
+      }
+      return entries.sort((left, right) => left.file.path.localeCompare(right.file.path) || (left.line ?? -1) - (right.line ?? -1) || left.label.localeCompare(right.label));
+    }
     directLinkedFiles(sourcePath) {
       const source = this.app.vault.getFileByPath(sourcePath);
       if (!source) return [];
@@ -7490,6 +7602,11 @@ var LexisPlugin = class extends import_obsidian8.Plugin {
     }
     out.sort((a, b) => b.sinceLast - a.sinceLast);
     return out;
+  }
+  async restoreSuspendedReviewItem(key) {
+    if (!this.settings.suspendedReviewItems?.[key]) return;
+    delete this.settings.suspendedReviewItems[key];
+    await this.saveSettings();
   }
   async openReview(options = {}) {
     let leaf = this.app.workspace.getLeavesOfType(LEXIS_REVIEW_VIEW)[0];

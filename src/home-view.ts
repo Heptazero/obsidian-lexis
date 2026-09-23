@@ -3,7 +3,7 @@ import { LEXIS_HOME_VIEW } from "./constants";
 import { FolderSuggest } from "./folder-suggest";
 import type { TranslationVars } from "./i18n";
 import { MarkdownFileSuggest } from "./markdown-file-suggest";
-import type { LexisSettings, ReviewContentMode, ReviewOptions, ReviewScopeMode, ReviewSortDirection, ReviewSortKey } from "./types";
+import type { LexisSettings, ReviewContentMode, ReviewOptions, ReviewScopeMode, ReviewSortDirection, ReviewSortKey, SuspendedReviewEntry } from "./types";
 
 export interface RetireCandidate {
   file: TFile;
@@ -25,6 +25,8 @@ interface HomeViewHost {
   dictFolders(): string[];
   collectReviewFolders(): string[];
   collectReviewTags(): string[];
+  collectSuspendedReviewItems(): Promise<SuspendedReviewEntry[]>;
+  restoreSuspendedReviewItem(key: string): Promise<void>;
   openReview(options: ReviewOptions): Promise<void>;
   saveSettings(): Promise<void>;
   buildRetireCandidates(): Promise<RetireCandidate[]>;
@@ -213,13 +215,79 @@ export class LexisHomeView extends ItemView {
     };
     renderControls();
 
+    void this.renderSuspendedItems(container);
     void this.renderRetireCandidates(container);
+  }
+
+  private async renderSuspendedItems(container: HTMLElement): Promise<void> {
+    const section = container.createEl("details", { cls: "lexis-home-section lexis-suspended-section" });
+    section.open = !this.plugin.settings.homeSuspendedCollapsed;
+    const summary = section.createEl("summary", { cls: "lexis-home-section-summary" });
+    const summaryLabel = summary.createSpan({ text: `⏸️ ${this.plugin.t("home.suspended")}` });
+    const body = section.createDiv({ cls: "lexis-home-section-body" });
+    section.addEventListener("toggle", () => {
+      this.plugin.settings.homeSuspendedCollapsed = !section.open;
+      void this.plugin.saveSettings();
+    });
+    body.setText(this.plugin.t("common.loading"));
+
+    let entries: SuspendedReviewEntry[] = [];
+    try { entries = await this.plugin.collectSuspendedReviewItems(); } catch { entries = []; }
+    if (!body.isConnected) return;
+    body.empty();
+    summaryLabel.setText(`⏸️ ${this.plugin.t("home.suspended")} (${entries.length})`);
+    if (!entries.length) {
+      body.createDiv({ cls: "lexis-dim", text: this.plugin.t("home.noSuspended") });
+      return;
+    }
+
+    const rows = new Map<string, HTMLElement>();
+    const renderEmpty = () => {
+      if (rows.size === 0 && body.isConnected) body.createDiv({ cls: "lexis-dim", text: this.plugin.t("home.noSuspended") });
+    };
+    for (const entry of entries) {
+      const row = body.createDiv({ cls: "lexis-suspended-row" });
+      rows.set(entry.key, row);
+      const info = row.createDiv({ cls: "lexis-suspended-info" });
+      const name = info.createEl("a", { text: entry.label, href: "#", cls: "lexis-suspended-name" });
+      name.addEventListener("click", (event) => {
+        event.preventDefault();
+        void this.plugin.app.workspace.getLeaf(false).openFile(entry.file);
+      });
+      info.createDiv({
+        cls: "lexis-suspended-meta",
+        text: entry.type === "syntax" && entry.line != null
+          ? `${this.plugin.t("home.suspendedSyntax")} · ${this.plugin.t("home.line", { line: entry.line + 1 })}`
+          : this.plugin.t("home.suspendedNote"),
+      });
+      const restore = row.createEl("button", { text: this.plugin.t("home.restoreSuspendedOne") });
+      restore.addEventListener("click", () => {
+        void (async () => {
+          restore.disabled = true;
+          try {
+            await this.plugin.restoreSuspendedReviewItem(entry.key);
+            rows.delete(entry.key);
+            row.remove();
+            summaryLabel.setText(`⏸️ ${this.plugin.t("home.suspended")} (${rows.size})`);
+            renderEmpty();
+          } catch {
+            restore.disabled = false;
+          }
+        })();
+      });
+    }
   }
 
   private async renderRetireCandidates(container: HTMLElement): Promise<void> {
     const days = this.plugin.settings.retireCandidateDays ?? 90;
-    const wrapper = container.createDiv({ cls: "lexis-retire-wrap" });
-    wrapper.createEl("h4", { text: `🗑️ ${this.plugin.t("home.retire")}` });
+    const section = container.createEl("details", { cls: "lexis-home-section lexis-retire-section" });
+    section.open = !this.plugin.settings.homeRetireCollapsed;
+    const summary = section.createEl("summary", { cls: "lexis-home-section-summary", text: `🗑️ ${this.plugin.t("home.retire")}` });
+    const wrapper = section.createDiv({ cls: "lexis-retire-wrap lexis-home-section-body" });
+    section.addEventListener("toggle", () => {
+      this.plugin.settings.homeRetireCollapsed = !section.open;
+      void this.plugin.saveSettings();
+    });
     new Setting(wrapper)
       .setName(this.plugin.t("home.retireThreshold"))
       .setDesc(this.plugin.t("home.retireThresholdDesc"))
@@ -243,6 +311,7 @@ export class LexisHomeView extends ItemView {
       list.createDiv({ cls: "lexis-dim", text: this.plugin.t("home.noCandidates") });
       return;
     }
+    summary.setText(`🗑️ ${this.plugin.t("home.retire")} (${candidates.length})`);
 
     const selected = new Set<string>();
     const rows = new Map<string, HTMLElement>();

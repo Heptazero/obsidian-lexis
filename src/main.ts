@@ -167,6 +167,7 @@ class LexisPlugin extends Plugin {
   declare undoReviewItemLog: (item: ReviewItem) => Promise<void>;
   declare collectReviewFolders: () => string[];
   declare collectReviewTags: () => string[];
+  declare collectSuspendedReviewItems: () => Promise<import("./types").SuspendedReviewEntry[]>;
   declare buildQueue: (options?: ReviewOptions) => Promise<ReviewItem[]>;
   declare migrateSyntaxCardPath: (file: TFile, oldPath: string) => Promise<void>;
 
@@ -860,6 +861,11 @@ class LexisPlugin extends Plugin {
     }
     out.sort((a, b) => b.sinceLast - a.sinceLast);
     return out;
+  }
+  async restoreSuspendedReviewItem(key: string): Promise<void> {
+    if (!this.settings.suspendedReviewItems?.[key]) return;
+    delete this.settings.suspendedReviewItems[key];
+    await this.saveSettings();
   }
   async openReview(options: ReviewOptions = {}): Promise<void> {
     let leaf = this.app.workspace.getLeavesOfType(LEXIS_REVIEW_VIEW)[0];

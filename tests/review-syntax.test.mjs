@@ -168,6 +168,39 @@ test("reviews notes or syntax cards directly linked by one selected file", async
   assert.deepEqual(unsuspended.map((item) => item.file.path), [linkedB.path]);
 });
 
+test("lists suspended notes and syntax cards for the home view", async () => {
+  const { createReviewQueue } = await loadTypeScript("src/review-queue.ts");
+  const { parseSyntaxCards } = await loadTypeScript("src/flashcard-syntax.ts");
+  const note = { path: "notes/a.md", extension: "md" };
+  const syntaxFile = { path: "notes/b.md", extension: "md" };
+  const markdown = { [note.path]: "普通笔记", [syntaxFile.path]: "问题::答案" };
+  const syntax = parseSyntaxCards(markdown[syntaxFile.path], syntaxFile.path, templates)[0];
+  const byPath = new Map([note, syntaxFile].map((file) => [file.path, file]));
+  const host = {
+    app: {
+      vault: {
+        getMarkdownFiles: () => [note, syntaxFile],
+        getFileByPath: (path) => byPath.get(path) || null,
+        cachedRead: async (file) => markdown[file.path],
+      },
+    },
+    settings: {
+      flashcardInlineTemplate: templates.inline,
+      flashcardBidirectionalTemplate: templates.bidirectional,
+      flashcardBlockTemplate: templates.block,
+      flashcardClozeTemplate: templates.cloze,
+      suspendedReviewItems: { [`note:${note.path}`]: true, [`syntax:${syntax.id}`]: true, "note:missing.md": true },
+    },
+  };
+  Object.defineProperties(host, createReviewQueue({ todayStr: () => "2026-09-20" }));
+  const entries = await host.collectSuspendedReviewItems();
+  assert.deepEqual(entries.map((entry) => [entry.type, entry.file.path]), [
+    ["note", note.path],
+    ["syntax", syntaxFile.path],
+  ]);
+  assert.equal(entries[1].line, 0);
+});
+
 test("limits dictionary review to the selected configured folder", async () => {
   const { createReviewQueue } = await loadTypeScript("src/review-queue.ts");
   const files = [
