@@ -1,6 +1,6 @@
 "use strict";
 
-import type { App, ColorComponent, MetadataCache, Plugin, Setting, SettingDefinitionItem, TextComponent, View } from "obsidian";
+import type { App, ColorComponent, MetadataCache, Plugin, Setting, SettingDefinitionItem, View } from "obsidian";
 import type { TranslationVars } from "./i18n";
 import type { HighlightStyle, InlineCategoryOccurrence, LexisSettings, LexisStats } from "./types";
 import { addSelectionPillPosition } from "./settings-selection-pill";
@@ -201,12 +201,18 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
         } catch { /* Suggestions are optional. */ }
         return [];
       })();
-      const tagSuggest = (comp: TextComponent, apply: (value: string) => void | Promise<void>) => { if (hasSuggest) new PathSuggest(this.app, comp.inputEl, () => allTags, (value) => { comp.setValue(value); void apply(value); }, { multi: true }); };
-
       const dictSection = this.section(containerEl, t("settings.dictionary"), { open: true });
-      new Setting(dictSection).setDesc(t("settings.dictionaryDesc")).setHeading();
+      const dictHeading = new Setting(dictSection).setDesc(t("settings.dictionaryDesc")).setHeading();
       const dictsWrap = dictSection.createDiv();
-      const renderDicts = () => {
+      let renderDicts: () => void;
+      const addSource = (tag: boolean) => {
+        this.plugin.settings.dicts.push(tag ? { folder: "", template: "", tag: "" } : { folder: "", template: "", highlight: true });
+        renderDicts();
+        void save();
+      };
+      dictHeading.addButton((button) => button.setButtonText(t("settings.addFolderSource")).onClick(() => addSource(false)));
+      dictHeading.addButton((button) => button.setButtonText(t("settings.addTagSource")).onClick(() => addSource(true)));
+      renderDicts = () => {
         dictsWrap.empty();
         const reorder = createReorderController({
           container: dictsWrap,
@@ -221,56 +227,78 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
         });
         (this.plugin.settings.dicts || []).forEach((d, i) => {
           const row = dictsWrap.createDiv({ cls: "lexis-setting-row lexis-dictionary-row" });
+          const isTagSource = () => typeof d.tag === "string";
           const fIn = new obsidian.TextComponent(row);
-          fIn.setPlaceholder(t("settings.folderPlaceholder")).setValue(d.folder || "");
+          fIn.setPlaceholder(t("settings.folderPlaceholder")).setValue(isTagSource() ? `#${d.tag || ""}` : (d.folder || ""));
           fIn.inputEl.setCssStyles({ flex: "1" });
           const tIn = new obsidian.TextComponent(row);
           tIn.setPlaceholder(t("settings.templatePlaceholder")).setValue(d.template || "");
           tIn.inputEl.setCssStyles({ flex: "1.4" });
+          if (isTagSource()) {
+            tIn.setDisabled(true);
+            tIn.setPlaceholder(t("settings.tagSourcePlaceholder"));
+          }
           const updateTemplateSource = () => {
+            if (isTagSource()) {
+              tIn.setDisabled(true);
+              tIn.setValue("");
+              tIn.inputEl.title = "";
+              return;
+            }
             const match = this.plugin.templateProvider.templaterTemplateFor(d.folder);
             tIn.setDisabled(!!match);
             tIn.setValue(match ? match.path : (d.template || ""));
             tIn.inputEl.title = match ? t("settings.templaterTemplate", { path: match.path }) : "";
           };
-          const onFolder = async (v: string) => { d.folder = (v || "").trim(); updateTemplateSource(); await save(); void this.plugin.rebuildIndex(false); this.renderStats(); };
-          fIn.onChange(onFolder);
+          const onSource = async (v: string) => {
+            const value = (v || "").trim();
+            if (value.startsWith("#")) {
+              d.tag = this.plugin.parseTags(value)[0] || "";
+              d.folder = "";
+              tIn.setDisabled(true);
+              tIn.setValue("");
+            } else {
+              delete d.tag;
+              d.folder = value;
+              tIn.setDisabled(false);
+              updateTemplateSource();
+            }
+            await save();
+            void this.plugin.rebuildIndex(false);
+            this.renderStats();
+          };
+          fIn.onChange(onSource);
           const onTpl = async (v: string) => { d.template = (v || "").trim(); await save(); };
           tIn.onChange(onTpl);
           updateTemplateSource();
           if (hasSuggest) {
-            new PathSuggest(this.app, fIn.inputEl, () => folders, (v) => { fIn.setValue(v); void onFolder(v); });
+            new PathSuggest(this.app, fIn.inputEl, () => [...folders, ...allTags.map((tag) => `#${tag}`)], (v) => { fIn.setValue(v); void onSource(v); });
             new PathSuggest(this.app, tIn.inputEl, () => mdFiles, (v) => { tIn.setValue(v); void onTpl(v); });
           }
-          new obsidian.ToggleComponent(row)
-            .setTooltip(t("settings.showDictionaryHighlight"))
-            .setValue(d.highlight !== false)
-            .onChange(async (value) => { d.highlight = value; refresh(); await save(); });
-          const globalColor = this.plugin.settings.highlightColor || accentHex;
-          addAppearanceButton({
-            app: this.app,
-            obsidian,
-            parent: row,
-            title: t("settings.dictionaryAppearance"),
-            labels: appearanceLabels,
-            state: () => ({ color: d.color || globalColor, opacity: Number(d.opacity ?? this.plugin.settings.highlightOpacity) }),
-            onChange: async (patch) => { Object.assign(d, patch); await save(); refresh(); },
-            onReset: async () => { delete d.color; delete d.opacity; await save(); refresh(); },
-          });
+          if (!isTagSource()) {
+            new obsidian.ToggleComponent(row)
+              .setTooltip(t("settings.showDictionaryHighlight"))
+              .setValue(d.highlight !== false)
+              .onChange(async (value) => { d.highlight = value; refresh(); await save(); });
+            const globalColor = this.plugin.settings.highlightColor || accentHex;
+            addAppearanceButton({
+              app: this.app,
+              obsidian,
+              parent: row,
+              title: t("settings.dictionaryAppearance"),
+              labels: appearanceLabels,
+              state: () => ({ color: d.color || globalColor, opacity: Number(d.opacity ?? this.plugin.settings.highlightOpacity) }),
+              onChange: async (patch) => { Object.assign(d, patch); await save(); refresh(); },
+              onReset: async () => { delete d.color; delete d.opacity; await save(); refresh(); },
+            });
+          } else {
+            row.createSpan({ cls: "lexis-source-kind", text: t("settings.tagSource") });
+          }
           new obsidian.ExtraButtonComponent(row).setIcon("trash").setTooltip(t("settings.deleteDictionary")).onClick(async () => { this.plugin.settings.dicts.splice(i, 1); await save(); await this.plugin.rebuildIndex(false); renderDicts(); this.renderStats(); });
           reorder.attach(row, i);
         });
-        const addDict = dictsWrap.createEl("button", { text: t("settings.addDictionary") });
-        addDict.setCssStyles({ marginTop: "2px" });
-        addDict.addEventListener("click", () => { void (async () => { this.plugin.settings.dicts.push({ folder: "", template: "", highlight: true }); await save(); renderDicts(); })(); });
       };
       renderDicts();
-      new Setting(dictSection).setName(t("settings.tagsAsEntries")).setDesc(t("settings.tagsAsEntriesDesc"))
-        .addText((t) => {
-          t.setPlaceholder("词汇 术语").setValue(this.plugin.settings.vocabTags);
-          const apply = async (v: string) => { this.plugin.settings.vocabTags = v; await save(); void this.plugin.rebuildIndex(true); this.renderStats(); };
-          t.onChange(apply); tagSuggest(t, apply);
-        });
       new Setting(dictSection).setName(t("settings.includeAliases"))
         .addToggle((t) => t.setValue(this.plugin.settings.includeAliases).onChange(async (v) => { this.plugin.settings.includeAliases = v; await save(); await this.plugin.rebuildIndex(false); this.renderStats(); }));
       new Setting(dictSection).setName(t("settings.aliasProperties")).setDesc(t("settings.aliasPropertiesDesc"))

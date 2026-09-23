@@ -796,8 +796,12 @@ var MESSAGES = {
   "restore.resetDone": { zh: "Lexis\uFF1A\u300C{word}\u300D\u5DF2\u6062\u590D\u4E3A\u65B0\u8BCD", en: "Lexis: restored \u201C{word}\u201D as new" },
   "settings.title": { zh: "Lexis \u8BBE\u7F6E", en: "Lexis settings" },
   "settings.dictionary": { zh: "\u8BCD\u5178\u4E0E\u8BCD\u5E93\u6765\u6E90", en: "Dictionaries and sources" },
-  "settings.dictionaryDesc": { zh: "\u6BCF\u884C\u4E00\u4E2A\u8BCD\u5178\uFF1B\u65B0\u8BCD\u9ED8\u8BA4\u8FDB\u5165\u7B2C\u4E00\u884C\u3002", en: "One dictionary per row; new entries go to the first." },
-  "settings.folderPlaceholder": { zh: "\u6587\u4EF6\u5939\uFF0C\u5982 01-word", en: "Folder, e.g. 01-word" },
+  "settings.dictionaryDesc": { zh: "\u6BCF\u884C\u4E00\u4E2A\u6765\u6E90\uFF1B\u6587\u4EF6\u5939\u53EF\u8BBE\u6A21\u677F\uFF0C\u6807\u7B7E\u6765\u6E90\u53EA\u8D1F\u8D23\u6536\u5F55\u3002", en: "One source per row; folders can use templates, tags only collect entries." },
+  "settings.folderPlaceholder": { zh: "\u6587\u4EF6\u5939\uFF0C\u6216\u8F93\u5165 #\u6807\u7B7E", en: "Folder, or enter #tag" },
+  "settings.tagSourcePlaceholder": { zh: "\u6807\u7B7E\u6765\u6E90\u65E0\u9700\u6A21\u677F", en: "Tag sources do not use templates" },
+  "settings.tagSource": { zh: "\u6807\u7B7E", en: "Tag" },
+  "settings.addFolderSource": { zh: "\u6DFB\u52A0\u6587\u4EF6\u5939", en: "Add folder" },
+  "settings.addTagSource": { zh: "\u6DFB\u52A0\u6807\u7B7E", en: "Add tag" },
   "settings.templatePlaceholder": { zh: "\u6A21\u677F\u8DEF\u5F84\uFF1B\u7559\u7A7A\u4E3A\u767D\u7EB8", en: "Template path; blank for an empty note" },
   "settings.templaterTemplate": { zh: "\u7531 Templater \u6587\u4EF6\u5939\u6A21\u677F\u63A5\u7BA1\uFF1A{path}", en: "Managed by the Templater folder template: {path}" },
   "settings.followGlobal": { zh: "\u8DDF\u968F\u5168\u5C40\u989C\u8272", en: "Use global color" },
@@ -5453,16 +5457,18 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
         }
         return [];
       })();
-      const tagSuggest = (comp, apply) => {
-        if (hasSuggest) new PathSuggest(this.app, comp.inputEl, () => allTags, (value) => {
-          comp.setValue(value);
-          void apply(value);
-        }, { multi: true });
-      };
       const dictSection = this.section(containerEl, t("settings.dictionary"), { open: true });
-      new Setting3(dictSection).setDesc(t("settings.dictionaryDesc")).setHeading();
+      const dictHeading = new Setting3(dictSection).setDesc(t("settings.dictionaryDesc")).setHeading();
       const dictsWrap = dictSection.createDiv();
-      const renderDicts = () => {
+      let renderDicts;
+      const addSource = (tag) => {
+        this.plugin.settings.dicts.push(tag ? { folder: "", template: "", tag: "" } : { folder: "", template: "", highlight: true });
+        renderDicts();
+        void save();
+      };
+      dictHeading.addButton((button) => button.setButtonText(t("settings.addFolderSource")).onClick(() => addSource(false)));
+      dictHeading.addButton((button) => button.setButtonText(t("settings.addTagSource")).onClick(() => addSource(true)));
+      renderDicts = () => {
         dictsWrap.empty();
         const reorder = createReorderController2({
           container: dictsWrap,
@@ -5477,26 +5483,47 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
         });
         (this.plugin.settings.dicts || []).forEach((d, i) => {
           const row = dictsWrap.createDiv({ cls: "lexis-setting-row lexis-dictionary-row" });
+          const isTagSource = () => typeof d.tag === "string";
           const fIn = new obsidian5.TextComponent(row);
-          fIn.setPlaceholder(t("settings.folderPlaceholder")).setValue(d.folder || "");
+          fIn.setPlaceholder(t("settings.folderPlaceholder")).setValue(isTagSource() ? `#${d.tag || ""}` : d.folder || "");
           fIn.inputEl.setCssStyles({ flex: "1" });
           const tIn = new obsidian5.TextComponent(row);
           tIn.setPlaceholder(t("settings.templatePlaceholder")).setValue(d.template || "");
           tIn.inputEl.setCssStyles({ flex: "1.4" });
+          if (isTagSource()) {
+            tIn.setDisabled(true);
+            tIn.setPlaceholder(t("settings.tagSourcePlaceholder"));
+          }
           const updateTemplateSource = () => {
+            if (isTagSource()) {
+              tIn.setDisabled(true);
+              tIn.setValue("");
+              tIn.inputEl.title = "";
+              return;
+            }
             const match = this.plugin.templateProvider.templaterTemplateFor(d.folder);
             tIn.setDisabled(!!match);
             tIn.setValue(match ? match.path : d.template || "");
             tIn.inputEl.title = match ? t("settings.templaterTemplate", { path: match.path }) : "";
           };
-          const onFolder = async (v) => {
-            d.folder = (v || "").trim();
-            updateTemplateSource();
+          const onSource = async (v) => {
+            const value = (v || "").trim();
+            if (value.startsWith("#")) {
+              d.tag = this.plugin.parseTags(value)[0] || "";
+              d.folder = "";
+              tIn.setDisabled(true);
+              tIn.setValue("");
+            } else {
+              delete d.tag;
+              d.folder = value;
+              tIn.setDisabled(false);
+              updateTemplateSource();
+            }
             await save();
             void this.plugin.rebuildIndex(false);
             this.renderStats();
           };
-          fIn.onChange(onFolder);
+          fIn.onChange(onSource);
           const onTpl = async (v) => {
             d.template = (v || "").trim();
             await save();
@@ -5504,40 +5531,44 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
           tIn.onChange(onTpl);
           updateTemplateSource();
           if (hasSuggest) {
-            new PathSuggest(this.app, fIn.inputEl, () => folders, (v) => {
+            new PathSuggest(this.app, fIn.inputEl, () => [...folders, ...allTags.map((tag) => `#${tag}`)], (v) => {
               fIn.setValue(v);
-              void onFolder(v);
+              void onSource(v);
             });
             new PathSuggest(this.app, tIn.inputEl, () => mdFiles, (v) => {
               tIn.setValue(v);
               void onTpl(v);
             });
           }
-          new obsidian5.ToggleComponent(row).setTooltip(t("settings.showDictionaryHighlight")).setValue(d.highlight !== false).onChange(async (value) => {
-            d.highlight = value;
-            refresh();
-            await save();
-          });
-          const globalColor = this.plugin.settings.highlightColor || accentHex;
-          addAppearanceButton2({
-            app: this.app,
-            obsidian: obsidian5,
-            parent: row,
-            title: t("settings.dictionaryAppearance"),
-            labels: appearanceLabels,
-            state: () => ({ color: d.color || globalColor, opacity: Number(d.opacity ?? this.plugin.settings.highlightOpacity) }),
-            onChange: async (patch) => {
-              Object.assign(d, patch);
-              await save();
+          if (!isTagSource()) {
+            new obsidian5.ToggleComponent(row).setTooltip(t("settings.showDictionaryHighlight")).setValue(d.highlight !== false).onChange(async (value) => {
+              d.highlight = value;
               refresh();
-            },
-            onReset: async () => {
-              delete d.color;
-              delete d.opacity;
               await save();
-              refresh();
-            }
-          });
+            });
+            const globalColor = this.plugin.settings.highlightColor || accentHex;
+            addAppearanceButton2({
+              app: this.app,
+              obsidian: obsidian5,
+              parent: row,
+              title: t("settings.dictionaryAppearance"),
+              labels: appearanceLabels,
+              state: () => ({ color: d.color || globalColor, opacity: Number(d.opacity ?? this.plugin.settings.highlightOpacity) }),
+              onChange: async (patch) => {
+                Object.assign(d, patch);
+                await save();
+                refresh();
+              },
+              onReset: async () => {
+                delete d.color;
+                delete d.opacity;
+                await save();
+                refresh();
+              }
+            });
+          } else {
+            row.createSpan({ cls: "lexis-source-kind", text: t("settings.tagSource") });
+          }
           new obsidian5.ExtraButtonComponent(row).setIcon("trash").setTooltip(t("settings.deleteDictionary")).onClick(async () => {
             this.plugin.settings.dicts.splice(i, 1);
             await save();
@@ -5547,28 +5578,8 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
           });
           reorder.attach(row, i);
         });
-        const addDict = dictsWrap.createEl("button", { text: t("settings.addDictionary") });
-        addDict.setCssStyles({ marginTop: "2px" });
-        addDict.addEventListener("click", () => {
-          void (async () => {
-            this.plugin.settings.dicts.push({ folder: "", template: "", highlight: true });
-            await save();
-            renderDicts();
-          })();
-        });
       };
       renderDicts();
-      new Setting3(dictSection).setName(t("settings.tagsAsEntries")).setDesc(t("settings.tagsAsEntriesDesc")).addText((t2) => {
-        t2.setPlaceholder("\u8BCD\u6C47 \u672F\u8BED").setValue(this.plugin.settings.vocabTags);
-        const apply = async (v) => {
-          this.plugin.settings.vocabTags = v;
-          await save();
-          void this.plugin.rebuildIndex(true);
-          this.renderStats();
-        };
-        t2.onChange(apply);
-        tagSuggest(t2, apply);
-      });
       new Setting3(dictSection).setName(t("settings.includeAliases")).addToggle((t2) => t2.setValue(this.plugin.settings.includeAliases).onChange(async (v) => {
         this.plugin.settings.includeAliases = v;
         await save();
@@ -7144,6 +7155,20 @@ var LexisPlugin = class extends import_obsidian8.Plugin {
     if (!Array.isArray(this.settings.dicts)) {
       this.settings.dicts = this.parseFolders(this.settings.vocabFolders).map((f) => ({ folder: f, template: "" }));
     }
+    const legacyTags = this.parseTags(this.settings.vocabTags);
+    const configuredTags = new Set(this.settings.dicts.map((item) => this.parseTags(item.tag || "")).flat());
+    let migratedTags = false;
+    for (const tag of legacyTags) {
+      if (configuredTags.has(tag)) continue;
+      this.settings.dicts.push({ folder: "", template: "", tag });
+      configuredTags.add(tag);
+      migratedTags = true;
+    }
+    if (legacyTags.length) {
+      this.settings.vocabTags = "";
+      migratedTags = true;
+    }
+    if (migratedTags) await this.saveData(this.settings);
   }
   t(key, vars) {
     return this.i18n ? this.i18n.t(key, vars) : key;
@@ -7174,7 +7199,9 @@ var LexisPlugin = class extends import_obsidian8.Plugin {
     return (text || "").split(/[,，;；\s]+/).map((s) => s.trim().replace(/^#/, "").toLowerCase()).filter(Boolean);
   }
   vocabTagSet() {
-    return new Set(this.parseTags(this.settings.vocabTags));
+    const tags = new Set(this.parseTags(this.settings.vocabTags));
+    for (const item of this.settings.dicts || []) for (const tag of this.parseTags(item?.tag || "")) tags.add(tag);
+    return tags;
   }
   excludeTagSet() {
     return new Set(this.parseTags(this.settings.excludeTags));

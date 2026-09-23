@@ -988,6 +988,12 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     padding-top: 10px;
     border-top: 1px solid var(--background-modifier-border);
 }
+.lexis-source-kind {
+    color: var(--text-muted);
+    font-size: 12px;
+    white-space: nowrap;
+    align-self: center;
+}
 .lexis-suspended-row,
 .lexis-archive-row {
     display: flex;

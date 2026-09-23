@@ -72,6 +72,7 @@ export interface ReviewStateSnapshot {
 export interface DictionarySetting {
   folder: string;
   template: string;
+  tag?: string;
   highlight?: boolean;
   color?: string;
   opacity?: number;

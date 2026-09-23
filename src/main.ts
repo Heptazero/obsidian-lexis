@@ -455,6 +455,20 @@ class LexisPlugin extends Plugin {
     if (!Array.isArray(this.settings.dicts)) {
       this.settings.dicts = this.parseFolders(this.settings.vocabFolders).map((f) => ({ folder: f, template: "" }));
     }
+    const legacyTags = this.parseTags(this.settings.vocabTags);
+    const configuredTags = new Set(this.settings.dicts.map((item) => this.parseTags(item.tag || "")).flat());
+    let migratedTags = false;
+    for (const tag of legacyTags) {
+      if (configuredTags.has(tag)) continue;
+      this.settings.dicts.push({ folder: "", template: "", tag });
+      configuredTags.add(tag);
+      migratedTags = true;
+    }
+    if (legacyTags.length) {
+      this.settings.vocabTags = "";
+      migratedTags = true;
+    }
+    if (migratedTags) await this.saveData(this.settings);
   }
 
   t(key: string, vars?: TranslationVars): string { return this.i18n ? this.i18n.t(key, vars) : key; }
@@ -478,7 +492,11 @@ class LexisPlugin extends Plugin {
   // ---------- 出处 & 相关词 ----------
   parseFolders(text: string): string[] { return (text || "").split(/[,，\n]/).map((s) => this.normalizeFolder(s)).filter(Boolean); }
   parseTags(text: string): string[] { return (text || "").split(/[,，;；\s]+/).map((s) => s.trim().replace(/^#/, "").toLowerCase()).filter(Boolean); }
-  vocabTagSet() { return new Set(this.parseTags(this.settings.vocabTags)); }
+  vocabTagSet() {
+    const tags = new Set(this.parseTags(this.settings.vocabTags));
+    for (const item of this.settings.dicts || []) for (const tag of this.parseTags(item?.tag || "")) tags.add(tag);
+    return tags;
+  }
   excludeTagSet() { return new Set(this.parseTags(this.settings.excludeTags)); }
   // 词典表的文件夹列表 = 文件夹来源的单一真相
   dictFolders() { return (this.settings.dicts || []).map((d) => this.normalizeFolder(d && d.folder)).filter(Boolean); }
