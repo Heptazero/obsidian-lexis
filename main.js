@@ -1047,7 +1047,9 @@ var itemForMembers = (item, members, front) => ({
     id: members.length === 1 ? members[0].id : item.syntax.id,
     memberIds: members.map((member) => member.id),
     members,
-    front
+    front,
+    clozeAnswer: members.length === 1 ? members[0].answer : void 0,
+    clozeIndex: members.length === 1 ? members[0].clozeIndex : void 0
   } : void 0
 });
 var chooseClozeRevealMode = (item, mode) => {
@@ -1063,6 +1065,290 @@ var chooseClozeRevealMode = (item, mode) => {
     remaining: rest.map((member) => itemForMembers(item, [member], member.front))
   };
 };
+
+// src/flashcard-syntax.ts
+var PLACEHOLDERS = {
+  question: "{{question}}",
+  answer: "{{answer}}",
+  sideA: "{{sideA}}",
+  sideB: "{{sideB}}"
+};
+var ANSWER_MASK_OPEN = '<span class="lexis-rv-answer-mask">';
+var ANSWER_MASK_CLOSE = "</span>";
+var hashText = (value) => {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+};
+var stableId = (filePath, kind, front, back, occurrence = 0) => `syntax-${hashText([filePath, kind, front.trim(), back.trim(), occurrence].join(""))}`;
+var betweenVariables = (template, left, right) => {
+  const leftIndex = template.indexOf(left);
+  const rightIndex = template.indexOf(right, leftIndex + left.length);
+  if (leftIndex < 0 || rightIndex < 0 || rightIndex < leftIndex) return "";
+  return template.slice(leftIndex + left.length, rightIndex);
+};
+var maskExcludedLines = (markdown) => {
+  const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
+  let fence = "";
+  let frontmatter = lines[0]?.trim() === "---";
+  let comment = false;
+  return lines.map((line, index) => {
+    const trimmed = line.trim();
+    if (frontmatter) {
+      if (index > 0 && trimmed === "---") frontmatter = false;
+      return "";
+    }
+    if (fence) {
+      if (trimmed.startsWith(fence)) fence = "";
+      return "";
+    }
+    const fenceMatch = /^(```+|~~~+)/.exec(trimmed);
+    if (fenceMatch) {
+      fence = fenceMatch[1][0].repeat(fenceMatch[1].length);
+      return "";
+    }
+    if (comment) {
+      if (line.includes("-->")) comment = false;
+      return "";
+    }
+    const commentStart = line.indexOf("<!--");
+    if (commentStart >= 0) {
+      if (!line.slice(commentStart + 4).includes("-->")) comment = true;
+      return line.slice(0, commentStart);
+    }
+    return line;
+  });
+};
+var wrapAnswer = (value) => `${ANSWER_MASK_OPEN}${value}${ANSWER_MASK_CLOSE}`;
+var maskBlockLine = (line) => {
+  if (!line.trim()) return line;
+  const table = /^(\s*\|)(.*)(\|\s*)$/.exec(line);
+  if (table && !/^\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+$/.test(table[2])) {
+    const cells = table[2].split("|").map((cell) => cell.trim() ? wrapAnswer(cell) : cell);
+    return `${table[1]}${cells.join("|")}${table[3]}`;
+  }
+  const match = /^(\s*(?:(?:>\s*)*(?:(?:[-+*]|\d+[.)])\s+|#{1,6}\s+)?))(.*)$/.exec(line);
+  return match ? `${match[1]}${wrapAnswer(match[2])}` : wrapAnswer(line);
+};
+var applyMaskRanges = (line, ranges) => {
+  const ordered = [...ranges].filter((range) => range.end > range.start).sort((left, right) => right.start - left.start);
+  let result = line;
+  for (const range of ordered) result = result.slice(0, range.start) + wrapAnswer(result.slice(range.start, range.end)) + result.slice(range.end);
+  return result;
+};
+function maskSyntaxAnswers(markdown, templates) {
+  const rawLines = markdown.replace(/\r\n?/g, "\n").split("\n");
+  const lines = maskExcludedLines(markdown);
+  const output = [...rawLines];
+  const fullyMasked = /* @__PURE__ */ new Set();
+  const ranges = /* @__PURE__ */ new Map();
+  const addRange = (line, start, end) => {
+    const current = ranges.get(line) || [];
+    current.push({ start, end });
+    ranges.set(line, current);
+  };
+  const blockBetween = betweenVariables(templates.block || "", PLACEHOLDERS.question, PLACEHOLDERS.answer);
+  const blockMarker = blockBetween.trim();
+  const markerOnOwnLine = /^\s*\n[\s\S]*\n\s*$/.test(blockBetween);
+  if (blockMarker) {
+    for (let index = 0; index < lines.length; index++) {
+      const line = lines[index];
+      let question = "";
+      let answerStart = index + 1;
+      if (markerOnOwnLine && line.trim() === blockMarker) {
+        let start = index - 1;
+        while (start >= 0 && lines[start].trim()) start--;
+        question = rawLines.slice(start + 1, index).join("\n").trim();
+      } else if (!markerOnOwnLine && line.trimEnd().endsWith(blockMarker)) {
+        question = line.trimEnd().slice(0, -blockMarker.length).trim();
+      } else continue;
+      let answerEnd = answerStart;
+      while (answerEnd < rawLines.length && rawLines[answerEnd].trim()) answerEnd++;
+      if (!question || answerEnd === answerStart) continue;
+      for (let answerLine = answerStart; answerLine < answerEnd; answerLine++) {
+        output[answerLine] = maskBlockLine(rawLines[answerLine]);
+        fullyMasked.add(answerLine);
+      }
+      index = Math.max(index, answerEnd - 1);
+    }
+  }
+  const bidirectionalDelimiter = betweenVariables(templates.bidirectional || "", PLACEHOLDERS.sideA, PLACEHOLDERS.sideB).trim();
+  const inlineDelimiter = betweenVariables(templates.inline || "", PLACEHOLDERS.question, PLACEHOLDERS.answer).trim();
+  for (let index = 0; index < lines.length; index++) {
+    if (fullyMasked.has(index) || !lines[index].trim()) continue;
+    const line = lines[index];
+    const delimiter = bidirectionalDelimiter && line.includes(bidirectionalDelimiter) ? bidirectionalDelimiter : inlineDelimiter && line.includes(inlineDelimiter) ? inlineDelimiter : "";
+    if (!delimiter) continue;
+    const at = line.indexOf(delimiter);
+    const answerStart = at + delimiter.length;
+    if (line.slice(0, at).trim() && line.slice(answerStart).trim()) addRange(index, answerStart, line.length);
+  }
+  const clozeTemplate = templates.cloze || "";
+  const answerAt = clozeTemplate.indexOf(PLACEHOLDERS.answer);
+  const clozeOpen = answerAt >= 0 ? clozeTemplate.slice(0, answerAt) : "";
+  const clozeClose = answerAt >= 0 ? clozeTemplate.slice(answerAt + PLACEHOLDERS.answer.length) : "";
+  if (clozeOpen && clozeClose) {
+    for (let index = 0; index < lines.length; index++) {
+      if (fullyMasked.has(index) || !lines[index].trim() || ranges.has(index)) continue;
+      const source = lines[index];
+      let cursor = 0;
+      while (cursor < source.length) {
+        const start = source.indexOf(clozeOpen, cursor);
+        if (start < 0) break;
+        const contentStart = start + clozeOpen.length;
+        const close = source.indexOf(clozeClose, contentStart);
+        if (close < 0) break;
+        if (source.slice(contentStart, close).trim()) addRange(index, contentStart, close);
+        cursor = close + clozeClose.length;
+      }
+    }
+  }
+  for (const [index, lineRanges] of ranges) output[index] = applyMaskRanges(rawLines[index], lineRanges);
+  return output.join("\n");
+}
+function findClozeAnswerRanges(markdown, templates) {
+  const clozeTemplate = templates.cloze || "";
+  const answerAt = clozeTemplate.indexOf(PLACEHOLDERS.answer);
+  if (answerAt < 0) return [];
+  const clozeOpen = clozeTemplate.slice(0, answerAt);
+  const clozeClose = clozeTemplate.slice(answerAt + PLACEHOLDERS.answer.length);
+  if (!clozeOpen || !clozeClose) return [];
+  const ranges = [];
+  let cursor = 0;
+  while (cursor < markdown.length) {
+    const start = markdown.indexOf(clozeOpen, cursor);
+    if (start < 0) break;
+    const answerStart = start + clozeOpen.length;
+    const close = markdown.indexOf(clozeClose, answerStart);
+    if (close < 0) break;
+    const answer = markdown.slice(answerStart, close).trim();
+    if (answer) ranges.push({ start, end: close + clozeClose.length, answer });
+    cursor = close + clozeClose.length;
+  }
+  return ranges;
+}
+function maskClozeAnswers(markdown, templates, revealIndexes = /* @__PURE__ */ new Set()) {
+  const ranges = findClozeAnswerRanges(markdown, templates);
+  let result = markdown;
+  for (let index = ranges.length - 1; index >= 0; index--) {
+    const range = ranges[index];
+    if (revealIndexes.has(index)) continue;
+    const answerStart = range.start + (templates.cloze || "").indexOf(PLACEHOLDERS.answer);
+    const answerEnd = range.end - ((templates.cloze || "").length - (templates.cloze || "").indexOf(PLACEHOLDERS.answer) - PLACEHOLDERS.answer.length);
+    result = result.slice(0, answerStart) + `<span class="lexis-rv-answer-mask">${result.slice(answerStart, answerEnd)}</span>` + result.slice(answerEnd);
+  }
+  return result;
+}
+var addCard = (cards, counts, filePath, kind, front, back, line, groupSource = "", combinedFront) => {
+  const base = [kind, front.trim(), back.trim()].join("");
+  const occurrence = counts.get(base) || 0;
+  counts.set(base, occurrence + 1);
+  const id = stableId(filePath, kind, front, back, occurrence);
+  cards.push({
+    id,
+    groupId: `group-${hashText([filePath, kind, groupSource || base, line].join(""))}`,
+    kind,
+    front: front.trim(),
+    back: back.trim(),
+    combinedFront: combinedFront?.trim(),
+    line
+  });
+};
+function parseSyntaxCards(markdown, filePath, templates) {
+  const rawLines = markdown.replace(/\r\n?/g, "\n").split("\n");
+  const lines = maskExcludedLines(markdown);
+  const cards = [];
+  const counts = /* @__PURE__ */ new Map();
+  const consumed = /* @__PURE__ */ new Set();
+  const blockBetween = betweenVariables(templates.block || "", PLACEHOLDERS.question, PLACEHOLDERS.answer);
+  const blockMarker = blockBetween.trim();
+  const markerOnOwnLine = /^\s*\n[\s\S]*\n\s*$/.test(blockBetween);
+  if (blockMarker) {
+    for (let index = 0; index < lines.length; index++) {
+      const line = lines[index];
+      let question = "";
+      let answerStart = index + 1;
+      let questionStart = index;
+      if (markerOnOwnLine && line.trim() === blockMarker) {
+        let start = index - 1;
+        while (start >= 0 && lines[start].trim()) start--;
+        questionStart = start + 1;
+        question = rawLines.slice(questionStart, index).join("\n").trim();
+      } else if (!markerOnOwnLine && line.trimEnd().endsWith(blockMarker)) {
+        question = line.trimEnd().slice(0, -blockMarker.length).trim();
+      } else continue;
+      let answerEnd = answerStart;
+      while (answerEnd < rawLines.length && rawLines[answerEnd].trim()) answerEnd++;
+      const answer = rawLines.slice(answerStart, answerEnd).join("\n").trim();
+      if (!question || !answer) continue;
+      for (let used = questionStart; used < answerEnd; used++) consumed.add(used);
+      addCard(cards, counts, filePath, "block", question, answer, questionStart, `${question}
+${answer}`);
+      index = Math.max(index, answerEnd - 1);
+    }
+  }
+  const bidirectionalDelimiter = betweenVariables(templates.bidirectional || "", PLACEHOLDERS.sideA, PLACEHOLDERS.sideB).trim();
+  const inlineDelimiter = betweenVariables(templates.inline || "", PLACEHOLDERS.question, PLACEHOLDERS.answer).trim();
+  for (let index = 0; index < lines.length; index++) {
+    if (consumed.has(index) || !lines[index].trim()) continue;
+    const line = lines[index];
+    if (bidirectionalDelimiter && line.includes(bidirectionalDelimiter)) {
+      const at = line.indexOf(bidirectionalDelimiter);
+      const sideA = line.slice(0, at).trim();
+      const sideB = line.slice(at + bidirectionalDelimiter.length).trim();
+      if (sideA && sideB) {
+        const group = `${sideA}${bidirectionalDelimiter}${sideB}`;
+        addCard(cards, counts, filePath, "bidirectional", sideA, sideB, index, group);
+        addCard(cards, counts, filePath, "bidirectional", sideB, sideA, index, group);
+        consumed.add(index);
+      }
+      continue;
+    }
+    if (inlineDelimiter && line.includes(inlineDelimiter)) {
+      const at = line.indexOf(inlineDelimiter);
+      const question = line.slice(0, at).trim();
+      const answer = line.slice(at + inlineDelimiter.length).trim();
+      if (question && answer) {
+        addCard(cards, counts, filePath, "inline", question, answer, index);
+        consumed.add(index);
+      }
+    }
+  }
+  const clozeTemplate = templates.cloze || "";
+  const answerAt = clozeTemplate.indexOf(PLACEHOLDERS.answer);
+  const clozeOpen = answerAt >= 0 ? clozeTemplate.slice(0, answerAt) : "";
+  const clozeClose = answerAt >= 0 ? clozeTemplate.slice(answerAt + PLACEHOLDERS.answer.length) : "";
+  if (clozeOpen && clozeClose) {
+    for (let index = 0; index < lines.length; index++) {
+      if (!lines[index].trim()) continue;
+      const source = lines[index];
+      const ranges = [];
+      let cursor = 0;
+      while (cursor < source.length) {
+        const start = source.indexOf(clozeOpen, cursor);
+        if (start < 0) break;
+        const contentStart = start + clozeOpen.length;
+        const close = source.indexOf(clozeClose, contentStart);
+        if (close < 0) break;
+        const answer = source.slice(contentStart, close).trim();
+        if (answer) ranges.push({ start, end: close + clozeClose.length, answer });
+        cursor = close + clozeClose.length;
+      }
+      if (!ranges.length) continue;
+      const combinedFront = ranges.reduceRight((value, range) => value.slice(0, range.start) + "[\u2026]" + value.slice(range.end), source);
+      ranges.forEach((range, clozeIndex) => {
+        const front = source.slice(0, range.start) + "[\u2026]" + source.slice(range.end);
+        addCard(cards, counts, filePath, "cloze", front, source, index, source, combinedFront);
+        cards[cards.length - 1].clozeAnswer = range.answer;
+        cards[cards.length - 1].clozeIndex = clozeIndex;
+      });
+    }
+  }
+  return cards;
+}
 
 // src/review-view.ts
 var errorMessage = (error) => error instanceof Error ? error.message : typeof error === "string" ? error : "Unknown error";
@@ -1276,8 +1562,14 @@ var createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown: renderL
         this.backEl.empty();
         this.backEl.setCssStyles({ display: "none" });
       } else if (item.type === "syntax" && item.syntax) {
-        this.backEl.empty();
-        await renderLexisMarkdown2(this.app, item.syntax.back, this.backEl, item.file.path, this._comp);
+        if (item.syntax.kind === "cloze") {
+          this.backEl.empty();
+          this.backEl.setCssStyles({ display: "none" });
+          if (this.wordEl) await this.renderSyntaxFront(this.wordEl, item, true);
+        } else {
+          this.backEl.empty();
+          await renderLexisMarkdown2(this.app, item.syntax.back, this.backEl, item.file.path, this._comp);
+        }
       } else {
         await this.plugin.renderNoteInto(this.backEl, item.file, this._comp, true);
         const openOcc = () => this.backEl.querySelectorAll("details.lexis-occ-details").forEach((details) => {
@@ -1401,13 +1693,31 @@ var createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown: renderL
     const cloze = this.plugin.buildCloze(ex, item.file.basename);
     await renderLexisMarkdown2(this.app, cloze, wordEl, item.file.path, this._frontComp);
   }
-  async renderSyntaxFront(wordEl, item) {
+  async renderSyntaxFront(wordEl, item, reveal = false) {
     if (!item.syntax || this.currentItem !== item) return;
     wordEl.empty();
+    wordEl.removeClass("is-cloze");
     if (this._frontComp) this._frontComp.unload();
     this._frontComp = new import_obsidian4.Component();
     this._frontComp.load();
-    await renderLexisMarkdown2(this.app, item.syntax.front, wordEl, item.file.path, this._frontComp);
+    let markdown = item.syntax.front;
+    if (item.syntax.kind === "cloze") {
+      wordEl.addClass("is-cloze");
+      const templates = {
+        inline: this.plugin.settings.flashcardInlineTemplate,
+        bidirectional: this.plugin.settings.flashcardBidirectionalTemplate,
+        block: this.plugin.settings.flashcardBlockTemplate,
+        cloze: this.plugin.settings.flashcardClozeTemplate
+      };
+      const ranges = findClozeAnswerRanges(item.syntax.back, templates);
+      const revealIndexes = /* @__PURE__ */ new Set();
+      if (reveal) {
+        if (item.syntax.memberIds.length > 1) ranges.forEach((_, index) => revealIndexes.add(index));
+        else if (item.syntax.clozeIndex != null) revealIndexes.add(item.syntax.clozeIndex);
+      }
+      markdown = maskClozeAnswers(item.syntax.back, templates, revealIndexes);
+    }
+    await renderLexisMarkdown2(this.app, markdown, wordEl, item.file.path, this._frontComp);
   }
   async renderContextFront(wordEl, item) {
     if (!this.isContextCard(item) || this.currentItem !== item) return;
@@ -4094,257 +4404,6 @@ function createReaderInteractions() {
 
 // src/reader-ui.ts
 var obsidian3 = __toESM(require("obsidian"));
-
-// src/flashcard-syntax.ts
-var PLACEHOLDERS = {
-  question: "{{question}}",
-  answer: "{{answer}}",
-  sideA: "{{sideA}}",
-  sideB: "{{sideB}}"
-};
-var ANSWER_MASK_OPEN = '<span class="lexis-rv-answer-mask">';
-var ANSWER_MASK_CLOSE = "</span>";
-var hashText = (value) => {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index++) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(36);
-};
-var stableId = (filePath, kind, front, back, occurrence = 0) => `syntax-${hashText([filePath, kind, front.trim(), back.trim(), occurrence].join(""))}`;
-var betweenVariables = (template, left, right) => {
-  const leftIndex = template.indexOf(left);
-  const rightIndex = template.indexOf(right, leftIndex + left.length);
-  if (leftIndex < 0 || rightIndex < 0 || rightIndex < leftIndex) return "";
-  return template.slice(leftIndex + left.length, rightIndex);
-};
-var maskExcludedLines = (markdown) => {
-  const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
-  let fence = "";
-  let frontmatter = lines[0]?.trim() === "---";
-  let comment = false;
-  return lines.map((line, index) => {
-    const trimmed = line.trim();
-    if (frontmatter) {
-      if (index > 0 && trimmed === "---") frontmatter = false;
-      return "";
-    }
-    if (fence) {
-      if (trimmed.startsWith(fence)) fence = "";
-      return "";
-    }
-    const fenceMatch = /^(```+|~~~+)/.exec(trimmed);
-    if (fenceMatch) {
-      fence = fenceMatch[1][0].repeat(fenceMatch[1].length);
-      return "";
-    }
-    if (comment) {
-      if (line.includes("-->")) comment = false;
-      return "";
-    }
-    const commentStart = line.indexOf("<!--");
-    if (commentStart >= 0) {
-      if (!line.slice(commentStart + 4).includes("-->")) comment = true;
-      return line.slice(0, commentStart);
-    }
-    return line;
-  });
-};
-var wrapAnswer = (value) => `${ANSWER_MASK_OPEN}${value}${ANSWER_MASK_CLOSE}`;
-var maskBlockLine = (line) => {
-  if (!line.trim()) return line;
-  const table = /^(\s*\|)(.*)(\|\s*)$/.exec(line);
-  if (table && !/^\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+$/.test(table[2])) {
-    const cells = table[2].split("|").map((cell) => cell.trim() ? wrapAnswer(cell) : cell);
-    return `${table[1]}${cells.join("|")}${table[3]}`;
-  }
-  const match = /^(\s*(?:(?:>\s*)*(?:(?:[-+*]|\d+[.)])\s+|#{1,6}\s+)?))(.*)$/.exec(line);
-  return match ? `${match[1]}${wrapAnswer(match[2])}` : wrapAnswer(line);
-};
-var applyMaskRanges = (line, ranges) => {
-  const ordered = [...ranges].filter((range) => range.end > range.start).sort((left, right) => right.start - left.start);
-  let result = line;
-  for (const range of ordered) result = result.slice(0, range.start) + wrapAnswer(result.slice(range.start, range.end)) + result.slice(range.end);
-  return result;
-};
-function maskSyntaxAnswers(markdown, templates) {
-  const rawLines = markdown.replace(/\r\n?/g, "\n").split("\n");
-  const lines = maskExcludedLines(markdown);
-  const output = [...rawLines];
-  const fullyMasked = /* @__PURE__ */ new Set();
-  const ranges = /* @__PURE__ */ new Map();
-  const addRange = (line, start, end) => {
-    const current = ranges.get(line) || [];
-    current.push({ start, end });
-    ranges.set(line, current);
-  };
-  const blockBetween = betweenVariables(templates.block || "", PLACEHOLDERS.question, PLACEHOLDERS.answer);
-  const blockMarker = blockBetween.trim();
-  const markerOnOwnLine = /^\s*\n[\s\S]*\n\s*$/.test(blockBetween);
-  if (blockMarker) {
-    for (let index = 0; index < lines.length; index++) {
-      const line = lines[index];
-      let question = "";
-      let answerStart = index + 1;
-      if (markerOnOwnLine && line.trim() === blockMarker) {
-        let start = index - 1;
-        while (start >= 0 && lines[start].trim()) start--;
-        question = rawLines.slice(start + 1, index).join("\n").trim();
-      } else if (!markerOnOwnLine && line.trimEnd().endsWith(blockMarker)) {
-        question = line.trimEnd().slice(0, -blockMarker.length).trim();
-      } else continue;
-      let answerEnd = answerStart;
-      while (answerEnd < rawLines.length && rawLines[answerEnd].trim()) answerEnd++;
-      if (!question || answerEnd === answerStart) continue;
-      for (let answerLine = answerStart; answerLine < answerEnd; answerLine++) {
-        output[answerLine] = maskBlockLine(rawLines[answerLine]);
-        fullyMasked.add(answerLine);
-      }
-      index = Math.max(index, answerEnd - 1);
-    }
-  }
-  const bidirectionalDelimiter = betweenVariables(templates.bidirectional || "", PLACEHOLDERS.sideA, PLACEHOLDERS.sideB).trim();
-  const inlineDelimiter = betweenVariables(templates.inline || "", PLACEHOLDERS.question, PLACEHOLDERS.answer).trim();
-  for (let index = 0; index < lines.length; index++) {
-    if (fullyMasked.has(index) || !lines[index].trim()) continue;
-    const line = lines[index];
-    const delimiter = bidirectionalDelimiter && line.includes(bidirectionalDelimiter) ? bidirectionalDelimiter : inlineDelimiter && line.includes(inlineDelimiter) ? inlineDelimiter : "";
-    if (!delimiter) continue;
-    const at = line.indexOf(delimiter);
-    const answerStart = at + delimiter.length;
-    if (line.slice(0, at).trim() && line.slice(answerStart).trim()) addRange(index, answerStart, line.length);
-  }
-  const clozeTemplate = templates.cloze || "";
-  const answerAt = clozeTemplate.indexOf(PLACEHOLDERS.answer);
-  const clozeOpen = answerAt >= 0 ? clozeTemplate.slice(0, answerAt) : "";
-  const clozeClose = answerAt >= 0 ? clozeTemplate.slice(answerAt + PLACEHOLDERS.answer.length) : "";
-  if (clozeOpen && clozeClose) {
-    for (let index = 0; index < lines.length; index++) {
-      if (fullyMasked.has(index) || !lines[index].trim() || ranges.has(index)) continue;
-      const source = lines[index];
-      let cursor = 0;
-      while (cursor < source.length) {
-        const start = source.indexOf(clozeOpen, cursor);
-        if (start < 0) break;
-        const contentStart = start + clozeOpen.length;
-        const close = source.indexOf(clozeClose, contentStart);
-        if (close < 0) break;
-        if (source.slice(contentStart, close).trim()) addRange(index, contentStart, close);
-        cursor = close + clozeClose.length;
-      }
-    }
-  }
-  for (const [index, lineRanges] of ranges) output[index] = applyMaskRanges(rawLines[index], lineRanges);
-  return output.join("\n");
-}
-var addCard = (cards, counts, filePath, kind, front, back, line, groupSource = "", combinedFront) => {
-  const base = [kind, front.trim(), back.trim()].join("");
-  const occurrence = counts.get(base) || 0;
-  counts.set(base, occurrence + 1);
-  const id = stableId(filePath, kind, front, back, occurrence);
-  cards.push({
-    id,
-    groupId: `group-${hashText([filePath, kind, groupSource || base, line].join(""))}`,
-    kind,
-    front: front.trim(),
-    back: back.trim(),
-    combinedFront: combinedFront?.trim(),
-    line
-  });
-};
-function parseSyntaxCards(markdown, filePath, templates) {
-  const rawLines = markdown.replace(/\r\n?/g, "\n").split("\n");
-  const lines = maskExcludedLines(markdown);
-  const cards = [];
-  const counts = /* @__PURE__ */ new Map();
-  const consumed = /* @__PURE__ */ new Set();
-  const blockBetween = betweenVariables(templates.block || "", PLACEHOLDERS.question, PLACEHOLDERS.answer);
-  const blockMarker = blockBetween.trim();
-  const markerOnOwnLine = /^\s*\n[\s\S]*\n\s*$/.test(blockBetween);
-  if (blockMarker) {
-    for (let index = 0; index < lines.length; index++) {
-      const line = lines[index];
-      let question = "";
-      let answerStart = index + 1;
-      let questionStart = index;
-      if (markerOnOwnLine && line.trim() === blockMarker) {
-        let start = index - 1;
-        while (start >= 0 && lines[start].trim()) start--;
-        questionStart = start + 1;
-        question = rawLines.slice(questionStart, index).join("\n").trim();
-      } else if (!markerOnOwnLine && line.trimEnd().endsWith(blockMarker)) {
-        question = line.trimEnd().slice(0, -blockMarker.length).trim();
-      } else continue;
-      let answerEnd = answerStart;
-      while (answerEnd < rawLines.length && rawLines[answerEnd].trim()) answerEnd++;
-      const answer = rawLines.slice(answerStart, answerEnd).join("\n").trim();
-      if (!question || !answer) continue;
-      for (let used = questionStart; used < answerEnd; used++) consumed.add(used);
-      addCard(cards, counts, filePath, "block", question, answer, questionStart, `${question}
-${answer}`);
-      index = Math.max(index, answerEnd - 1);
-    }
-  }
-  const bidirectionalDelimiter = betweenVariables(templates.bidirectional || "", PLACEHOLDERS.sideA, PLACEHOLDERS.sideB).trim();
-  const inlineDelimiter = betweenVariables(templates.inline || "", PLACEHOLDERS.question, PLACEHOLDERS.answer).trim();
-  for (let index = 0; index < lines.length; index++) {
-    if (consumed.has(index) || !lines[index].trim()) continue;
-    const line = lines[index];
-    if (bidirectionalDelimiter && line.includes(bidirectionalDelimiter)) {
-      const at = line.indexOf(bidirectionalDelimiter);
-      const sideA = line.slice(0, at).trim();
-      const sideB = line.slice(at + bidirectionalDelimiter.length).trim();
-      if (sideA && sideB) {
-        const group = `${sideA}${bidirectionalDelimiter}${sideB}`;
-        addCard(cards, counts, filePath, "bidirectional", sideA, sideB, index, group);
-        addCard(cards, counts, filePath, "bidirectional", sideB, sideA, index, group);
-        consumed.add(index);
-      }
-      continue;
-    }
-    if (inlineDelimiter && line.includes(inlineDelimiter)) {
-      const at = line.indexOf(inlineDelimiter);
-      const question = line.slice(0, at).trim();
-      const answer = line.slice(at + inlineDelimiter.length).trim();
-      if (question && answer) {
-        addCard(cards, counts, filePath, "inline", question, answer, index);
-        consumed.add(index);
-      }
-    }
-  }
-  const clozeTemplate = templates.cloze || "";
-  const answerAt = clozeTemplate.indexOf(PLACEHOLDERS.answer);
-  const clozeOpen = answerAt >= 0 ? clozeTemplate.slice(0, answerAt) : "";
-  const clozeClose = answerAt >= 0 ? clozeTemplate.slice(answerAt + PLACEHOLDERS.answer.length) : "";
-  if (clozeOpen && clozeClose) {
-    for (let index = 0; index < lines.length; index++) {
-      if (!lines[index].trim()) continue;
-      const source = lines[index];
-      const ranges = [];
-      let cursor = 0;
-      while (cursor < source.length) {
-        const start = source.indexOf(clozeOpen, cursor);
-        if (start < 0) break;
-        const contentStart = start + clozeOpen.length;
-        const close = source.indexOf(clozeClose, contentStart);
-        if (close < 0) break;
-        const answer = source.slice(contentStart, close).trim();
-        if (answer) ranges.push({ start, end: close + clozeClose.length, answer });
-        cursor = close + clozeClose.length;
-      }
-      if (!ranges.length) continue;
-      const combinedFront = ranges.reduceRight((value, range) => value.slice(0, range.start) + "[\u2026]" + value.slice(range.end), source);
-      ranges.forEach((range) => {
-        const front = source.slice(0, range.start) + "[\u2026]" + source.slice(range.end);
-        addCard(cards, counts, filePath, "cloze", front, source, index, source, combinedFront);
-      });
-    }
-  }
-  return cards;
-}
-
-// src/reader-ui.ts
 function errorMessage3(error) {
   return error instanceof Error ? error.message : typeof error === "string" ? error : "Unknown error";
 }
@@ -6417,7 +6476,7 @@ function createReviewQueue({ todayStr }) {
       }
       for (const group of combinedGroups.values()) {
         const first = group[0];
-        const members = group.map((syntax) => ({ id: syntax.id, front: syntax.front, card: this.readSyntaxCardState(syntax.id) }));
+        const members = group.map((syntax) => ({ id: syntax.id, front: syntax.front, answer: syntax.clozeAnswer, clozeIndex: syntax.clozeIndex, card: this.readSyntaxCardState(syntax.id) }));
         result.push({
           type: "syntax",
           file,
@@ -6429,6 +6488,8 @@ function createReviewQueue({ todayStr }) {
             kind: "cloze",
             front: members[0].front,
             combinedFront: first.combinedFront || first.front,
+            clozeAnswer: first.clozeAnswer,
+            clozeIndex: first.clozeIndex,
             back: first.back,
             line: first.line
           }

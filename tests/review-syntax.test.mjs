@@ -66,6 +66,17 @@ test("masks configured answers while preserving the note around them", async () 
   assert.match(masked, /```js\nfake::card\n```/);
 });
 
+test("masks cloze answers inline and reveals only the selected range", async () => {
+  const { findClozeAnswerRanges, maskClozeAnswers } = await loadTypeScript("src/flashcard-syntax.ts");
+  const source = "能量 ==高== 时，速度 ==快==。";
+  assert.deepEqual(findClozeAnswerRanges(source, templates).map((range) => range.answer), ["高", "快"]);
+  const masked = maskClozeAnswers(source, templates);
+  assert.equal((masked.match(/lexis-rv-answer-mask/g) || []).length, 2);
+  const one = maskClozeAnswers(source, templates, new Set([0]));
+  assert.match(one, /==高==/);
+  assert.match(one, /lexis-rv-answer-mask/);
+});
+
 test("groups multiple clozes so reveal mode can be chosen on the card", async () => {
   const { createReviewQueue } = await loadTypeScript("src/review-queue.ts");
   const { chooseClozeRevealMode } = await loadTypeScript("src/review-item.ts");

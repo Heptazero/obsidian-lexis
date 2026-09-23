@@ -4,6 +4,7 @@ import { ItemView, Component, MarkdownView, Notice } from "obsidian";
 import type { App, TFile, WorkspaceLeaf } from "obsidian";
 import type { TranslationVars } from "./i18n";
 import { chooseClozeRevealMode, type ClozeRevealMode } from "./review-item";
+import { findClozeAnswerRanges, maskClozeAnswers } from "./flashcard-syntax";
 import type { LexisSettings, ReviewCardState, ReviewItem, ReviewOptions, ReviewStateSnapshot } from "./types";
 
 interface ReviewSchedule {
@@ -229,8 +230,14 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
         this.backEl.empty();
         this.backEl.setCssStyles({ display: "none" });
       } else if (item.type === "syntax" && item.syntax) {
-        this.backEl.empty();
-        await renderLexisMarkdown(this.app, item.syntax.back, this.backEl, item.file.path, this._comp);
+        if (item.syntax.kind === "cloze") {
+          this.backEl.empty();
+          this.backEl.setCssStyles({ display: "none" });
+          if (this.wordEl) await this.renderSyntaxFront(this.wordEl, item, true);
+        } else {
+          this.backEl.empty();
+          await renderLexisMarkdown(this.app, item.syntax.back, this.backEl, item.file.path, this._comp);
+        }
       } else {
         await this.plugin.renderNoteInto(this.backEl, item.file, this._comp, true);
         const openOcc = () => this.backEl.querySelectorAll<HTMLDetailsElement>("details.lexis-occ-details").forEach((details) => { details.open = true; });
@@ -319,12 +326,30 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
     const cloze = this.plugin.buildCloze(ex, item.file.basename);
     await renderLexisMarkdown(this.app, cloze, wordEl, item.file.path, this._frontComp);
   }
-  async renderSyntaxFront(wordEl: HTMLElement, item: ReviewItem) {
+  async renderSyntaxFront(wordEl: HTMLElement, item: ReviewItem, reveal = false) {
     if (!item.syntax || this.currentItem !== item) return;
     wordEl.empty();
+    wordEl.removeClass("is-cloze");
     if (this._frontComp) this._frontComp.unload();
     this._frontComp = new Component(); this._frontComp.load();
-    await renderLexisMarkdown(this.app, item.syntax.front, wordEl, item.file.path, this._frontComp);
+    let markdown = item.syntax.front;
+    if (item.syntax.kind === "cloze") {
+      wordEl.addClass("is-cloze");
+      const templates = {
+        inline: this.plugin.settings.flashcardInlineTemplate,
+        bidirectional: this.plugin.settings.flashcardBidirectionalTemplate,
+        block: this.plugin.settings.flashcardBlockTemplate,
+        cloze: this.plugin.settings.flashcardClozeTemplate,
+      };
+      const ranges = findClozeAnswerRanges(item.syntax.back, templates);
+      const revealIndexes = new Set<number>();
+      if (reveal) {
+        if (item.syntax.memberIds.length > 1) ranges.forEach((_, index) => revealIndexes.add(index));
+        else if (item.syntax.clozeIndex != null) revealIndexes.add(item.syntax.clozeIndex);
+      }
+      markdown = maskClozeAnswers(item.syntax.back, templates, revealIndexes);
+    }
+    await renderLexisMarkdown(this.app, markdown, wordEl, item.file.path, this._frontComp);
   }
   async renderContextFront(wordEl: HTMLElement, item: ReviewItem) {
     if (!this.isContextCard(item) || this.currentItem !== item) return;

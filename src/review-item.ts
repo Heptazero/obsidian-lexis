@@ -18,6 +18,8 @@ const itemForMembers = (item: ReviewItem, members: SyntaxReviewMember[], front: 
     memberIds: members.map((member) => member.id),
     members,
     front,
+    clozeAnswer: members.length === 1 ? members[0].answer : undefined,
+    clozeIndex: members.length === 1 ? members[0].clozeIndex : undefined,
   } : undefined,
 });
 

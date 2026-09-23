@@ -39,6 +39,8 @@ export interface SyntaxReviewCard {
   kind: "inline" | "bidirectional" | "block" | "cloze";
   front: string;
   combinedFront?: string;
+  clozeAnswer?: string;
+  clozeIndex?: number;
   back: string;
   line: number;
 }
@@ -46,6 +48,8 @@ export interface SyntaxReviewCard {
 export interface SyntaxReviewMember {
   id: string;
   front: string;
+  answer?: string;
+  clozeIndex?: number;
   card: ReviewCardState;
 }
 

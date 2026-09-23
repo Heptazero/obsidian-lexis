@@ -179,7 +179,7 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
       }
       for (const group of combinedGroups.values()) {
         const first = group[0];
-        const members = group.map((syntax) => ({ id: syntax.id, front: syntax.front, card: this.readSyntaxCardState(syntax.id) }));
+        const members = group.map((syntax) => ({ id: syntax.id, front: syntax.front, answer: syntax.clozeAnswer, clozeIndex: syntax.clozeIndex, card: this.readSyntaxCardState(syntax.id) }));
         result.push({
           type: "syntax",
           file,
@@ -191,6 +191,8 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
             kind: "cloze",
             front: members[0].front,
             combinedFront: first.combinedFront || first.front,
+            clozeAnswer: first.clozeAnswer,
+            clozeIndex: first.clozeIndex,
             back: first.back,
             line: first.line,
           },

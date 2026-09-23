@@ -14,7 +14,15 @@ export interface ParsedSyntaxCard {
   front: string;
   back: string;
   combinedFront?: string;
+  clozeAnswer?: string;
+  clozeIndex?: number;
   line: number;
+}
+
+export interface ClozeAnswerRange {
+  start: number;
+  end: number;
+  answer: string;
 }
 
 const PLACEHOLDERS = {
@@ -178,6 +186,41 @@ export function maskSyntaxAnswers(markdown: string, templates: FlashcardTemplate
   return output.join("\n");
 }
 
+export function findClozeAnswerRanges(markdown: string, templates: FlashcardTemplates): ClozeAnswerRange[] {
+  const clozeTemplate = templates.cloze || "";
+  const answerAt = clozeTemplate.indexOf(PLACEHOLDERS.answer);
+  if (answerAt < 0) return [];
+  const clozeOpen = clozeTemplate.slice(0, answerAt);
+  const clozeClose = clozeTemplate.slice(answerAt + PLACEHOLDERS.answer.length);
+  if (!clozeOpen || !clozeClose) return [];
+  const ranges: ClozeAnswerRange[] = [];
+  let cursor = 0;
+  while (cursor < markdown.length) {
+    const start = markdown.indexOf(clozeOpen, cursor);
+    if (start < 0) break;
+    const answerStart = start + clozeOpen.length;
+    const close = markdown.indexOf(clozeClose, answerStart);
+    if (close < 0) break;
+    const answer = markdown.slice(answerStart, close).trim();
+    if (answer) ranges.push({ start, end: close + clozeClose.length, answer });
+    cursor = close + clozeClose.length;
+  }
+  return ranges;
+}
+
+export function maskClozeAnswers(markdown: string, templates: FlashcardTemplates, revealIndexes: Set<number> = new Set()): string {
+  const ranges = findClozeAnswerRanges(markdown, templates);
+  let result = markdown;
+  for (let index = ranges.length - 1; index >= 0; index--) {
+    const range = ranges[index];
+    if (revealIndexes.has(index)) continue;
+    const answerStart = range.start + (templates.cloze || "").indexOf(PLACEHOLDERS.answer);
+    const answerEnd = range.end - ((templates.cloze || "").length - (templates.cloze || "").indexOf(PLACEHOLDERS.answer) - PLACEHOLDERS.answer.length);
+    result = result.slice(0, answerStart) + `<span class="lexis-rv-answer-mask">${result.slice(answerStart, answerEnd)}</span>` + result.slice(answerEnd);
+  }
+  return result;
+}
+
 const addCard = (
   cards: ParsedSyntaxCard[],
   counts: Map<string, number>,
@@ -288,9 +331,11 @@ export function parseSyntaxCards(markdown: string, filePath: string, templates: 
       }
       if (!ranges.length) continue;
       const combinedFront = ranges.reduceRight((value, range) => value.slice(0, range.start) + "[…]" + value.slice(range.end), source);
-      ranges.forEach((range) => {
+      ranges.forEach((range, clozeIndex) => {
         const front = source.slice(0, range.start) + "[…]" + source.slice(range.end);
         addCard(cards, counts, filePath, "cloze", front, source, index, source, combinedFront);
+        cards[cards.length - 1].clozeAnswer = range.answer;
+        cards[cards.length - 1].clozeIndex = clozeIndex;
       });
     }
   }

@@ -628,7 +628,7 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
 }
 .lexis-rv-word.is-syntax {
     cursor: default;
-    font-size: 24px;
+    font-size: calc(var(--font-text-size) * 1.15);
     text-align: left;
     font-weight: 600;
     user-select: text;
@@ -639,7 +639,7 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
 .lexis-rv-word.is-context {
     width: 100%;
     cursor: default;
-    font-size: var(--font-text-size);
+    font-size: calc(var(--font-text-size) * 1.05);
     font-weight: var(--font-normal);
     line-height: var(--line-height-normal);
     text-align: left;
@@ -665,6 +665,20 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
 .lexis-rv-word.is-context.is-masked .lexis-rv-answer-mask img,
 .lexis-rv-word.is-context.is-masked .lexis-rv-answer-mask svg {
     opacity: 0;
+}
+.lexis-rv-word.is-syntax.is-cloze {
+    width: 100%;
+    cursor: default;
+    font-size: calc(var(--font-text-size) * 1.05);
+    font-weight: var(--font-normal);
+    line-height: var(--line-height-normal);
+    text-align: left;
+}
+.lexis-rv-word.is-cloze .lexis-rv-answer-mask,
+.lexis-rv-word.is-cloze .lexis-rv-answer-mask * {
+    color: transparent;
+    text-shadow: none;
+    user-select: none;
 }
 .lexis-rv-source {
     align-self: flex-start;
@@ -1162,7 +1176,7 @@ body.is-phone .workspace-leaf-content[data-type="lexis-review-view"] .lexis-rv-r
         font-size: 20px;
     }
     .lexis-rv-word.is-syntax {
-        font-size: 21px;
+        font-size: calc(var(--font-text-size) * 1.05);
     }
     .lexis-rv-back {
         margin-top: 14px;
