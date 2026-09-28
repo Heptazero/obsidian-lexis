@@ -30,6 +30,7 @@ import { createTemplateProvider } from "./template-provider";
 import { createSettingsTab } from "./settings-tab";
 import { createReviewState } from "./review-state";
 import { createReviewQueue } from "./review-queue";
+import { parseSectionLinks, relationBlockSource, relationHeading, relationTypes } from "./relation-sections";
 import { repairReviewHistory, scheduleReviewCard, type ReviewSchedule } from "./review-scheduler";
 import { migrateLegacySettings, pluginFolderName, type StoredSettings } from "./settings-migration";
 import { WorkspaceDocuments } from "./workspace-documents";
@@ -313,6 +314,7 @@ class LexisPlugin extends Plugin {
 
     this.registerMarkdownPostProcessor((el, ctx) => this.highlightElement(el, ctx));
     this.registerMarkdownCodeBlockProcessor("lexis", (src, el, ctx) => this.renderLexisBlock(el, ctx, src));
+    this.registerMarkdownCodeBlockProcessor("rel", (src, el, ctx) => this.renderLexisBlock(el, ctx, relationBlockSource(src, ctx.getSectionInfo(el)?.text)));
     this.registerMarkdownCodeBlockProcessor("lexis-heatmap", (src, el) => this.renderHeatmap(el));
     this.registerMarkdownCodeBlockProcessor("lexis-home", (src, el) => this.renderHomeBlock(el));
     this.setupLiveExtension();
@@ -589,27 +591,13 @@ class LexisPlugin extends Plugin {
     for (const dest in out) { if (this.inVocabFolder(dest) && dest !== file.path) set.add(dest); }
     return [...set].map((p) => this.app.vault.getAbstractFileByPath(p)).filter((file): file is TFile => file instanceof TFile);
   }
-  parseSectionLinks(raw: string, known: string[]): { type: string; target: string }[] {
-    const clean = raw.replace(/```[\s\S]*?```/g, "").replace(/^---\n[\s\S]*?\n---/, "");
-    const out: { type: string; target: string }[] = [];
-    let cur = "相关";
-    const linkRe = /\[\[([^\]|#\n]+)(?:\|[^\]\n]*)?\]\]/g;
-    for (const line of clean.split("\n")) {
-      const h = /^#{1,6}\s*(.+?)\s*$/.exec(line);
-      if (h) { cur = known.find((t) => h[1].includes(t)) || "相关"; continue; }
-      let m; linkRe.lastIndex = 0;
-      while ((m = linkRe.exec(line))) out.push({ type: cur, target: m[1].trim() });
-    }
-    return out;
-  }
   async findTypedRelations(file: TFile): Promise<{ out: RelationBag; inc: RelationBag }> {
-    const KNOWN = ["近义词", "同根词", "形近词", "辨析"];
     const out: Record<string, Map<string, string>> = {}, inc: Record<string, Map<string, string>> = {};
     const put = (bag: Record<string, Map<string, string>>, type: string, tf: TFile | null) => { if (!tf || tf.path === file.path) return; (bag[type] = bag[type] || new Map<string, string>()).set(tf.path, tf.basename); };
     // 出链:本词笔记里每个 [[link]] 在哪个段下
     try {
       const raw = await this.app.vault.cachedRead(file);
-      for (const { type, target } of this.parseSectionLinks(raw, KNOWN)) {
+      for (const { type, target } of parseSectionLinks(raw)) {
         const tf = this.app.metadataCache.getFirstLinkpathDest(target, file.path);
         if (tf && this.inVocabFolder(tf.path)) put(out, type, tf);
       }
@@ -623,7 +611,7 @@ class LexisPlugin extends Plugin {
       try {
         const raw = await this.app.vault.cachedRead(srcFile);
         let matched = false;
-        for (const { type, target } of this.parseSectionLinks(raw, KNOWN)) {
+        for (const { type, target } of parseSectionLinks(raw)) {
           const tf = this.app.metadataCache.getFirstLinkpathDest(target, src);
           if (tf && tf.path === file.path) { put(inc, type, srcFile); matched = true; }
         }
@@ -653,7 +641,7 @@ class LexisPlugin extends Plugin {
   }
   async renderTypedRelations(container: HTMLElement, file: TFile): Promise<number> {
     const { out, inc } = await this.findTypedRelations(file);
-    const order = ["近义词", "同根词", "形近词", "辨析", "相关"];
+    const order = relationTypes(out, inc);
     let n = 0;
     for (const t of order) {
       const map = new Map<string, string>();
@@ -668,7 +656,8 @@ class LexisPlugin extends Plugin {
   }
   async renderReverseRelations(container: HTMLElement, file: TFile, type: string): Promise<number> {
     const { out, inc } = await this.findTypedRelations(file);
-    const types = type === "辨析" ? ["辨析", "相关"] : [type];
+    const name = relationHeading(type);
+    const types = name === "辨析" ? ["辨析", "相关"] : [name];
     const outPaths = new Set<string>();
     for (const t of types) for (const r of (out[t] || [])) outPaths.add(r.path);
     const map = new Map<string, string>();

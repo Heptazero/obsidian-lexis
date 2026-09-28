@@ -2490,6 +2490,51 @@ async function withTimeout(promise, milliseconds) {
   }
 }
 
+// src/relation-sections.ts
+function relationHeading(text) {
+  return text.replace(/\s+#+\s*$/, "").replace(/^\s*\d+(?:\.\d+)*[.)、]?\s+/, "").trim().normalize("NFC");
+}
+function parseSectionLinks(raw) {
+  const clean = raw.replace(/```[\s\S]*?```/g, "").replace(/^---\n[\s\S]*?\n---/, "");
+  const out = [];
+  let current = "\u76F8\u5173";
+  const linkRe = /\[\[([^\]\n]+)\]\]/g;
+  for (const line of clean.split("\n")) {
+    const heading = /^#{1,6}[ \t]+(.+?)\s*$/.exec(line);
+    if (heading) {
+      current = relationHeading(heading[1]) || "\u76F8\u5173";
+      continue;
+    }
+    linkRe.lastIndex = 0;
+    let match = linkRe.exec(line);
+    while (match) {
+      const target = match[1].split(/[|#]/, 1)[0].trim();
+      if (target && line[match.index - 1] !== "!") out.push({ type: current, target });
+      match = linkRe.exec(line);
+    }
+  }
+  return out;
+}
+function relationTypes(out, inc) {
+  const names = /* @__PURE__ */ new Set([...Object.keys(out), ...Object.keys(inc)]);
+  names.delete("\u76F8\u5173");
+  return [...names, ...out["\u76F8\u5173"]?.length || inc["\u76F8\u5173"]?.length ? ["\u76F8\u5173"] : []];
+}
+function relationBlockSource(source, sectionText) {
+  const info = /(?:^|\r?\n)[ \t]*(?:`{3,}|~{3,})[ \t]*rel(?:[ \t]+([^\r\n]+))?[ \t]*(?=\r?\n|$)/i.exec(sectionText || "")?.[1];
+  return `rel ${relationHeading(info || source.trim().split(/\r?\n/, 1)[0] || "")}`.trim();
+}
+function replaceLexisFences(markdown, replace) {
+  return markdown.replace(
+    /(^|\n)(`{3,})[ \t]*(lexis|rel)\b([^\r\n]*)\r?\n([\s\S]*?)\2[ \t]*(?=\r?\n|$)/gi,
+    (_all, prefix, _fence, language, info, body) => {
+      const source = language.toLowerCase() === "rel" ? relationBlockSource(body, `\`\`\`rel${info}`) : `${info}
+${body}`.trim();
+      return `${prefix}${replace(source)}`;
+    }
+  );
+}
+
 // src/bridge-api.ts
 function errorMessage2(error) {
   if (error instanceof Error) return error.message;
@@ -2654,7 +2699,7 @@ ${line}`);
     }
     appendBeforeLexisBlock(data, blockText) {
       const content = String(data || "");
-      const match = /(^|\n)```lexis\b/.exec(content);
+      const match = /(^|\n)```(?:lexis|rel)\b/.exec(content);
       const at = match ? match.index + match[1].length : -1;
       if (at >= 0) {
         const before2 = content.slice(0, at).replace(/\s*$/, "");
@@ -2900,7 +2945,7 @@ ${line}`);
       let body = "";
       try {
         const raw = await this.app.vault.cachedRead(e.file);
-        body = raw.replace(/^---\n[\s\S]*?\n---\n?/, "").replace(/```dataviewjs[\s\S]*?```/g, "").replace(/```dataview[\s\S]*?```/g, "").replace(/```lexis[\s\S]*?```/g, "");
+        body = raw.replace(/^---\n[\s\S]*?\n---\n?/, "").replace(/```dataviewjs[\s\S]*?```/g, "").replace(/```dataview[\s\S]*?```/g, "").replace(/```(?:lexis|rel)\b[\s\S]*?```/g, "");
         body = this.compactSections(body.trim());
       } catch {
       }
@@ -2983,9 +3028,9 @@ ${line}`);
       }
       raw = raw.replace(/^---\n[\s\S]*?\n---\n?/, "").replace(/```dataviewjs[\s\S]*?```/g, "").replace(/```dataview[\s\S]*?```/g, "");
       const blocks = [];
-      raw = raw.replace(/```lexis\s*([\s\S]*?)```/g, (_whole, inner) => {
+      raw = replaceLexisFences(raw, (source) => {
         const i = blocks.length;
-        blocks.push((inner || "").trim());
+        blocks.push(source);
         return `
 
 @@LEXIS${i}@@
@@ -3090,14 +3135,15 @@ ${line}`);
         try {
           const { out, inc } = await this.findTypedRelations(file);
           if ((m === "rel" || m === "related") && typeArg) {
-            const types = typeArg === "\u8FA8\u6790" ? ["\u8FA8\u6790", "\u76F8\u5173"] : [typeArg];
+            const type = relationHeading(typeArg);
+            const types = type === "\u8FA8\u6790" ? ["\u8FA8\u6790", "\u76F8\u5173"] : [type];
             const outPaths = /* @__PURE__ */ new Set();
             for (const t of types) for (const r of out[t] || []) outPaths.add(r.path);
             const map = /* @__PURE__ */ new Map();
             for (const t of types) for (const r of inc[t] || []) if (!outPaths.has(r.path)) map.set(r.path, r.basename);
             if (map.size) html += `<div class="lexis-web-rel">` + [...map].map(([p, b]) => olink(p, b)).join("") + `</div>`;
           } else {
-            for (const t of ["\u8FD1\u4E49\u8BCD", "\u540C\u6839\u8BCD", "\u5F62\u8FD1\u8BCD", "\u8FA8\u6790", "\u76F8\u5173"]) {
+            for (const t of relationTypes(out, inc)) {
               const map = relMap(out, [t]);
               for (const [p, b] of relMap(inc, [t])) map.set(p, b);
               if (!map.size) continue;
@@ -5110,12 +5156,12 @@ ${line}---` + data.slice(fm.index + fm[0].length);
       return md.replace(/^#{2,6}[ \t].*\n(?:[ \t]*\n)*(?=#{1,6}[ \t]|$)/gm, "").trim();
     }
     stripForPreview(content) {
-      return content.replace(/^---\n[\s\S]*?\n---\n?/, "").replace(/```dataviewjs[\s\S]*?```/g, "").replace(/```dataview[\s\S]*?```/g, "").replace(/```lexis[\s\S]*?```/g, "").trim();
+      return content.replace(/^---\n[\s\S]*?\n---\n?/, "").replace(/```dataviewjs[\s\S]*?```/g, "").replace(/```dataview[\s\S]*?```/g, "").replace(/```(?:lexis|rel)\b[\s\S]*?```/g, "").trim();
     }
     async renderNoteInto(el, file, comp, keepLexis = false, maskAnswers = false) {
       const raw = await this.app.vault.cachedRead(file);
       let stripped = raw.replace(/^---\n[\s\S]*?\n---\n?/, "").replace(/```dataviewjs[\s\S]*?```/g, "").replace(/```dataview[\s\S]*?```/g, "");
-      if (!keepLexis) stripped = stripped.replace(/```lexis[\s\S]*?```/g, "");
+      if (!keepLexis) stripped = stripped.replace(/```(?:lexis|rel)\b[\s\S]*?```/g, "");
       if (maskAnswers) stripped = maskSyntaxAnswers(stripped, {
         inline: this.settings.flashcardInlineTemplate,
         bidirectional: this.settings.flashcardBidirectionalTemplate,
@@ -7522,6 +7568,7 @@ var LexisPlugin = class extends import_obsidian9.Plugin {
     this.addSettingTab(new LexisSettingTab(this.app, this));
     this.registerMarkdownPostProcessor((el, ctx) => this.highlightElement(el, ctx));
     this.registerMarkdownCodeBlockProcessor("lexis", (src, el, ctx) => this.renderLexisBlock(el, ctx, src));
+    this.registerMarkdownCodeBlockProcessor("rel", (src, el, ctx) => this.renderLexisBlock(el, ctx, relationBlockSource(src, ctx.getSectionInfo(el)?.text)));
     this.registerMarkdownCodeBlockProcessor("lexis-heatmap", (src, el) => this.renderHeatmap(el));
     this.registerMarkdownCodeBlockProcessor("lexis-home", (src, el) => this.renderHomeBlock(el));
     this.setupLiveExtension();
@@ -7823,25 +7870,7 @@ var LexisPlugin = class extends import_obsidian9.Plugin {
     }
     return [...set].map((p) => this.app.vault.getAbstractFileByPath(p)).filter((file2) => file2 instanceof import_obsidian9.TFile);
   }
-  parseSectionLinks(raw, known) {
-    const clean = raw.replace(/```[\s\S]*?```/g, "").replace(/^---\n[\s\S]*?\n---/, "");
-    const out = [];
-    let cur = "\u76F8\u5173";
-    const linkRe = /\[\[([^\]|#\n]+)(?:\|[^\]\n]*)?\]\]/g;
-    for (const line of clean.split("\n")) {
-      const h = /^#{1,6}\s*(.+?)\s*$/.exec(line);
-      if (h) {
-        cur = known.find((t) => h[1].includes(t)) || "\u76F8\u5173";
-        continue;
-      }
-      let m;
-      linkRe.lastIndex = 0;
-      while (m = linkRe.exec(line)) out.push({ type: cur, target: m[1].trim() });
-    }
-    return out;
-  }
   async findTypedRelations(file) {
-    const KNOWN = ["\u8FD1\u4E49\u8BCD", "\u540C\u6839\u8BCD", "\u5F62\u8FD1\u8BCD", "\u8FA8\u6790"];
     const out = {}, inc = {};
     const put = (bag, type, tf) => {
       if (!tf || tf.path === file.path) return;
@@ -7849,7 +7878,7 @@ var LexisPlugin = class extends import_obsidian9.Plugin {
     };
     try {
       const raw = await this.app.vault.cachedRead(file);
-      for (const { type, target } of this.parseSectionLinks(raw, KNOWN)) {
+      for (const { type, target } of parseSectionLinks(raw)) {
         const tf = this.app.metadataCache.getFirstLinkpathDest(target, file.path);
         if (tf && this.inVocabFolder(tf.path)) put(out, type, tf);
       }
@@ -7863,7 +7892,7 @@ var LexisPlugin = class extends import_obsidian9.Plugin {
       try {
         const raw = await this.app.vault.cachedRead(srcFile);
         let matched = false;
-        for (const { type, target } of this.parseSectionLinks(raw, KNOWN)) {
+        for (const { type, target } of parseSectionLinks(raw)) {
           const tf = this.app.metadataCache.getFirstLinkpathDest(target, src);
           if (tf && tf.path === file.path) {
             put(inc, type, srcFile);
@@ -7908,7 +7937,7 @@ var LexisPlugin = class extends import_obsidian9.Plugin {
   }
   async renderTypedRelations(container, file) {
     const { out, inc } = await this.findTypedRelations(file);
-    const order = ["\u8FD1\u4E49\u8BCD", "\u540C\u6839\u8BCD", "\u5F62\u8FD1\u8BCD", "\u8FA8\u6790", "\u76F8\u5173"];
+    const order = relationTypes(out, inc);
     let n = 0;
     for (const t of order) {
       const map = /* @__PURE__ */ new Map();
@@ -7926,7 +7955,8 @@ var LexisPlugin = class extends import_obsidian9.Plugin {
   }
   async renderReverseRelations(container, file, type) {
     const { out, inc } = await this.findTypedRelations(file);
-    const types = type === "\u8FA8\u6790" ? ["\u8FA8\u6790", "\u76F8\u5173"] : [type];
+    const name = relationHeading(type);
+    const types = name === "\u8FA8\u6790" ? ["\u8FA8\u6790", "\u76F8\u5173"] : [name];
     const outPaths = /* @__PURE__ */ new Set();
     for (const t of types) for (const r of out[t] || []) outPaths.add(r.path);
     const map = /* @__PURE__ */ new Map();

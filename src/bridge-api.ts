@@ -2,6 +2,7 @@
 
 import type { App, Component as ObsidianComponent, TFile as ObsidianTFile } from "obsidian";
 import { containsMath, withTimeout } from "./bridge-render";
+import { relationHeading, relationTypes, replaceLexisFences } from "./relation-sections";
 import type { Occurrence } from "./occurrence-search";
 import type { HighlightStyle, InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats, ReviewHistoryEvent } from "./types";
 
@@ -267,7 +268,7 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, recentR
   }
   appendBeforeLexisBlock(data: string, blockText: string): string {
     const content = String(data || "");
-    const match = /(^|\n)```lexis\b/.exec(content);
+    const match = /(^|\n)```(?:lexis|rel)\b/.exec(content);
     const at = match ? match.index + match[1].length : -1;
     if (at >= 0) {
       const before = content.slice(0, at).replace(/\s*$/, "");
@@ -492,7 +493,7 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, recentR
     let body = "";
     try {
       const raw = await this.app.vault.cachedRead(e.file);
-      body = raw.replace(/^---\n[\s\S]*?\n---\n?/, "").replace(/```dataviewjs[\s\S]*?```/g, "").replace(/```dataview[\s\S]*?```/g, "").replace(/```lexis[\s\S]*?```/g, "");
+      body = raw.replace(/^---\n[\s\S]*?\n---\n?/, "").replace(/```dataviewjs[\s\S]*?```/g, "").replace(/```dataview[\s\S]*?```/g, "").replace(/```(?:lexis|rel)\b[\s\S]*?```/g, "");
       body = this.compactSections(body.trim());
     } catch { /* The card can still render its metadata when the note cannot be read. */ }
     const html = await this.bridgeFullHtml(e.file, e.display);
@@ -559,7 +560,7 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, recentR
     raw = raw.replace(/^---\n[\s\S]*?\n---\n?/, "").replace(/```dataviewjs[\s\S]*?```/g, "").replace(/```dataview[\s\S]*?```/g, "");
     // 把每个 lexis 块换成占位符,先整体渲染(保留标题与顺序),再回填各块算好的 HTML
     const blocks: string[] = [];
-    raw = raw.replace(/```lexis\s*([\s\S]*?)```/g, (_whole: string, inner: string) => { const i = blocks.length; blocks.push((inner || "").trim()); return `\n\n@@LEXIS${i}@@\n\n`; });
+    raw = replaceLexisFences(raw, (source) => { const i = blocks.length; blocks.push(source); return `\n\n@@LEXIS${i}@@\n\n`; });
     const div = createDiv();
     const comp = new Component(); comp.load();
     try {
@@ -645,13 +646,14 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, recentR
         const { out, inc } = await this.findTypedRelations(file);
         if ((m === "rel" || m === "related") && typeArg) {
           // 某标题下的块:只显示「反向未回链」的(正向手写链接已在正文里渲染了)
-          const types = typeArg === "辨析" ? ["辨析", "相关"] : [typeArg];
+          const type = relationHeading(typeArg);
+          const types = type === "辨析" ? ["辨析", "相关"] : [type];
           const outPaths = new Set<string>(); for (const t of types) for (const r of (out[t] || [])) outPaths.add(r.path);
           const map = new Map<string, string>(); for (const t of types) for (const r of (inc[t] || [])) if (!outPaths.has(r.path)) map.set(r.path, r.basename);
           if (map.size) html += `<div class="lexis-web-rel">` + [...map].map(([p, b]) => olink(p, b)).join("") + `</div>`;
         } else {
           // 不带类型(如悬浮卡空块):全部分类,各自带标题
-          for (const t of ["近义词", "同根词", "形近词", "辨析", "相关"]) {
+          for (const t of relationTypes(out, inc)) {
             const map = relMap(out, [t]); for (const [p, b] of relMap(inc, [t])) map.set(p, b);
             if (!map.size) continue;
             html += `<div class="lexis-web-sec">🔗 ${escHtml(t)}</div><div class="lexis-web-rel">` + [...map].map(([p, b]) => olink(p, b)).join("") + `</div>`;

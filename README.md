@@ -86,6 +86,17 @@ Use a `lexis` code block to render memory, relationship, and occurrence data ins
 - `derived` — root-derived entries
 - blank — all applicable sections
 
+Relation types come from heading text rather than a fixed list. Any Markdown heading level (`#` through `######`) works. For example:
+
+````md
+### Antonyms
+```rel Antonyms
+```
+[[cold]]
+````
+
+This is shorthand for `rel Antonyms` inside a `lexis` block. The block adds missing reverse links without repeating links already written in the note.
+
 Use `lexis-home` for a compact home summary, or `lexis-heatmap` for the heatmap alone.
 
 ## Why a personal lexicon
