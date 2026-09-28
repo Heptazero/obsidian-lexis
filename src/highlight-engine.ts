@@ -73,10 +73,27 @@ function createHighlightEngine({ Notice, boundedSource, compactMixedScriptSpacin
     this._occCache.clear();
     if (file?.extension === "pdf") this.occurrenceSearch?.invalidatePdf(file.path);
     if (oldPath && /\.pdf$/i.test(oldPath)) this.occurrenceSearch?.invalidatePdf(oldPath);
-    if (oldPath && p && this.settings.reviewHistory?.[oldPath]) {
-      this.settings.reviewHistory[p] = this.settings.reviewHistory[oldPath];
-      delete this.settings.reviewHistory[oldPath];
-      void this.saveSettings();
+    if (oldPath && p) {
+      let reviewChanged = false;
+      if (this.settings.reviewHistory?.[oldPath]) {
+        this.settings.reviewHistory[p] = this.settings.reviewHistory[oldPath];
+        delete this.settings.reviewHistory[oldPath];
+        reviewChanged = true;
+      }
+      if (this.settings.reviewAddedAt?.[oldPath]) {
+        this.settings.reviewAddedAt[p] = this.settings.reviewAddedAt[oldPath];
+        delete this.settings.reviewAddedAt[oldPath];
+        reviewChanged = true;
+      }
+      for (const event of this.settings.reviewEvents || []) {
+        if (event.filePath === oldPath) { event.filePath = p; reviewChanged = true; }
+        if (event.type === "note" && event.memberKeys.includes(oldPath)) {
+          event.memberKeys = event.memberKeys.map((key) => key === oldPath ? p : key);
+          event.label = file?.basename || event.label;
+          reviewChanged = true;
+        }
+      }
+      if (reviewChanged) void this.saveSettings();
     }
     if (this.isVocabFile(file) || this.vocabPaths.has(p) || this.isInlineSourceFile(file) || this.inlineSourcePaths?.has(p) || (oldPath && (this.inFolderScope(oldPath) || this.vocabPaths.has(oldPath) || this.inlineSourcePaths?.has(oldPath)))) this.scheduleRebuild();
   }

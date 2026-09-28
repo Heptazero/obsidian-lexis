@@ -295,28 +295,31 @@ test("counts note text and sorts eligible notes by field and direction", async (
 
 test("applies, suspends, and undoes one combined action across member clozes", async () => {
   const { createReviewState } = await loadTypeScript("src/review-state.ts");
-  const settings = { syntaxCardStates: {}, suspendedReviewItems: {}, reviewHistory: {}, reviewLog: {} };
+  const settings = { syntaxCardStates: {}, suspendedReviewItems: {}, reviewHistory: {}, reviewLog: {}, reviewEvents: [] };
   const host = {
     app: { fileManager: { processFrontMatter: async () => {} } },
     settings,
     saveSettings: async () => {},
   };
   Object.defineProperties(host, createReviewState({ todayStr: () => "2026-08-31", round2: (value) => Math.round(value * 100) / 100 }));
-  const item = { type: "syntax", file: { path: "a.md" }, card: {}, syntax: { memberIds: ["a", "b"] } };
+  const item = { type: "syntax", file: { path: "a.md", basename: "a" }, card: {}, syntax: { memberIds: ["a", "b"] } };
   const snapshot = host.snapshotReviewItem(item);
   const schedule = { s: 1.234, d: 4.567, due: "2026-09-01", reps: 1, lapses: 0 };
   await host.applyReviewItemSchedule(item, schedule);
-  await host.logReviewItem(item, schedule, 3, 0.8);
+  const eventId = await host.logReviewItem(item, schedule, 3, 0.8);
   assert.equal(settings.syntaxCardStates.a.s, 1.23);
   assert.equal(settings.syntaxCardStates.b.d, 4.57);
   assert.equal(settings.reviewLog["2026-08-31"], 1);
+  assert.equal(settings.reviewEvents.length, 1);
+  assert.deepEqual(settings.reviewEvents[0].memberKeys, ["syntax:a", "syntax:b"]);
   await host.suspendReviewItem(item);
   assert.equal(settings.suspendedReviewItems["syntax:a"], true);
   assert.equal(settings.suspendedReviewItems["syntax:b"], true);
   await host.restoreReviewItem(item, snapshot);
-  await host.undoReviewItemLog(item);
+  await host.undoReviewItemLog(item, eventId);
   assert.equal(settings.syntaxCardStates.a, undefined);
   assert.equal(settings.reviewLog["2026-08-31"], undefined);
+  assert.equal(settings.reviewEvents.length, 0);
 });
 
 test("restores an existing whole-note schedule without treating zero as a missing snapshot", async () => {

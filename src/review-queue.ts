@@ -224,6 +224,14 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
           delete this.settings.reviewHistory[`syntax:${before.id}`];
           changed = true;
         }
+        const oldKey = `syntax:${before.id}`;
+        const newKey = `syntax:${after.id}`;
+        for (const event of this.settings.reviewEvents) {
+          if (!event.memberKeys.includes(oldKey)) continue;
+          event.memberKeys = event.memberKeys.map((key) => key === oldKey ? newKey : key);
+          event.filePath = file.path;
+          changed = true;
+        }
       }
       if (changed) await this.saveSettings();
     }

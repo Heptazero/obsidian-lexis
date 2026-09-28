@@ -22,6 +22,7 @@ interface ReviewUndo {
   previousCard: ReviewCardState;
   pos: number;
   requeued: boolean;
+  eventId: string;
 }
 
 interface ReviewSession {
@@ -50,8 +51,8 @@ interface ReviewRuntime {
   applyReviewItemSchedule(item: ReviewItem, schedule: ReviewSchedule): Promise<void>;
   suspendReviewItem(item: ReviewItem): Promise<void>;
   restoreReviewItem(item: ReviewItem, snapshot: ReviewStateSnapshot): Promise<void>;
-  logReviewItem(item: ReviewItem, schedule: ReviewSchedule, grade: number, retentionBefore: number): Promise<void>;
-  undoReviewItemLog(item: ReviewItem): Promise<void>;
+  logReviewItem(item: ReviewItem, schedule: ReviewSchedule, grade: number, retentionBefore: number): Promise<string>;
+  undoReviewItemLog(item: ReviewItem, eventId: string): Promise<void>;
   getFirstExample(file: TFile): Promise<string>;
   buildCloze(example: string, word: string): string;
   rebuildIndex(notify?: boolean): Promise<void>;
@@ -264,8 +265,8 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
       const retentionBefore = this.plugin.cardRetrievability(item.card);
       const sched = this.plugin.scheduleCard(item.card, g);
       await this.plugin.applyReviewItemSchedule(item, sched);
-      await this.plugin.logReviewItem(item, sched, g, retentionBefore);
-      this.undoStack.push({ item, snapshot, previousCard, pos: this.pos, requeued: g === 1 });
+      const eventId = await this.plugin.logReviewItem(item, sched, g, retentionBefore);
+      this.undoStack.push({ item, snapshot, previousCard, pos: this.pos, requeued: g === 1, eventId });
       this.reviewed++;
       const updated = { s: sched.s, d: sched.d, due: sched.due, last: todayStr(), reps: sched.reps, lapses: sched.lapses };
       item.card = updated;
@@ -282,7 +283,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
     if (!u) { new Notice(this.plugin.t("review.nothingUndo")); return; }
     try {
       await this.plugin.restoreReviewItem(u.item, u.snapshot);
-      await this.plugin.undoReviewItemLog(u.item);
+      await this.plugin.undoReviewItemLog(u.item, u.eventId);
       u.item.card = { ...u.previousCard };
       if (u.requeued && this.queue.length) this.queue.pop();
       this.pos = u.pos;

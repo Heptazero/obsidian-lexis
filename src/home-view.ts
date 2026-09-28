@@ -29,6 +29,7 @@ interface HomeViewHost {
   restoreSuspendedReviewItem(key: string): Promise<void>;
   collectArchivedFiles(): TFile[];
   openReview(options: ReviewOptions): Promise<void>;
+  openReviewLog(date?: string): Promise<void>;
   saveSettings(): Promise<void>;
   buildRetireCandidates(): Promise<RetireCandidate[]>;
   setRetired(file: TFile, retired: boolean): Promise<void>;
@@ -61,7 +62,10 @@ export class LexisHomeView extends ItemView {
     stats.createDiv({ cls: "lexis-stat", text: `⏰ ${this.plugin.t("home.due", { count: current.due })}` });
     stats.createDiv({ cls: "lexis-stat", text: `✨ ${this.plugin.t("home.new", { count: current.fresh })}` });
     stats.createDiv({ cls: "lexis-stat", text: `📚 ${this.plugin.t("home.total", { count: current.total })}` });
-    this.plugin.renderHeatmap(container.createDiv({ cls: "lexis-hm-wrap" }));
+    const heatmap = container.createDiv({ cls: "lexis-hm-wrap lexis-log-trigger" });
+    heatmap.setAttribute("title", this.plugin.t("log.title"));
+    this.plugin.renderHeatmap(heatmap);
+    heatmap.addEventListener("click", () => { void this.plugin.openReviewLog(); });
 
     const folders = this.plugin.collectReviewFolders();
     const dictionaries = this.plugin.dictFolders();

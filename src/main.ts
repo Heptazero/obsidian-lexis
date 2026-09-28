@@ -9,13 +9,15 @@
 
 import * as obsidian from "obsidian";
 import { Plugin, PluginSettingTab, Setting, Notice, Platform, TFolder, TFile, Component, finishRenderMath } from "obsidian";
-import { LEXIS_HOME_VIEW, LEXIS_REVIEW_VIEW } from "./constants";
+import { LEXIS_HOME_VIEW, LEXIS_REVIEW_VIEW, LEXIS_LOG_VIEW } from "./constants";
 import { DEFAULT_SETTINGS } from "./default-settings";
 import { FSRS } from "./fsrs";
 import { LexisHomeView, type RetireCandidate } from "./home-view";
 import { createI18n } from "./i18n";
 import { buildCurveSVG, recentReviewDates } from "./curve";
 import { createReviewView } from "./review-view";
+import { LexisLogView } from "./review-log-view";
+import { migrateReviewEvents } from "./review-log-data";
 import { createOccurrenceSearch } from "./occurrence-search";
 import { createBridgeServer } from "./bridge-server";
 import { createBridgeApi } from "./bridge-api";
@@ -163,8 +165,8 @@ class LexisPlugin extends Plugin {
   declare applyReviewItemSchedule: (item: ReviewItem, schedule: Schedule) => Promise<void>;
   declare suspendReviewItem: (item: ReviewItem) => Promise<void>;
   declare restoreReviewItem: (item: ReviewItem, snapshot: ReviewStateSnapshot) => Promise<void>;
-  declare logReviewItem: (item: ReviewItem, schedule: Schedule, grade: number, retentionBefore: number) => Promise<void>;
-  declare undoReviewItemLog: (item: ReviewItem) => Promise<void>;
+  declare logReviewItem: (item: ReviewItem, schedule: Schedule, grade: number, retentionBefore: number) => Promise<string>;
+  declare undoReviewItemLog: (item: ReviewItem, eventId: string) => Promise<void>;
   declare collectReviewFolders: () => string[];
   declare collectReviewTags: () => string[];
   declare collectSuspendedReviewItems: () => Promise<import("./types").SuspendedReviewEntry[]>;
@@ -227,6 +229,7 @@ class LexisPlugin extends Plugin {
 
     this.addCommand({ id: "rebuild-index", name: this.t("command.rebuild"), callback: () => this.rebuildIndex(true) });
     this.addCommand({ id: "open-review", name: this.t("command.review"), callback: () => this.openHome() });
+    this.addCommand({ id: "open-review-log", name: this.t("log.title"), callback: () => this.openReviewLog() });
     this.addCommand({ id: "add-selected-word", name: this.t("command.addSelection"), callback: () => this.addSelectedWordCommand() });
     this.addCommand({ id: "open-home", name: this.t("command.home"), callback: () => this.openHome("center") });
     this.addCommand({ id: "open-home-sidebar", name: this.t("command.homeSidebar"), callback: () => this.openHome("sidebar") });
@@ -304,6 +307,7 @@ class LexisPlugin extends Plugin {
 
     this.registerView(LEXIS_REVIEW_VIEW, (leaf) => new LexisReviewView(leaf, this as unknown as ConstructorParameters<typeof LexisReviewView>[1]));
     this.registerView(LEXIS_HOME_VIEW, (leaf) => new LexisHomeView(leaf, this));
+    this.registerView(LEXIS_LOG_VIEW, (leaf) => new LexisLogView(leaf, this));
 
     this.addSettingTab(new LexisSettingTab(this.app, this as unknown as ConstructorParameters<typeof LexisSettingTab>[1]));
 
@@ -424,7 +428,8 @@ class LexisPlugin extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadStoredSettings()) as LexisSettings;
+    const stored = await this.loadStoredSettings();
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, stored) as LexisSettings;
     if ((!this.settings.tagRules || !this.settings.tagRules.length) && this.settings.tagRulesText) {
       this.settings.tagRules = this.parseTagRulesText(this.settings.tagRulesText);
       delete this.settings.tagRulesText;
@@ -445,7 +450,11 @@ class LexisPlugin extends Plugin {
     if (!this.settings.inlineCategoryOrderByParent || typeof this.settings.inlineCategoryOrderByParent !== "object" || Array.isArray(this.settings.inlineCategoryOrderByParent)) this.settings.inlineCategoryOrderByParent = {};
     if (!this.settings.reviewLog) this.settings.reviewLog = {};
     if (!this.settings.reviewHistory || typeof this.settings.reviewHistory !== "object" || Array.isArray(this.settings.reviewHistory)) this.settings.reviewHistory = {};
-    if (repairReviewHistory(this.settings.reviewHistory)) await this.saveData(this.settings);
+    const historyRepaired = repairReviewHistory(this.settings.reviewHistory);
+    const eventsMigrated = !Array.isArray(stored.reviewEvents);
+    this.settings.reviewEvents = eventsMigrated ? migrateReviewEvents(this.settings.reviewHistory) : stored.reviewEvents;
+    if (!this.settings.reviewAddedAt || typeof this.settings.reviewAddedAt !== "object" || Array.isArray(this.settings.reviewAddedAt)) this.settings.reviewAddedAt = {};
+    if (historyRepaired || eventsMigrated) await this.saveData(this.settings);
     if (!this.settings.syntaxCardStates || typeof this.settings.syntaxCardStates !== "object" || Array.isArray(this.settings.syntaxCardStates)) this.settings.syntaxCardStates = {};
     // 单值 → 多值迁移(收录文件夹 / 网页排除标签)。旧键不在 DEFAULT_SETTINGS,故能区分"未迁移"。
     if (this.settings.vocabFolders == null) this.settings.vocabFolders = this.settings.vocabFolder != null ? this.settings.vocabFolder : "01-word";
@@ -896,6 +905,15 @@ class LexisPlugin extends Plugin {
     await this.app.workspace.revealLeaf(leaf);
     if (leaf.view instanceof LexisReviewView) { leaf.view.options = options || {}; await leaf.view.refresh(); }
   }
+  async openReviewLog(date?: string): Promise<void> {
+    let leaf = this.app.workspace.getLeavesOfType(LEXIS_LOG_VIEW)[0];
+    if (!leaf) { leaf = this.app.workspace.getLeaf("tab"); await leaf.setViewState({ type: LEXIS_LOG_VIEW, active: true }); }
+    await this.app.workspace.revealLeaf(leaf);
+    if (leaf.view instanceof LexisLogView) {
+      if (date) leaf.view.setDay(date);
+      else void leaf.view.refresh();
+    }
+  }
   saveReviewSession(leaf: obsidian.WorkspaceLeaf, state: unknown): void { if (leaf && state) this._reviewSessions.set(leaf, state); }
   takeReviewSession(leaf: obsidian.WorkspaceLeaf): unknown {
     if (!leaf) return null;
@@ -932,8 +950,11 @@ class LexisPlugin extends Plugin {
     if (f instanceof TFile) { try { return await this.app.vault.read(f); } catch { return null; } }
     return null;
   }
-  createEntryFile(path: string, folder: string, fallbackContent: string, transform: (content: string) => string): Promise<TFile> {
-    return this.templateProvider.create({ path, folder, fallbackContent, transform });
+  async createEntryFile(path: string, folder: string, fallbackContent: string, transform: (content: string) => string): Promise<TFile> {
+    const file = await this.templateProvider.create({ path, folder, fallbackContent, transform });
+    this.settings.reviewAddedAt[file.path] = new Date().toISOString();
+    await this.saveSettings();
+    return file;
   }
   // 无模板可选纯空白，或只放一个内置的出处面板；用户自己的模板始终优先。
   minimalSkeleton() { return this.settings.emptyNotePreset === "occ" ? "```lexis\nocc\n```\n" : ""; }

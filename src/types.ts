@@ -96,6 +96,20 @@ export interface ReviewHistoryEvent {
   retention: number;
 }
 
+export interface ReviewLogEvent {
+  id: string;
+  date: string;
+  timestamp: string;
+  precision: "day" | "time";
+  type: "note" | "syntax";
+  filePath: string;
+  label: string;
+  line?: number;
+  memberKeys: string[];
+  grade: number;
+  retention: number;
+}
+
 export interface LexisSettings {
   legacySettingsImported?: boolean;
   language: Language;
@@ -144,6 +158,8 @@ export interface LexisSettings {
   maxReviewsPerSession: number;
   reviewLog: Record<string, number>;
   reviewHistory: Record<string, ReviewHistoryEvent[]>;
+  reviewEvents: ReviewLogEvent[];
+  reviewAddedAt: Record<string, string>;
   syntaxCardStates: Record<string, ReviewCardState>;
   suspendedReviewItems: Record<string, boolean>;
   showReviewMetadata: boolean;

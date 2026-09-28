@@ -110,30 +110,47 @@ export function createReviewState({ todayStr, round2 }: ReviewStateDependencies)
       await this.saveSettings();
     }
 
-    async logReviewItem(item: ReviewItem, schedule: ReviewSchedule, grade: number, retentionBefore: number): Promise<void> {
+    async logReviewItem(item: ReviewItem, schedule: ReviewSchedule, grade: number, retentionBefore: number): Promise<string> {
       const { s } = persistedSchedule(schedule, round2);
       const today = todayStr();
       this.settings.reviewLog[today] = (this.settings.reviewLog[today] || 0) + 1;
       const keys = item.type === "note" ? [item.file.path] : (item.syntax?.memberIds || []).map((id) => `syntax:${id}`);
+      const id = `${Date.now()}:${Math.random().toString(36).slice(2)}`;
+      this.settings.reviewEvents.push({
+        id,
+        date: today,
+        timestamp: new Date().toISOString(),
+        precision: "time",
+        type: item.type,
+        filePath: item.file.path,
+        label: item.type === "note" ? item.file.basename : item.syntax?.front || item.file.basename,
+        line: item.syntax?.line,
+        memberKeys: keys,
+        grade,
+        retention: Math.round(Math.max(0, Math.min(1, retentionBefore)) * 100),
+      });
       for (const key of keys) {
         const history = Array.isArray(this.settings.reviewHistory[key]) ? this.settings.reviewHistory[key] : [];
         history.push({ date: today, s, grade, retention: Math.round(Math.max(0, Math.min(1, retentionBefore)) * 100) });
         this.settings.reviewHistory[key] = history.slice(-64);
       }
       await this.saveSettings();
+      return id;
     }
 
-    async undoReviewItemLog(item: ReviewItem): Promise<void> {
-      const today = todayStr();
-      if (this.settings.reviewLog[today]) {
-        this.settings.reviewLog[today]--;
-        if (this.settings.reviewLog[today] <= 0) delete this.settings.reviewLog[today];
+    async undoReviewItemLog(item: ReviewItem, eventId: string): Promise<void> {
+      const event = this.settings.reviewEvents.find((entry) => entry.id === eventId);
+      const day = event?.date || todayStr();
+      if (this.settings.reviewLog[day]) {
+        this.settings.reviewLog[day]--;
+        if (this.settings.reviewLog[day] <= 0) delete this.settings.reviewLog[day];
       }
       const keys = item.type === "note" ? [item.file.path] : (item.syntax?.memberIds || []).map((id) => `syntax:${id}`);
       for (const key of keys) {
         const history = this.settings.reviewHistory[key];
         if (Array.isArray(history) && history.length) history.pop();
       }
+      this.settings.reviewEvents = this.settings.reviewEvents.filter((event) => event.id !== eventId);
       await this.saveSettings();
     }
   }

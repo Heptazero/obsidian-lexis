@@ -50,6 +50,8 @@ export const DEFAULT_SETTINGS: DefaultLexisSettings = {
   maxReviewsPerSession: 200,
   reviewLog: {},
   reviewHistory: {},
+  reviewEvents: [],
+  reviewAddedAt: {},
   syntaxCardStates: {},
   suspendedReviewItems: {},
   showReviewMetadata: false,

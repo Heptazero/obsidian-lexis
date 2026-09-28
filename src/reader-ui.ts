@@ -80,6 +80,7 @@ function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, da
   declare getTags: (file: ObsidianTFile) => Set<string>;
   declare computeStats: () => StatsSummary;
   declare openHome: () => void;
+  declare openReviewLog: (date?: string) => Promise<void>;
   declare openReview: () => void;
   declare collectVocabTags: () => string[];
   declare bridgeMoveWord: (payload: Record<string, unknown>) => Promise<BridgeResult>;
@@ -236,13 +237,27 @@ function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, da
         const ds = fmtDate(cur);
         const cell = col.createDiv({ cls: "lexis-hm-cell" });
         if (cur > today) cell.addClass("lexis-hm-future");
-        else { const c = Number(log[ds]) || 0; total += c; if (c > 0) cell.addClass("lexis-hm-l" + Math.min(4, Math.ceil((c / max) * 4))); cell.setAttribute("title", this.t("home.heatmapDay", { date: ds, count: c })); }
+        else {
+          const c = Number(log[ds]) || 0;
+          total += c;
+          if (c > 0) cell.addClass("lexis-hm-l" + Math.min(4, Math.ceil((c / max) * 4)));
+          cell.setAttribute("title", this.t("home.heatmapDay", { date: ds, count: c }));
+          cell.setAttribute("role", "button");
+          cell.tabIndex = 0;
+          cell.addEventListener("click", (event) => { event.stopPropagation(); void this.openReviewLog(ds); });
+          cell.addEventListener("keydown", (event) => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            event.stopPropagation();
+            void this.openReviewLog(ds);
+          });
+        }
         cur.setDate(cur.getDate() + 1);
       }
     }
     el.createDiv({ cls: "lexis-hm-caption", text: this.t("home.heatmapCaption", { weeks, count: total }) });
   }
-  // ```lexis-home``` 代码块:笔记里内嵌一份主页摘要(统计 + 热力图),点热力图或按钮跳到真正的主页/开始复习
+  // ```lexis-home``` 代码块:笔记里内嵌主页摘要；热力图打开记录，按钮打开主页或复习。
   renderHomeBlock(el: HTMLElement): void {
     el.addClass("lexis-home-block");
     const st = this.computeStats();
@@ -251,9 +266,9 @@ function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, da
     stats.createDiv({ cls: "lexis-stat", text: `✨ ${this.t("home.new", { count: st.fresh })}` });
     stats.createDiv({ cls: "lexis-stat", text: `📚 ${this.t("home.total", { count: st.total })}` });
     const hmWrap = el.createDiv({ cls: "lexis-hm-wrap lexis-home-block-hm" });
-    hmWrap.setAttribute("title", this.t("home.openTitle"));
+    hmWrap.setAttribute("title", this.t("log.title"));
     this.renderHeatmap(hmWrap);
-    hmWrap.addEventListener("click", () => this.openHome());
+    hmWrap.addEventListener("click", () => { void this.openReviewLog(); });
     const btnRow = el.createDiv({ cls: "lexis-home-block-btns" });
     const reviewBtn = btnRow.createEl("button", { cls: "mod-cta", text: `▶ ${this.t("home.start")}` });
     reviewBtn.addEventListener("click", (e) => { e.stopPropagation(); this.openReview(); });
