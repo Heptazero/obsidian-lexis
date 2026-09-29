@@ -37,6 +37,7 @@ export const DEFAULT_SETTINGS: DefaultLexisSettings = {
   hoverFeedback: true,
   hoverFeedbackDays: 3,
   retireCandidateDays: 90,
+  encounterFolder: "",
   homeRetireCollapsed: true,
   homeSuspendedCollapsed: true,
   homeArchivedCollapsed: true,

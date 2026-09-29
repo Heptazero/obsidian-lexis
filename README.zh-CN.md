@@ -76,6 +76,10 @@ Obsidian 中每个词典都有独立高亮开关。Lexis Web 则按网站单独�
 
 设置页可切换中文和 English。翻译按消息键集中在 `src/i18n.ts`，每句中英文挨在一起；新增语言不需要在界面代码中到处找文字，也不依赖 AI 记住旧翻译的位置。
 
+### 数据存在哪里
+
+词条和 FSRS 字段仍在库内 Markdown 文件中。Lexis 设置与复习日志在 `.obsidian/plugins/lexis/data.json`。相遇记录默认存于库内文件夹 `.obsidian/plugins/lexis/encounters/`；“设置 → Lexis → 复习 → 相遇记录文件夹”可填写其他**库内文件夹路径**，不是文件名。一次性迁移的历史计数放在 `baseline.json`；新相遇按设备、日期分别追加到 `.jsonl` 文件。更改路径会复制现有记录，原文件夹保留。浏览器设置和临时词库缓存在浏览器扩展的本地存储中。
+
 ## 笔记代码块
 
 在词条笔记中使用 `lexis` 代码块：

@@ -353,8 +353,10 @@ export class LexisHomeView extends ItemView {
     let candidates: RetireCandidate[];
     try {
       candidates = await this.plugin.buildRetireCandidates();
-    } catch {
-      candidates = [];
+    } catch (error) {
+      console.warn("[Lexis] Cannot calculate retirement candidates", error);
+      if (list.isConnected) list.setText(this.plugin.t("home.encounterDataError"));
+      return;
     }
     if (!list.isConnected) return;
     list.empty();

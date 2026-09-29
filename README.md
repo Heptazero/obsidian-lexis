@@ -76,6 +76,10 @@ After the first manual installation, Zotero can update the add-on from its updat
 
 The interface language can be switched between Chinese and English in Lexis settings. Translations are kept together by message key in `src/i18n.ts`, so adding another language does not require searching through the UI code.
 
+### Where data lives
+
+Dictionary notes and FSRS fields stay in vault Markdown files. Lexis settings and review history stay in `.obsidian/plugins/lexis/data.json`. Encounter history defaults to the vault folder `.obsidian/plugins/lexis/encounters/`; *Settings → Lexis → Review → Encounter data folder* accepts another vault-relative **folder** path. A one-time `baseline.json` holds migrated counts, while new encounters are appended to separate per-device, per-day `.jsonl` files. Changing the folder copies existing records and leaves the old folder intact. Browser settings and its temporary dictionary cache live in the browser's extension storage.
+
 ## Note blocks
 
 Use a `lexis` code block to render memory, relationship, and occurrence data inside an entry note:

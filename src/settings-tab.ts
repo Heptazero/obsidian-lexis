@@ -20,6 +20,7 @@ interface SettingsRuntime extends Plugin {
   };
   t(key: string, vars?: TranslationVars): string;
   saveSettings(): Promise<void>;
+  setEncounterFolder(folder: string): Promise<void>;
   refreshAllViews(): void;
   rebuildIndex(notify?: boolean): Promise<void>;
   collectVocabTags(): string[];
@@ -705,6 +706,24 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
         .addSlider((s) => s.setLimits(1, 30, 1).setValue(this.plugin.settings.hoverFeedbackDays).onChange(async (v) => { this.plugin.settings.hoverFeedbackDays = v; await save(); }));
       new Setting(fsrsSection).setName(t("settings.retireDays")).setDesc(t("settings.retireDaysDesc"))
         .addSlider((s) => s.setLimits(14, 365, 1).setValue(this.plugin.settings.retireCandidateDays).onChange(async (v) => { this.plugin.settings.retireCandidateDays = v; await save(); }));
+      new Setting(fsrsSection).setName(t("settings.encounterFolder")).setDesc(t("settings.encounterFolderDesc"))
+        .addText((input) => {
+          const apply = async () => {
+            const previous = this.plugin.settings.encounterFolder;
+            try {
+              await this.plugin.setEncounterFolder(input.getValue());
+              input.setValue(this.plugin.settings.encounterFolder);
+              if (previous !== this.plugin.settings.encounterFolder) new Notice(t("settings.encounterFolderSaved"));
+            } catch (error) {
+              input.setValue(previous);
+              new Notice(t("settings.encounterFolderError", { error: error instanceof Error ? error.message : typeof error === "string" ? error : "Unknown error" }));
+            }
+          };
+          input.setPlaceholder(`${this.app.vault.configDir}/plugins/${this.plugin.manifest.id}/encounters`).setValue(this.plugin.settings.encounterFolder);
+          input.inputEl.addEventListener("change", () => { void apply(); });
+          input.inputEl.addEventListener("keydown", (event) => { if (event.key === "Enter") input.inputEl.blur(); });
+          if (hasSuggest) new PathSuggest(this.app, input.inputEl, () => folders, (value) => { input.setValue(value); void apply(); });
+        });
 
       const bridgeSection = this.section(containerEl, t("settings.bridge"), { desc: t("settings.bridgeDesc") });
       new Setting(bridgeSection).setName(t("settings.enableBridge"))

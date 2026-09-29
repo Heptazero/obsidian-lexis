@@ -78,6 +78,7 @@ var DEFAULT_SETTINGS = {
   hoverFeedback: true,
   hoverFeedbackDays: 3,
   retireCandidateDays: 90,
+  encounterFolder: "",
   homeRetireCollapsed: true,
   homeSuspendedCollapsed: true,
   homeArchivedCollapsed: true,
@@ -523,8 +524,10 @@ var LexisHomeView = class extends import_obsidian3.ItemView {
     let candidates;
     try {
       candidates = await this.plugin.buildRetireCandidates();
-    } catch {
-      candidates = [];
+    } catch (error) {
+      console.warn("[Lexis] Cannot calculate retirement candidates", error);
+      if (list.isConnected) list.setText(this.plugin.t("home.encounterDataError"));
+      return;
     }
     if (!list.isConnected) return;
     list.empty();
@@ -968,6 +971,11 @@ var MESSAGES = {
   "settings.feedbackDaysDesc": { zh: "\u5230\u671F\u65E5\u8D85\u8FC7\u6B64\u5929\u6570\u624D\u63D0\u524D\u3002", en: "Only later due dates are pulled forward." },
   "settings.retireDays": { zh: "\u6DD8\u6C70\u5019\u9009\u9608\u503C\uFF08\u5929\uFF09", en: "Retirement threshold (days)" },
   "settings.retireDaysDesc": { zh: "\u5165\u5E93\u4E0E\u672A\u76F8\u9047\u5747\u8FBE\u5230\u6B64\u5929\u6570\u3002", en: "Both added and unseen ages must reach this value." },
+  "settings.encounterFolder": { zh: "\u76F8\u9047\u8BB0\u5F55\u6587\u4EF6\u5939", en: "Encounter data folder" },
+  "settings.encounterFolderDesc": { zh: "\u8F93\u5165\u5E93\u5185\u6587\u4EF6\u5939\u8DEF\u5F84\uFF1B\u7559\u7A7A\u4F7F\u7528\u9ED8\u8BA4\u4F4D\u7F6E\u3002\u66F4\u6539\u65F6\u590D\u5236\u5DF2\u6709\u8BB0\u5F55\uFF0C\u539F\u6587\u4EF6\u4FDD\u7559\u3002", en: "Enter a folder path inside the vault. Blank uses the default location. Existing records are copied; originals remain." },
+  "settings.encounterFolderSaved": { zh: "\u76F8\u9047\u8BB0\u5F55\u5DF2\u5207\u6362\u6587\u4EF6\u5939", en: "Encounter folder updated" },
+  "settings.encounterFolderError": { zh: "\u65E0\u6CD5\u5207\u6362\u76F8\u9047\u8BB0\u5F55\u6587\u4EF6\u5939\uFF1A{error}", en: "Could not change encounter folder: {error}" },
+  "home.encounterDataError": { zh: "\u76F8\u9047\u8BB0\u5F55\u8BFB\u53D6\u5931\u8D25\uFF0C\u6682\u4E0D\u8BA1\u7B97\u6DD8\u6C70\u5019\u9009\u3002", en: "Encounter history could not be read. Retirement candidates are unavailable." },
   "settings.bridge": { zh: "\u672C\u673A\u6865\u63A5", en: "Local bridge" },
   "settings.bridgeDesc": { zh: "\u4F9B\u6D4F\u89C8\u5668\u4E0E Zotero \u8FDE\u63A5", en: "Connects the browser and Zotero companions" },
   "settings.excludeTags": { zh: "\u4E0D\u9AD8\u4EAE\u7684\u6807\u7B7E", en: "Tags hidden from highlights" },
@@ -2362,6 +2370,114 @@ function createOccurrenceSearch(options) {
     }
   };
 }
+
+// src/encounter-store.ts
+var DAY = /^\d{4}-\d{2}-\d{2}$/;
+var KINDS = /* @__PURE__ */ new Set(["hover", "add", "passive", "open"]);
+function encounterFolder(input, configDir, pluginId) {
+  const value = input.trim().replaceAll("\\", "/").replace(/\/+$/, "");
+  if (!value) return `${configDir}/plugins/${pluginId}/encounters`;
+  const parts = value.split("/");
+  if (value.startsWith("/") || /^[A-Za-z]:/.test(value) || parts.some((part) => !part || part === "." || part === "..") || /\.jsonl?$/i.test(value)) {
+    throw new Error("Enter a vault-relative folder path, not a file name or absolute path.");
+  }
+  return value;
+}
+function applyEvent(totals, event) {
+  const entry = totals[event.path] || (totals[event.path] = { hoverCount: 0, encounterCount: 0, lastEncounter: "" });
+  entry.encounterCount++;
+  if (event.kind === "hover") entry.hoverCount++;
+  if (event.day > entry.lastEncounter) entry.lastEncounter = event.day;
+}
+async function ensureDirectory(adapter, folder) {
+  let current = "";
+  for (const segment of folder.split("/")) {
+    current = current ? `${current}/${segment}` : segment;
+    if (!await adapter.exists(current)) await adapter.mkdir(current);
+  }
+}
+var EncounterStore = class {
+  constructor(adapter, folder, deviceId) {
+    this.adapter = adapter;
+    this.folder = folder;
+    this.deviceId = deviceId;
+  }
+  async load() {
+    const totals = {};
+    if (!await this.adapter.exists(this.folder)) return totals;
+    const root = await this.adapter.list(this.folder);
+    const baselinePath = `${this.folder}/baseline.json`;
+    if (root.files.includes(baselinePath)) {
+      const raw = JSON.parse(await this.adapter.read(baselinePath));
+      if (!raw || typeof raw !== "object") throw new Error("Invalid Lexis encounter baseline");
+      const baseline = raw;
+      if (baseline.schema !== 1 || !baseline.entries || typeof baseline.entries !== "object" || Array.isArray(baseline.entries)) throw new Error("Invalid Lexis encounter baseline");
+      for (const [path, entry] of Object.entries(baseline.entries)) {
+        if (!path || !entry || !Number.isSafeInteger(entry.encounterCount) || entry.encounterCount < 0 || !Number.isSafeInteger(entry.hoverCount) || entry.hoverCount < 0 || entry.hoverCount > entry.encounterCount || entry.lastEncounter && !DAY.test(entry.lastEncounter)) continue;
+        totals[path] = { encounterCount: entry.encounterCount, hoverCount: entry.hoverCount, lastEncounter: entry.lastEncounter };
+      }
+    }
+    const seen = /* @__PURE__ */ new Set();
+    for (const deviceFolder of root.folders) {
+      if (!/\/[a-f0-9]{32}$/.test(deviceFolder)) continue;
+      const { files } = await this.adapter.list(deviceFolder);
+      for (const file of files) {
+        if (!/\/\d{4}-\d{2}-\d{2}\.jsonl$/.test(file)) continue;
+        const lines = (await this.adapter.read(file)).split("\n");
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let event;
+          try {
+            event = JSON.parse(line);
+          } catch {
+            console.warn(`[Lexis] Invalid encounter event in ${file}`);
+            continue;
+          }
+          if (typeof event.id !== "string" || typeof event.path !== "string" || !event.path || !KINDS.has(event.kind) || !DAY.test(event.day) || seen.has(event.id)) continue;
+          seen.add(event.id);
+          applyEvent(totals, event);
+        }
+      }
+    }
+    return totals;
+  }
+  async append(events) {
+    if (!events.length) return;
+    const folder = `${this.folder}/${this.deviceId}`;
+    await ensureDirectory(this.adapter, folder);
+    const byDay = /* @__PURE__ */ new Map();
+    for (const event of events) {
+      if (!DAY.test(event.day)) throw new Error("Invalid encounter date");
+      const lines = byDay.get(event.day) || [];
+      lines.push(JSON.stringify(event));
+      byDay.set(event.day, lines);
+    }
+    for (const [day, lines] of byDay) {
+      const file = `${folder}/${day}.jsonl`;
+      const text = `${lines.join("\n")}
+`;
+      if (await this.adapter.exists(file)) await this.adapter.append(file, text);
+      else await this.adapter.write(file, text);
+    }
+  }
+  async copyTo(folder) {
+    if (folder === this.folder || !await this.adapter.exists(this.folder)) return;
+    await ensureDirectory(this.adapter, folder);
+    const root = await this.adapter.list(this.folder);
+    const copy = async (source) => {
+      const target = folder + source.slice(this.folder.length);
+      if (await this.adapter.exists(target)) {
+        if (await this.adapter.read(target) !== await this.adapter.read(source)) throw new Error(`Target already has different data: ${target}`);
+      } else await this.adapter.copy(source, target);
+    };
+    for (const file of root.files) await copy(file);
+    for (const sourceFolder of root.folders) {
+      await ensureDirectory(this.adapter, folder + sourceFolder.slice(this.folder.length));
+      const { files } = await this.adapter.list(sourceFolder);
+      for (const file of files) await copy(file);
+    }
+  }
+};
 
 // src/bridge-server.ts
 function createBridgeServer({ Notice: Notice4, Platform: Platform3 }) {
@@ -6717,6 +6833,30 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
         this.plugin.settings.retireCandidateDays = v;
         await save();
       }));
+      new Setting3(fsrsSection).setName(t("settings.encounterFolder")).setDesc(t("settings.encounterFolderDesc")).addText((input) => {
+        const apply = async () => {
+          const previous = this.plugin.settings.encounterFolder;
+          try {
+            await this.plugin.setEncounterFolder(input.getValue());
+            input.setValue(this.plugin.settings.encounterFolder);
+            if (previous !== this.plugin.settings.encounterFolder) new Notice4(t("settings.encounterFolderSaved"));
+          } catch (error) {
+            input.setValue(previous);
+            new Notice4(t("settings.encounterFolderError", { error: error instanceof Error ? error.message : typeof error === "string" ? error : "Unknown error" }));
+          }
+        };
+        input.setPlaceholder(`${this.app.vault.configDir}/plugins/${this.plugin.manifest.id}/encounters`).setValue(this.plugin.settings.encounterFolder);
+        input.inputEl.addEventListener("change", () => {
+          void apply();
+        });
+        input.inputEl.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") input.inputEl.blur();
+        });
+        if (hasSuggest) new PathSuggest(this.app, input.inputEl, () => folders, (value) => {
+          input.setValue(value);
+          void apply();
+        });
+      });
       const bridgeSection = this.section(containerEl, t("settings.bridge"), { desc: t("settings.bridgeDesc") });
       new Setting3(bridgeSection).setName(t("settings.enableBridge")).addToggle((t2) => t2.setValue(this.plugin.settings.bridgeEnabled).onChange(async (v) => {
         this.plugin.settings.bridgeEnabled = v;
@@ -7540,11 +7680,25 @@ var LexisPlugin = class extends import_obsidian9.Plugin {
     this.liveAvailable = false;
     this._encounters = {};
     this._encSaveTimer = 0;
+    this._encPending = [];
+    this._encWriting = null;
+    this._encRevision = 0;
+    this._encRelocating = false;
+    let deviceId = this.app.loadLocalStorage("lexis:encounter-device-id");
+    if (!deviceId || !/^[a-f0-9]{32}$/.test(deviceId)) {
+      deviceId = crypto.randomUUID().replaceAll("-", "");
+      this.app.saveLocalStorage("lexis:encounter-device-id", deviceId);
+    }
+    this._encounterStore = new EncounterStore(this.app.vault.adapter, encounterFolder(this.settings.encounterFolder, this.app.vault.configDir, this.manifest.id), deviceId);
     this._encounterDedup = {};
     this._passiveSeenToday = /* @__PURE__ */ new Set();
     this._pageHighlightState = /* @__PURE__ */ new WeakMap();
     this._reviewSessions = /* @__PURE__ */ new WeakMap();
-    await this.loadEncounters();
+    try {
+      await this.loadEncounters();
+    } catch (error) {
+      console.warn("[Lexis] Cannot load encounter history", error);
+    }
     this.registerEvent(this.app.workspace.on("file-open", (file) => {
       if (file instanceof import_obsidian9.TFile && this.inVocabFolder(file.path)) this.recordEncounter(file, "open");
       window.requestAnimationFrame(() => this.syncActivePageHighlightState());
@@ -7733,7 +7887,7 @@ var LexisPlugin = class extends import_obsidian9.Plugin {
     window.clearTimeout(this._rebuildTimer);
     window.clearTimeout(this._hideTimer);
     window.clearTimeout(this._showTimer);
-    if (this._encSaveTimer) {
+    if (this._encSaveTimer || this._encPending.length) {
       window.clearTimeout(this._encSaveTimer);
       void this.saveEncounters();
     }
@@ -8126,26 +8280,55 @@ var LexisPlugin = class extends import_obsidian9.Plugin {
     });
     await this.rebuildIndex(false);
   }
-  // ---------- 相遇记账(阶段 2) ----------
-  // 只做"强相遇"记账:悬停查释义 / 划词加出处 / 打开词条笔记本身,都是现成代码路径上加一行记账,
-  // 不额外采集停留时长/滚动/点击深度。数据存进插件自己 data 目录下的 sidecar JSON,不写 frontmatter——
-  // 悬停很频繁,写 frontmatter 会不停刷新笔记 mtime 和 git 历史。
-  encountersPath() {
-    return `${this.app.vault.configDir}/plugins/${this.manifest.id}/encounters.json`;
-  }
+  // 相遇按设备、日期追加；插件只读取新格式。旧累计快照由独立脚本一次性转成 baseline.json。
   async loadEncounters() {
+    const revision = this._encRevision;
+    const loaded = await this._encounterStore.load();
+    if (revision === this._encRevision) this._encounters = loaded;
+  }
+  async setEncounterFolder(input) {
+    const target = encounterFolder(input, this.app.vault.configDir, this.manifest.id);
+    const setting = input.trim().replaceAll("\\", "/").replace(/\/+$/, "");
+    if (target === this._encounterStore.folder) {
+      if (setting !== this.settings.encounterFolder) {
+        this.settings.encounterFolder = setting;
+        await this.saveSettings();
+      }
+      return;
+    }
+    if (target.startsWith(`${this._encounterStore.folder}/`) || this._encounterStore.folder.startsWith(`${target}/`)) {
+      throw new Error("Choose a folder outside the current encounter folder.");
+    }
+    if (this._encSaveTimer) window.clearTimeout(this._encSaveTimer);
+    await this.saveEncounters();
+    if (this._encPending.length) throw new Error("Could not save pending encounters");
+    const previousSetting = this.settings.encounterFolder;
+    const previousStore = this._encounterStore;
+    this._encRelocating = true;
     try {
-      const parsed = JSON.parse(await this.app.vault.adapter.read(this.encountersPath()));
-      this._encounters = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-    } catch {
-      this._encounters = {};
+      await this._encounterStore.copyTo(target);
+      const nextStore = new EncounterStore(this.app.vault.adapter, target, this._encounterStore.deviceId);
+      const revision = this._encRevision;
+      const loaded = await nextStore.load();
+      this.settings.encounterFolder = setting;
+      await this.saveSettings();
+      this._encounterStore = nextStore;
+      if (revision === this._encRevision) this._encounters = loaded;
+    } catch (error) {
+      this.settings.encounterFolder = previousSetting;
+      this._encounterStore = previousStore;
+      throw error;
+    } finally {
+      this._encRelocating = false;
+      if (this._encPending.length) this._encSaveTimer = window.setTimeout(() => {
+        void this.saveEncounters();
+      }, 500);
     }
   }
-  // key 用词条文件的标题(不是命中它的具体别名/拼法)——别名和标题指向同一个文件,相遇次数要合并,不能按 key 分裂计数
-  // 短时间内反复触发同一类相遇(比如鼠标在同一个词上晃出晃入,连续弹好几次悬浮卡)只算一次,靠 (词+类型) 的冷却时间去重
+  // 同一词条与相遇类型在 60 秒内去重；文件路径避免不同词典的同名笔记混算。
   recordEncounter(file, type) {
     if (!(file instanceof import_obsidian9.TFile)) return;
-    const k = file.basename.toLowerCase();
+    const k = file.path;
     const now = Date.now();
     const dedupKey = k + ":" + type;
     if (!this._encounterDedup) this._encounterDedup = {};
@@ -8156,10 +8339,14 @@ var LexisPlugin = class extends import_obsidian9.Plugin {
     e.encounterCount = (e.encounterCount || 0) + 1;
     if (type === "hover") e.hoverCount = (e.hoverCount || 0) + 1;
     e.lastEncounter = todayString();
-    if (this._encSaveTimer) window.clearTimeout(this._encSaveTimer);
-    this._encSaveTimer = window.setTimeout(() => {
-      void this.saveEncounters();
-    }, 1500);
+    this._encRevision++;
+    this._encPending.push({ id: crypto.randomUUID(), path: k, kind: type, day: e.lastEncounter, at: now });
+    if (!this._encRelocating) {
+      if (this._encSaveTimer) window.clearTimeout(this._encSaveTimer);
+      this._encSaveTimer = window.setTimeout(() => {
+        void this.saveEncounters();
+      }, 500);
+    }
   }
   // 被动相遇(阶段 4):高亮装饰在打开的文件里实际渲染出来,就算词出现在你面前过一次——比悬停更弱的信号,
   // 只证明"出现过",不证明"注意到了"。按「词+当天」去重,不是每次重渲染(滚动/切标签页/实时预览重算)都记一次。
@@ -8173,10 +8360,26 @@ var LexisPlugin = class extends import_obsidian9.Plugin {
   }
   async saveEncounters() {
     this._encSaveTimer = 0;
-    try {
-      await this.app.vault.adapter.write(this.encountersPath(), JSON.stringify(this._encounters));
-    } catch {
-    }
+    if (this._encRelocating) return;
+    if (this._encWriting !== null) return this._encWriting;
+    this._encWriting = (async () => {
+      while (this._encPending.length) {
+        const batch = this._encPending.splice(0);
+        try {
+          await this._encounterStore.append(batch);
+        } catch (error) {
+          this._encPending.unshift(...batch);
+          console.warn("[Lexis] Cannot save encounters; will retry", error);
+          break;
+        }
+      }
+    })().finally(() => {
+      this._encWriting = null;
+      if (this._encPending.length) this._encSaveTimer = window.setTimeout(() => {
+        void this.saveEncounters();
+      }, 5e3);
+    });
+    return this._encWriting;
   }
   // 悬停 = 一次失败的提取(没想起来才要查)。这个词的到期日如果还很远,说明"排期偏晚了",拉近一点提醒尽快复习——
   // 只挪 lexis-due,绝不碰 stability/difficulty,也不伪造一次复习评分(FSRS 内部状态只能由真实复习事件驱动)。
@@ -8268,6 +8471,8 @@ var LexisPlugin = class extends import_obsidian9.Plugin {
   // ---------- 淘汰法庭(阶段 3) ----------
   // 硬条件筛子,不做加权评分:全部满足才入列,判决权在用户(淘汰/留下/已掌握三个按钮,见 LexisHomeView)。
   async buildRetireCandidates() {
+    await this.saveEncounters();
+    if (!this._encPending.length) await this.loadEncounters();
     const days = this.settings.retireCandidateDays ?? 90;
     const today = todayString();
     const files = this.app.vault.getMarkdownFiles().filter((f) => this.inVocabFolder(f.path));
@@ -8277,7 +8482,7 @@ var LexisPlugin = class extends import_obsidian9.Plugin {
       if (lc.pinned || lc.archived || lc.retired) continue;
       const created = formatDate(new Date(f.stat.ctime));
       if (daysBetween(created, today) < days) continue;
-      const enc = this._encounters[f.basename.toLowerCase()];
+      const enc = this._encounters[f.path];
       const lastEncounter = enc && enc.lastEncounter || created;
       const sinceLast = daysBetween(lastEncounter, today);
       if (sinceLast < days) continue;

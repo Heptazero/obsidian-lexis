@@ -145,6 +145,7 @@ export interface LexisSettings {
   hoverFeedback: boolean;
   hoverFeedbackDays: number;
   retireCandidateDays: number;
+  encounterFolder: string;
   homeRetireCollapsed: boolean;
   homeSuspendedCollapsed: boolean;
   homeArchivedCollapsed: boolean;

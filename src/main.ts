@@ -19,6 +19,7 @@ import { createReviewView } from "./review-view";
 import { LexisLogView } from "./review-log-view";
 import { migrateReviewEvents } from "./review-log-data";
 import { createOccurrenceSearch } from "./occurrence-search";
+import { EncounterStore, encounterFolder, type EncounterEvent, type EncounterSummary } from "./encounter-store";
 import { createBridgeServer } from "./bridge-server";
 import { createBridgeApi } from "./bridge-api";
 import { createHighlightEngine } from "./highlight-engine";
@@ -66,7 +67,6 @@ type Schedule = ReviewSchedule;
 type Lifecycle = { archived: boolean; retired: boolean; pinned: boolean };
 type Relation = { path: string; basename: string };
 type RelationBag = Record<string, Relation[]>;
-type Encounter = { hoverCount: number; encounterCount: number; lastEncounter: string };
 type BridgeRuntime = { running: boolean; generateToken(): string; start(): void; stop(): void; restart(): void };
 type AddSelectionOptions = {
   openExisting?: boolean;
@@ -105,7 +105,12 @@ class LexisPlugin extends Plugin {
   declare _showTimer: number | null;
   declare _showTarget: HTMLElement | null;
   declare _occCache: Map<string, Occurrence[]>;
-  declare _encounters: Record<string, Encounter>;
+  declare _encounters: Record<string, EncounterSummary>;
+  declare _encounterStore: EncounterStore;
+  declare _encPending: EncounterEvent[];
+  declare _encWriting: Promise<void> | null;
+  declare _encRevision: number;
+  declare _encRelocating: boolean;
   declare _encSaveTimer: number;
   declare _encounterDedup: Record<string, number>;
   declare _passiveSeenToday: Set<string>;
@@ -220,11 +225,22 @@ class LexisPlugin extends Plugin {
     this.liveAvailable = false;
     this._encounters = {};
     this._encSaveTimer = 0;
+    this._encPending = [];
+    this._encWriting = null;
+    this._encRevision = 0;
+    this._encRelocating = false;
+    let deviceId = this.app.loadLocalStorage("lexis:encounter-device-id") as string | null;
+    if (!deviceId || !/^[a-f0-9]{32}$/.test(deviceId)) {
+      deviceId = crypto.randomUUID().replaceAll("-", "");
+      this.app.saveLocalStorage("lexis:encounter-device-id", deviceId);
+    }
+    this._encounterStore = new EncounterStore(this.app.vault.adapter, encounterFolder(this.settings.encounterFolder, this.app.vault.configDir, this.manifest.id), deviceId);
     this._encounterDedup = {};
     this._passiveSeenToday = new Set();
     this._pageHighlightState = new WeakMap();
     this._reviewSessions = new WeakMap();
-    await this.loadEncounters();
+    try { await this.loadEncounters(); }
+    catch (error) { console.warn("[Lexis] Cannot load encounter history", error); }
     this.registerEvent(this.app.workspace.on("file-open", (file) => {
       if (file instanceof TFile && this.inVocabFolder(file.path)) this.recordEncounter(file, "open");
       window.requestAnimationFrame(() => this.syncActivePageHighlightState());
@@ -419,7 +435,7 @@ class LexisPlugin extends Plugin {
     window.clearTimeout(this._rebuildTimer);
     window.clearTimeout(this._hideTimer);
     window.clearTimeout(this._showTimer);
-    if (this._encSaveTimer) { window.clearTimeout(this._encSaveTimer); void this.saveEncounters(); }
+    if (this._encSaveTimer || this._encPending.length) { window.clearTimeout(this._encSaveTimer); void this.saveEncounters(); }
     this.removePopover();
     this.removeSelPill();
     this.teardownPdfHighlight();
@@ -752,22 +768,50 @@ class LexisPlugin extends Plugin {
     await this.rebuildIndex(false);
   }
 
-  // ---------- 相遇记账(阶段 2) ----------
-  // 只做"强相遇"记账:悬停查释义 / 划词加出处 / 打开词条笔记本身,都是现成代码路径上加一行记账,
-  // 不额外采集停留时长/滚动/点击深度。数据存进插件自己 data 目录下的 sidecar JSON,不写 frontmatter——
-  // 悬停很频繁,写 frontmatter 会不停刷新笔记 mtime 和 git 历史。
-  encountersPath() { return `${this.app.vault.configDir}/plugins/${this.manifest.id}/encounters.json`; }
+  // 相遇按设备、日期追加；插件只读取新格式。旧累计快照由独立脚本一次性转成 baseline.json。
   async loadEncounters() {
-    try {
-      const parsed: unknown = JSON.parse(await this.app.vault.adapter.read(this.encountersPath()));
-      this._encounters = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, Encounter> : {};
-    } catch { this._encounters = {}; }
+    const revision = this._encRevision;
+    const loaded = await this._encounterStore.load();
+    if (revision === this._encRevision) this._encounters = loaded;
   }
-  // key 用词条文件的标题(不是命中它的具体别名/拼法)——别名和标题指向同一个文件,相遇次数要合并,不能按 key 分裂计数
-  // 短时间内反复触发同一类相遇(比如鼠标在同一个词上晃出晃入,连续弹好几次悬浮卡)只算一次,靠 (词+类型) 的冷却时间去重
+  async setEncounterFolder(input: string): Promise<void> {
+    const target = encounterFolder(input, this.app.vault.configDir, this.manifest.id);
+    const setting = input.trim().replaceAll("\\", "/").replace(/\/+$/, "");
+    if (target === this._encounterStore.folder) {
+      if (setting !== this.settings.encounterFolder) { this.settings.encounterFolder = setting; await this.saveSettings(); }
+      return;
+    }
+    if (target.startsWith(`${this._encounterStore.folder}/`) || this._encounterStore.folder.startsWith(`${target}/`)) {
+      throw new Error("Choose a folder outside the current encounter folder.");
+    }
+    if (this._encSaveTimer) window.clearTimeout(this._encSaveTimer);
+    await this.saveEncounters();
+    if (this._encPending.length) throw new Error("Could not save pending encounters");
+    const previousSetting = this.settings.encounterFolder;
+    const previousStore = this._encounterStore;
+    this._encRelocating = true;
+    try {
+      await this._encounterStore.copyTo(target);
+      const nextStore = new EncounterStore(this.app.vault.adapter, target, this._encounterStore.deviceId);
+      const revision = this._encRevision;
+      const loaded = await nextStore.load();
+      this.settings.encounterFolder = setting;
+      await this.saveSettings();
+      this._encounterStore = nextStore;
+      if (revision === this._encRevision) this._encounters = loaded;
+    } catch (error) {
+      this.settings.encounterFolder = previousSetting;
+      this._encounterStore = previousStore;
+      throw error;
+    } finally {
+      this._encRelocating = false;
+      if (this._encPending.length) this._encSaveTimer = window.setTimeout(() => { void this.saveEncounters(); }, 500);
+    }
+  }
+  // 同一词条与相遇类型在 60 秒内去重；文件路径避免不同词典的同名笔记混算。
   recordEncounter(file: TFile, type: "hover" | "add" | "passive" | "open"): void {
     if (!(file instanceof TFile)) return;
-    const k = file.basename.toLowerCase();
+    const k = file.path;
     const now = Date.now();
     const dedupKey = k + ":" + type;
     if (!this._encounterDedup) this._encounterDedup = {};
@@ -778,8 +822,12 @@ class LexisPlugin extends Plugin {
     e.encounterCount = (e.encounterCount || 0) + 1;
     if (type === "hover") e.hoverCount = (e.hoverCount || 0) + 1;
     e.lastEncounter = todayStr();
-    if (this._encSaveTimer) window.clearTimeout(this._encSaveTimer);
-    this._encSaveTimer = window.setTimeout(() => { void this.saveEncounters(); }, 1500); // 内存攒批、防抖落盘,不是每次相遇都写一次盘
+    this._encRevision++;
+    this._encPending.push({ id: crypto.randomUUID(), path: k, kind: type, day: e.lastEncounter, at: now });
+    if (!this._encRelocating) {
+      if (this._encSaveTimer) window.clearTimeout(this._encSaveTimer);
+      this._encSaveTimer = window.setTimeout(() => { void this.saveEncounters(); }, 500);
+    }
   }
   // 被动相遇(阶段 4):高亮装饰在打开的文件里实际渲染出来,就算词出现在你面前过一次——比悬停更弱的信号,
   // 只证明"出现过",不证明"注意到了"。按「词+当天」去重,不是每次重渲染(滚动/切标签页/实时预览重算)都记一次。
@@ -793,7 +841,23 @@ class LexisPlugin extends Plugin {
   }
   async saveEncounters() {
     this._encSaveTimer = 0;
-    try { await this.app.vault.adapter.write(this.encountersPath(), JSON.stringify(this._encounters)); } catch { /* Encounter persistence is best-effort. */ }
+    if (this._encRelocating) return;
+    if (this._encWriting !== null) return this._encWriting;
+    this._encWriting = (async () => {
+      while (this._encPending.length) {
+        const batch = this._encPending.splice(0);
+        try { await this._encounterStore.append(batch); }
+        catch (error) {
+          this._encPending.unshift(...batch);
+          console.warn("[Lexis] Cannot save encounters; will retry", error);
+          break;
+        }
+      }
+    })().finally(() => {
+      this._encWriting = null;
+      if (this._encPending.length) this._encSaveTimer = window.setTimeout(() => { void this.saveEncounters(); }, 5000);
+    });
+    return this._encWriting;
   }
   // 悬停 = 一次失败的提取(没想起来才要查)。这个词的到期日如果还很远,说明"排期偏晚了",拉近一点提醒尽快复习——
   // 只挪 lexis-due,绝不碰 stability/difficulty,也不伪造一次复习评分(FSRS 内部状态只能由真实复习事件驱动)。
@@ -867,6 +931,8 @@ class LexisPlugin extends Plugin {
   // ---------- 淘汰法庭(阶段 3) ----------
   // 硬条件筛子,不做加权评分:全部满足才入列,判决权在用户(淘汰/留下/已掌握三个按钮,见 LexisHomeView)。
   async buildRetireCandidates(): Promise<RetireCandidate[]> {
+    await this.saveEncounters();
+    if (!this._encPending.length) await this.loadEncounters();
     const days = this.settings.retireCandidateDays ?? 90;
     const today = todayStr();
     const files = this.app.vault.getMarkdownFiles().filter((f) => this.inVocabFolder(f.path));
@@ -876,7 +942,7 @@ class LexisPlugin extends Plugin {
       if (lc.pinned || lc.archived || lc.retired) continue; // 常驻/已归档/已淘汰:永远不进候选
       const created = fmtDate(new Date(f.stat.ctime));
       if (daysBetween(created, today) < days) continue; // 入库不够久
-      const enc = this._encounters[f.basename.toLowerCase()];
+      const enc = this._encounters[f.path];
       const lastEncounter = (enc && enc.lastEncounter) || created; // 从没相遇过就用入库日期当基准
       const sinceLast = daysBetween(lastEncounter, today);
       if (sinceLast < days) continue; // 最近还自然相遇过,不算候选
