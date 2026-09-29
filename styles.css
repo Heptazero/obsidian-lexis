@@ -135,11 +135,11 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     margin-bottom: 6px;
 }
 .lexis-dictionary-row > input:first-child {
-    flex: 1 1 12rem;
+    flex: 1 1 0;
     min-width: 0;
 }
 .lexis-dictionary-row > input:nth-child(2) {
-    flex: 1.4 1 15rem;
+    flex: 1.4 1 0;
     min-width: 0;
 }
 .lexis-sortable-row > .setting-item {
