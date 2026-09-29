@@ -6280,10 +6280,8 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
           const isTagSource = () => typeof d.tag === "string";
           const fIn = new obsidian5.TextComponent(row);
           fIn.setPlaceholder(t("settings.folderPlaceholder")).setValue(isTagSource() ? `#${d.tag || ""}` : d.folder || "");
-          fIn.inputEl.setCssStyles({ flex: "1" });
           const tIn = new obsidian5.TextComponent(row);
           tIn.setPlaceholder(t("settings.templatePlaceholder")).setValue(d.template || "");
-          tIn.inputEl.setCssStyles({ flex: "1.4" });
           if (isTagSource()) {
             tIn.setDisabled(true);
             tIn.setPlaceholder(t("settings.tagSourcePlaceholder"));
@@ -6950,7 +6948,7 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
       }));
       new Setting3(bridgeSection).setName(t("settings.token")).setDesc(t("settings.tokenDesc")).addText((input) => {
         input.setValue(this.plugin.settings.bridgeToken || t("settings.tokenPending")).setDisabled(true);
-        input.inputEl.setCssStyles({ width: "260px" });
+        input.inputEl.addClass("lexis-bridge-token-input");
       }).addExtraButton((b) => b.setIcon("copy").setTooltip(t("settings.copyToken")).onClick(async () => {
         if (this.plugin.settings.bridgeToken) {
           await navigator.clipboard.writeText(this.plugin.settings.bridgeToken);

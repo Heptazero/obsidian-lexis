@@ -288,10 +288,8 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
           const isTagSource = () => typeof d.tag === "string";
           const fIn = new obsidian.TextComponent(row);
           fIn.setPlaceholder(t("settings.folderPlaceholder")).setValue(isTagSource() ? `#${d.tag || ""}` : (d.folder || ""));
-          fIn.inputEl.setCssStyles({ flex: "1" });
           const tIn = new obsidian.TextComponent(row);
           tIn.setPlaceholder(t("settings.templatePlaceholder")).setValue(d.template || "");
-          tIn.inputEl.setCssStyles({ flex: "1.4" });
           if (isTagSource()) {
             tIn.setDisabled(true);
             tIn.setPlaceholder(t("settings.tagSourcePlaceholder"));
@@ -775,7 +773,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
         .addText((t) => t.setValue(String(this.plugin.settings.bridgePort)).onChange(async (v) => { const n = parseInt(v, 10); if (n >= 1024 && n <= 65535) { this.plugin.settings.bridgePort = n; await save(); } }))
         .addExtraButton((b) => b.setIcon("rotate-ccw").setTooltip(t("settings.restartBridge")).onClick(() => { this.plugin.bridge.restart(); new Notice(t("notice.bridgeRestarted")); }));
       new Setting(bridgeSection).setName(t("settings.token")).setDesc(t("settings.tokenDesc"))
-        .addText((input) => { input.setValue(this.plugin.settings.bridgeToken || t("settings.tokenPending")).setDisabled(true); input.inputEl.setCssStyles({ width: "260px" }); })
+        .addText((input) => { input.setValue(this.plugin.settings.bridgeToken || t("settings.tokenPending")).setDisabled(true); input.inputEl.addClass("lexis-bridge-token-input"); })
         .addExtraButton((b) => b.setIcon("copy").setTooltip(t("settings.copyToken")).onClick(async () => { if (this.plugin.settings.bridgeToken) { await navigator.clipboard.writeText(this.plugin.settings.bridgeToken); new Notice(t("notice.tokenCopied")); } }))
         .addExtraButton((b) => b.setIcon("refresh-cw").setTooltip(t("settings.regenerateToken")).onClick(async () => { this.plugin.settings.bridgeToken = this.plugin.bridge.generateToken(); await save(); this.plugin.bridge.restart(); this.update(); }));
 

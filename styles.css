@@ -76,6 +76,7 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
 .lexis-data-path-setting .setting-item-control { display: flex; flex: 1 1 260px; min-width: 0; }
 .lexis-data-path-setting input { flex: 1 1 auto; width: auto; min-width: 0; }
 .lexis-data-section .setting-item-description { overflow-wrap: anywhere; }
+.lexis-bridge-token-input { width: 260px; max-width: 100%; }
 .lexis-highlight-options {
     min-width: 0;
     margin: 0;
@@ -132,6 +133,14 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
 }
 .lexis-dictionary-row {
     margin-bottom: 6px;
+}
+.lexis-dictionary-row > input:first-child {
+    flex: 1 1 12rem;
+    min-width: 0;
+}
+.lexis-dictionary-row > input:nth-child(2) {
+    flex: 1.4 1 15rem;
+    min-width: 0;
 }
 .lexis-sortable-row > .setting-item {
     flex: 1 1 auto;
@@ -296,6 +305,80 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
 .lexis-tag-editor-add .text-input {
     flex: 1 1 auto;
     width: 100%;
+}
+
+@media (max-width: 700px) {
+    .lexis-settings-section {
+        padding-inline: 10px;
+    }
+    .lexis-settings-section > summary {
+        align-items: center;
+        flex-wrap: wrap;
+    }
+    .lexis-settings-section-hint {
+        flex-basis: 100%;
+        padding-left: 20px;
+    }
+    .lexis-settings-subgroup {
+        margin-left: 4px;
+        padding-left: 10px;
+    }
+    .lexis-settings-root .setting-item:not(.setting-item-heading):has(> .setting-item-control > :is(input[type="text"], input[type="number"], input[type="range"], select, textarea)) {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+    }
+    .lexis-settings-root .setting-item:not(.setting-item-heading):has(> .setting-item-control > :is(input[type="text"], input[type="number"], input[type="range"], select, textarea)) > :is(.setting-item-info, .setting-item-control) {
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        flex: none;
+    }
+    .lexis-settings-root .setting-item:not(.setting-item-heading):has(> .setting-item-control > :is(input[type="text"], input[type="number"], input[type="range"], select, textarea)) > .setting-item-control {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        justify-content: flex-start;
+    }
+    .lexis-settings-root .setting-item-control > :is(input[type="text"], input[type="number"], input[type="range"], select, textarea) {
+        flex: 1 1 0;
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        box-sizing: border-box;
+    }
+    .lexis-settings-root .setting-item:has(> .setting-item-control > .checkbox-container) {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        column-gap: 12px;
+    }
+    .lexis-settings-root .setting-item:has(> .setting-item-control > .checkbox-container) > .setting-item-info {
+        min-width: 0;
+    }
+    .lexis-settings-root .setting-item:has(> .setting-item-control > .checkbox-container) > .setting-item-control {
+        width: auto;
+        min-width: 0;
+        margin-left: 0;
+        justify-self: end;
+    }
+    .lexis-dictionary-row {
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
+        padding: 8px;
+    }
+    .lexis-dictionary-row > input:first-child,
+    .lexis-dictionary-row > input:nth-child(2) {
+        flex: 1 1 100%;
+        width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
+    }
+    .lexis-dictionary-row > .lexis-drag-handle {
+        margin-left: 0;
+    }
 }
 
 /* 标签规则:一行多个紧凑卡片 */
