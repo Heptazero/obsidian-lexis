@@ -108,18 +108,38 @@ export class EncounterStore {
   async copyTo(folder: string): Promise<void> {
     if (folder === this.folder || !(await this.adapter.exists(this.folder))) return;
     await ensureDirectory(this.adapter, folder);
-    const root = await this.adapter.list(this.folder);
-    const copy = async (source: string) => {
-      const target = folder + source.slice(this.folder.length);
+    const destination = await this.adapter.list(folder);
+    const otherFile = destination.files.find((file) => !/\/(baseline\.json|\.DS_Store)$/.test(file));
+    const otherFolder = destination.folders.find((item) => !/\/(?:[a-f0-9]{32}|legacy-backup)$/.test(item));
+    if (otherFile || otherFolder) throw new Error("Choose an empty folder dedicated to Lexis encounter records.");
+    const source = await this.adapter.list(this.folder);
+    const baseline = `${this.folder}/baseline.json`;
+    if (source.files.includes(baseline)) {
+      const target = `${folder}/baseline.json`;
       if (await this.adapter.exists(target)) {
-        if (await this.adapter.read(target) !== await this.adapter.read(source)) throw new Error(`Target already has different data: ${target}`);
-      } else await this.adapter.copy(source, target);
-    };
-    for (const file of root.files) await copy(file);
-    for (const sourceFolder of root.folders) {
-      await ensureDirectory(this.adapter, folder + sourceFolder.slice(this.folder.length));
+        if (await this.adapter.read(target) !== await this.adapter.read(baseline)) throw new Error("The destination has a different encounter baseline.");
+      } else await this.adapter.copy(baseline, target);
+    }
+    for (const sourceFolder of source.folders.filter((item) => /\/[a-f0-9]{32}$/.test(item))) {
+      const targetFolder = folder + sourceFolder.slice(this.folder.length);
+      await ensureDirectory(this.adapter, targetFolder);
       const { files } = await this.adapter.list(sourceFolder);
-      for (const file of files) await copy(file);
+      for (const file of files.filter((item) => /\/\d{4}-\d{2}-\d{2}\.jsonl$/.test(item))) {
+        const target = targetFolder + file.slice(sourceFolder.length);
+        if (!(await this.adapter.exists(target))) { await this.adapter.copy(file, target); continue; }
+        const existing = await this.adapter.read(target);
+        const incoming = await this.adapter.read(file);
+        if (existing === incoming) continue;
+        const ids = new Set(existing.split("\n").filter(Boolean).map((line) => (JSON.parse(line) as EncounterEvent).id));
+        const additional = incoming.split("\n").filter(Boolean).filter((line) => {
+          const id = (JSON.parse(line) as EncounterEvent).id;
+          if (typeof id !== "string" || !id) throw new Error("Invalid encounter event ID");
+          if (ids.has(id)) return false;
+          ids.add(id);
+          return true;
+        });
+        if (additional.length) await this.adapter.append(target, `${existing.endsWith("\n") ? "" : "\n"}${additional.join("\n")}\n`);
+      }
     }
   }
 }

@@ -78,7 +78,7 @@ Obsidian 中每个词典都有独立高亮开关。Lexis Web 则按网站单独�
 
 ### 数据存在哪里
 
-词条和 FSRS 字段仍在库内 Markdown 文件中。Lexis 设置与复习日志在 Obsidian 固定的 `.obsidian/plugins/lexis/data.json`。相遇记录默认存于 `.obsidian/plugins/lexis/encounters/`；“设置 → Lexis → 数据存储 → 相遇记录文件夹”可填写其他**库内文件夹路径**，不是文件名。一次性迁移的历史计数放在 `baseline.json`；新相遇按设备、日期分别追加到 `.jsonl` 文件。更改相遇记录路径会复制现有记录、保留原文件夹，不会移动 `data.json`。浏览器设置和临时词库缓存在浏览器扩展的本地存储中。
+词条和 FSRS 字段仍在库内 Markdown 文件中。Lexis 设置与复习日志在 Obsidian 固定的 `.obsidian/plugins/lexis/data.json`。相遇记录默认存于 `.obsidian/plugins/lexis/encounters/`；“设置 → Lexis → 数据存储 → 相遇记录文件夹”可填写独立的**库内文件夹路径**。输入时不会搬数据；点勾确认才切换，点还原撤销未确认的输入。切换只复制活动的 `baseline.json` 与按设备、日期追加的 `.jsonl`，旧副本留待核实后清理；不会移动 `data.json` 或词条笔记。浏览器设置和临时词库缓存在浏览器扩展的本地存储中。
 
 ## 笔记代码块
 

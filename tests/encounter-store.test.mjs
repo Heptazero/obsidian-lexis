@@ -60,3 +60,48 @@ test("combines a one-time baseline with per-device daily events without double-c
   assert.deepEqual({ ...await new EncounterStore(io, "99_assets/Lexis", macId).load() }, { ...await mac.load() });
   assert.equal(io.files.has(`${folder}/baseline.json`), true);
 });
+
+test("folder switch copies only encounter data and merges an older daily log", async () => {
+  const io = adapter();
+  const source = ".obsidian/plugins/lexis/encounters";
+  const target = "99_assets/plugin-data/lexis";
+  const device = "a".repeat(32);
+  await io.mkdir(source);
+  await io.mkdir(`${source}/${device}`);
+  await io.write(`${source}/baseline.json`, JSON.stringify({ schema: 1, entries: {} }));
+  await io.write(`${source}/other-plugin.json`, "not Lexis data");
+  await io.mkdir(`${source}/legacy-backup`);
+  await io.write(`${source}/legacy-backup/encounters.json`, "old backup");
+  const first = { id: "one", path: "10_atom/词.md", kind: "hover", day: "2026-09-29", at: 1 };
+  const second = { ...first, id: "two", at: 2 };
+  await io.write(`${source}/${device}/2026-09-29.jsonl`, `${JSON.stringify(first)}\n${JSON.stringify(second)}\n`);
+  await io.mkdir("99_assets");
+  await io.mkdir("99_assets/plugin-data");
+  await io.mkdir(target);
+  await io.mkdir(`${target}/${device}`);
+  await io.write(`${target}/${device}/2026-09-29.jsonl`, `${JSON.stringify(first)}\n`);
+  const store = new EncounterStore(io, source, device);
+  await store.copyTo(target);
+  assert.equal(io.files.has(`${target}/other-plugin.json`), false);
+  assert.equal(io.files.has(`${target}/legacy-backup/encounters.json`), false);
+  assert.deepEqual((await io.read(`${target}/${device}/2026-09-29.jsonl`)).trim().split("\n").map((line) => JSON.parse(line).id), ["one", "two"]);
+  await store.copyTo(target);
+  assert.equal((await io.read(`${target}/${device}/2026-09-29.jsonl`)).trim().split("\n").length, 2);
+
+  const nested = `${source}/new-location`;
+  await store.copyTo(nested);
+  assert.equal(io.files.has(`${nested}/baseline.json`), true);
+  assert.equal(io.files.has(`${nested}/other-plugin.json`), false);
+});
+
+test("folder switch rejects a destination shared with other files", async () => {
+  const io = adapter();
+  const source = ".obsidian/plugins/lexis/encounters";
+  await io.mkdir(source);
+  await io.write(`${source}/baseline.json`, JSON.stringify({ schema: 1, entries: {} }));
+  await io.mkdir("99_assets");
+  await io.mkdir("99_assets/plugin-data");
+  await io.write("99_assets/plugin-data/other-plugin.json", "keep me");
+  await assert.rejects(new EncounterStore(io, source, "a".repeat(32)).copyTo("99_assets/plugin-data"), /dedicated/);
+  assert.equal(io.files.has("99_assets/plugin-data/baseline.json"), false);
+});

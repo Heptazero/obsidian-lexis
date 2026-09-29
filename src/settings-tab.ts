@@ -207,25 +207,34 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       dataSection.addClass("lexis-data-section");
       const encounterFolderSetting = new Setting(dataSection).setName(t("settings.encounterFolder")).setDesc(t("settings.encounterFolderDesc"));
       encounterFolderSetting.settingEl.addClass("lexis-data-path-setting");
-      encounterFolderSetting
-        .addText((input) => {
-          const apply = async () => {
-            const previous = this.plugin.settings.encounterFolder;
-            try {
-              const value = input.getValue().trim();
-              await this.plugin.setEncounterFolder(value === defaultEncounterFolder ? "" : value);
-              input.setValue(this.plugin.settings.encounterFolder || defaultEncounterFolder);
-              if (previous !== this.plugin.settings.encounterFolder) new Notice(t("settings.encounterFolderSaved"));
-            } catch (error) {
-              input.setValue(previous || defaultEncounterFolder);
-              new Notice(t("settings.encounterFolderError", { error: error instanceof Error ? error.message : typeof error === "string" ? error : "Unknown error" }));
-            }
-          };
-          input.setValue(this.plugin.settings.encounterFolder || defaultEncounterFolder);
-          input.inputEl.addEventListener("change", () => { void apply(); });
-          input.inputEl.addEventListener("keydown", (event) => { if (event.key === "Enter") input.inputEl.blur(); });
-          if (hasSuggest) new PathSuggest(this.app, input.inputEl, () => folders, (value) => { input.setValue(value); void apply(); });
-        });
+      const savedEncounterFolder = () => this.plugin.settings.encounterFolder || defaultEncounterFolder;
+      const folderInput = new obsidian.TextComponent(encounterFolderSetting.controlEl).setValue(savedEncounterFolder());
+      const undoFolder = new obsidian.ExtraButtonComponent(encounterFolderSetting.controlEl).setIcon("undo").setTooltip(t("settings.encounterFolderUndo"));
+      const confirmFolder = new obsidian.ExtraButtonComponent(encounterFolderSetting.controlEl).setIcon("check").setTooltip(t("settings.encounterFolderConfirm"));
+      let switchingFolder = false;
+      const refreshFolderActions = () => {
+        const changed = folderInput.getValue().trim() !== savedEncounterFolder();
+        undoFolder.setDisabled(!changed || switchingFolder);
+        confirmFolder.setDisabled(!changed || switchingFolder);
+      };
+      folderInput.onChange(refreshFolderActions);
+      folderInput.inputEl.addEventListener("keydown", (event) => { if (event.key === "Enter") event.preventDefault(); });
+      undoFolder.onClick(() => { folderInput.setValue(savedEncounterFolder()); refreshFolderActions(); });
+      confirmFolder.onClick(() => { void (async () => {
+        if (switchingFolder || folderInput.getValue().trim() === savedEncounterFolder()) return;
+        switchingFolder = true;
+        refreshFolderActions();
+        try {
+          const value = folderInput.getValue().trim();
+          await this.plugin.setEncounterFolder(value === defaultEncounterFolder ? "" : value);
+          folderInput.setValue(savedEncounterFolder());
+          new Notice(t("settings.encounterFolderSaved"));
+        } catch (error) {
+          new Notice(t("settings.encounterFolderError", { error: error instanceof Error ? error.message : typeof error === "string" ? error : "Unknown error" }));
+        } finally { switchingFolder = false; refreshFolderActions(); }
+      })(); });
+      if (hasSuggest) new PathSuggest(this.app, folderInput.inputEl, () => folders, (value) => { folderInput.setValue(value); refreshFolderActions(); });
+      refreshFolderActions();
       new Setting(dataSection).setName(t("settings.pluginDataPath"))
         .setDesc(t("settings.pluginDataPathDesc", { path: `${this.app.vault.configDir}/plugins/${this.plugin.manifest.id}/data.json` }));
 

@@ -73,8 +73,8 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
 .lexis-settings-section-body .setting-item:first-child { border-top: none; }
 .lexis-data-path-setting { flex-wrap: wrap; }
 .lexis-data-path-setting .setting-item-info { flex: 1 1 180px; }
-.lexis-data-path-setting .setting-item-control { flex: 1 1 260px; min-width: 0; }
-.lexis-data-path-setting input { width: 100%; }
+.lexis-data-path-setting .setting-item-control { display: flex; flex: 1 1 260px; min-width: 0; }
+.lexis-data-path-setting input { flex: 1 1 auto; width: auto; min-width: 0; }
 .lexis-data-section .setting-item-description { overflow-wrap: anywhere; }
 .lexis-highlight-options {
     min-width: 0;

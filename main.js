@@ -978,7 +978,9 @@ var MESSAGES = {
   "settings.retireDaysDesc": { zh: "\u5165\u5E93\u4E0E\u672A\u76F8\u9047\u5747\u8FBE\u5230\u6B64\u5929\u6570\u3002", en: "Both added and unseen ages must reach this value." },
   "settings.dataStorage": { zh: "\u6570\u636E\u5B58\u50A8", en: "Data storage" },
   "settings.encounterFolder": { zh: "\u76F8\u9047\u8BB0\u5F55\u6587\u4EF6\u5939", en: "Encounter data folder" },
-  "settings.encounterFolderDesc": { zh: "\u53EF\u4FEE\u6539\u7684\u5E93\u5185\u6587\u4EF6\u5939\u8DEF\u5F84\u3002\u66F4\u6539\u65F6\u590D\u5236\u5DF2\u6709\u8BB0\u5F55\uFF0C\u539F\u6587\u4EF6\u4FDD\u7559\u3002", en: "Editable folder path inside the vault. Existing records are copied; originals remain." },
+  "settings.encounterFolderDesc": { zh: "\u4F7F\u7528\u4E13\u7528\u6587\u4EF6\u5939\uFF1B\u53EA\u6709\u70B9\u52FE\u624D\u5207\u6362\u3002\u53EA\u590D\u5236\u76F8\u9047\u8BB0\u5F55\uFF0C\u65E7\u526F\u672C\u4FDD\u7559\u3002", en: "Use a dedicated folder. Only the check button switches paths. Encounter records are copied; old copies remain." },
+  "settings.encounterFolderUndo": { zh: "\u8FD8\u539F\u672A\u786E\u8BA4\u7684\u8DEF\u5F84", en: "Discard the unconfirmed path" },
+  "settings.encounterFolderConfirm": { zh: "\u786E\u8BA4\u5207\u6362\u76F8\u9047\u8BB0\u5F55\u6587\u4EF6\u5939", en: "Confirm encounter folder change" },
   "settings.pluginDataPath": { zh: "\u63D2\u4EF6\u8BBE\u7F6E\u4E0E\u590D\u4E60\u65E5\u5FD7", en: "Settings and review history" },
   "settings.pluginDataPathDesc": { zh: "Obsidian \u56FA\u5B9A\u4F4D\u7F6E\uFF1A{path}\u3002\u4E0D\u968F\u76F8\u9047\u8BB0\u5F55\u8FC1\u79FB\u3002", en: "Obsidian-managed path: {path}. This does not move with encounter data." },
   "settings.encounterFolderSaved": { zh: "\u76F8\u9047\u8BB0\u5F55\u5DF2\u5207\u6362\u6587\u4EF6\u5939", en: "Encounter folder updated" },
@@ -2471,18 +2473,42 @@ var EncounterStore = class {
   async copyTo(folder) {
     if (folder === this.folder || !await this.adapter.exists(this.folder)) return;
     await ensureDirectory(this.adapter, folder);
-    const root = await this.adapter.list(this.folder);
-    const copy = async (source) => {
-      const target = folder + source.slice(this.folder.length);
+    const destination = await this.adapter.list(folder);
+    const otherFile = destination.files.find((file) => !/\/(baseline\.json|\.DS_Store)$/.test(file));
+    const otherFolder = destination.folders.find((item) => !/\/(?:[a-f0-9]{32}|legacy-backup)$/.test(item));
+    if (otherFile || otherFolder) throw new Error("Choose an empty folder dedicated to Lexis encounter records.");
+    const source = await this.adapter.list(this.folder);
+    const baseline = `${this.folder}/baseline.json`;
+    if (source.files.includes(baseline)) {
+      const target = `${folder}/baseline.json`;
       if (await this.adapter.exists(target)) {
-        if (await this.adapter.read(target) !== await this.adapter.read(source)) throw new Error(`Target already has different data: ${target}`);
-      } else await this.adapter.copy(source, target);
-    };
-    for (const file of root.files) await copy(file);
-    for (const sourceFolder of root.folders) {
-      await ensureDirectory(this.adapter, folder + sourceFolder.slice(this.folder.length));
+        if (await this.adapter.read(target) !== await this.adapter.read(baseline)) throw new Error("The destination has a different encounter baseline.");
+      } else await this.adapter.copy(baseline, target);
+    }
+    for (const sourceFolder of source.folders.filter((item) => /\/[a-f0-9]{32}$/.test(item))) {
+      const targetFolder = folder + sourceFolder.slice(this.folder.length);
+      await ensureDirectory(this.adapter, targetFolder);
       const { files } = await this.adapter.list(sourceFolder);
-      for (const file of files) await copy(file);
+      for (const file of files.filter((item) => /\/\d{4}-\d{2}-\d{2}\.jsonl$/.test(item))) {
+        const target = targetFolder + file.slice(sourceFolder.length);
+        if (!await this.adapter.exists(target)) {
+          await this.adapter.copy(file, target);
+          continue;
+        }
+        const existing = await this.adapter.read(target);
+        const incoming = await this.adapter.read(file);
+        if (existing === incoming) continue;
+        const ids = new Set(existing.split("\n").filter(Boolean).map((line) => JSON.parse(line).id));
+        const additional = incoming.split("\n").filter(Boolean).filter((line) => {
+          const id = JSON.parse(line).id;
+          if (typeof id !== "string" || !id) throw new Error("Invalid encounter event ID");
+          if (ids.has(id)) return false;
+          ids.add(id);
+          return true;
+        });
+        if (additional.length) await this.adapter.append(target, `${existing.endsWith("\n") ? "" : "\n"}${additional.join("\n")}
+`);
+      }
     }
   }
 };
@@ -6173,31 +6199,47 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
       dataSection.addClass("lexis-data-section");
       const encounterFolderSetting = new Setting3(dataSection).setName(t("settings.encounterFolder")).setDesc(t("settings.encounterFolderDesc"));
       encounterFolderSetting.settingEl.addClass("lexis-data-path-setting");
-      encounterFolderSetting.addText((input) => {
-        const apply = async () => {
-          const previous = this.plugin.settings.encounterFolder;
-          try {
-            const value = input.getValue().trim();
-            await this.plugin.setEncounterFolder(value === defaultEncounterFolder ? "" : value);
-            input.setValue(this.plugin.settings.encounterFolder || defaultEncounterFolder);
-            if (previous !== this.plugin.settings.encounterFolder) new Notice4(t("settings.encounterFolderSaved"));
-          } catch (error) {
-            input.setValue(previous || defaultEncounterFolder);
-            new Notice4(t("settings.encounterFolderError", { error: error instanceof Error ? error.message : typeof error === "string" ? error : "Unknown error" }));
-          }
-        };
-        input.setValue(this.plugin.settings.encounterFolder || defaultEncounterFolder);
-        input.inputEl.addEventListener("change", () => {
-          void apply();
-        });
-        input.inputEl.addEventListener("keydown", (event) => {
-          if (event.key === "Enter") input.inputEl.blur();
-        });
-        if (hasSuggest) new PathSuggest(this.app, input.inputEl, () => folders, (value) => {
-          input.setValue(value);
-          void apply();
-        });
+      const savedEncounterFolder = () => this.plugin.settings.encounterFolder || defaultEncounterFolder;
+      const folderInput = new obsidian5.TextComponent(encounterFolderSetting.controlEl).setValue(savedEncounterFolder());
+      const undoFolder = new obsidian5.ExtraButtonComponent(encounterFolderSetting.controlEl).setIcon("undo").setTooltip(t("settings.encounterFolderUndo"));
+      const confirmFolder = new obsidian5.ExtraButtonComponent(encounterFolderSetting.controlEl).setIcon("check").setTooltip(t("settings.encounterFolderConfirm"));
+      let switchingFolder = false;
+      const refreshFolderActions = () => {
+        const changed = folderInput.getValue().trim() !== savedEncounterFolder();
+        undoFolder.setDisabled(!changed || switchingFolder);
+        confirmFolder.setDisabled(!changed || switchingFolder);
+      };
+      folderInput.onChange(refreshFolderActions);
+      folderInput.inputEl.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") event.preventDefault();
       });
+      undoFolder.onClick(() => {
+        folderInput.setValue(savedEncounterFolder());
+        refreshFolderActions();
+      });
+      confirmFolder.onClick(() => {
+        void (async () => {
+          if (switchingFolder || folderInput.getValue().trim() === savedEncounterFolder()) return;
+          switchingFolder = true;
+          refreshFolderActions();
+          try {
+            const value = folderInput.getValue().trim();
+            await this.plugin.setEncounterFolder(value === defaultEncounterFolder ? "" : value);
+            folderInput.setValue(savedEncounterFolder());
+            new Notice4(t("settings.encounterFolderSaved"));
+          } catch (error) {
+            new Notice4(t("settings.encounterFolderError", { error: error instanceof Error ? error.message : typeof error === "string" ? error : "Unknown error" }));
+          } finally {
+            switchingFolder = false;
+            refreshFolderActions();
+          }
+        })();
+      });
+      if (hasSuggest) new PathSuggest(this.app, folderInput.inputEl, () => folders, (value) => {
+        folderInput.setValue(value);
+        refreshFolderActions();
+      });
+      refreshFolderActions();
       new Setting3(dataSection).setName(t("settings.pluginDataPath")).setDesc(t("settings.pluginDataPathDesc", { path: `${this.app.vault.configDir}/plugins/${this.plugin.manifest.id}/data.json` }));
       const mobileSection = this.section(containerEl, t("settings.mobileInteractions"), { desc: t("settings.mobileSectionDesc") });
       new Setting3(mobileSection).setName(t("settings.mobileTapAction")).setDesc(t("settings.mobileTapDesc")).addDropdown((dropdown) => dropdown.addOption("popover", t("settings.mobileTapPopover")).addOption("open", t("settings.mobileTapOpen")).setValue(this.plugin.settings.mobileTapAction).onChange(async (value) => {
@@ -8326,9 +8368,6 @@ var LexisPlugin = class extends import_obsidian9.Plugin {
         await this.saveSettings();
       }
       return;
-    }
-    if (target.startsWith(`${this._encounterStore.folder}/`) || this._encounterStore.folder.startsWith(`${target}/`)) {
-      throw new Error("Choose a folder outside the current encounter folder.");
     }
     if (this._encSaveTimer) window.clearTimeout(this._encSaveTimer);
     await this.saveEncounters();

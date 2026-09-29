@@ -781,9 +781,6 @@ class LexisPlugin extends Plugin {
       if (setting !== this.settings.encounterFolder) { this.settings.encounterFolder = setting; await this.saveSettings(); }
       return;
     }
-    if (target.startsWith(`${this._encounterStore.folder}/`) || this._encounterStore.folder.startsWith(`${target}/`)) {
-      throw new Error("Choose a folder outside the current encounter folder.");
-    }
     if (this._encSaveTimer) window.clearTimeout(this._encSaveTimer);
     await this.saveEncounters();
     if (this._encPending.length) throw new Error("Could not save pending encounters");
