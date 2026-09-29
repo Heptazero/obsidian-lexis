@@ -63,6 +63,7 @@ var DEFAULT_SETTINGS = {
   inlineCategoryOrder: [],
   inlineFileOrder: [],
   inlineCategoryOrderByParent: {},
+  settingsSectionOrder: [],
   enableHighlight: true,
   enableLivePreview: true,
   highlightStyle: "wavy",
@@ -5747,6 +5748,7 @@ function createReorderController({ container, onMove, setIcon: setIcon2, label =
   let pointerId = null;
   let activeHandle = null;
   let draggedRow = null;
+  let draggedDetailsOpen = null;
   let placeholder = null;
   let savedStyle = null;
   let offsetX = 0;
@@ -5760,6 +5762,7 @@ function createReorderController({ container, onMove, setIcon: setIcon2, label =
     draggedRow.classList.remove("is-dragging", "is-floating");
     if (savedStyle == null) draggedRow.removeAttribute("style");
     else draggedRow.setAttribute("style", savedStyle);
+    if (draggedDetailsOpen != null) draggedRow.open = draggedDetailsOpen;
   };
   const floatingPosition = (x, y) => {
     if (!draggedRow) return;
@@ -5793,9 +5796,16 @@ function createReorderController({ container, onMove, setIcon: setIcon2, label =
     const reference = after ? target.nextSibling : target;
     if (reference !== placeholder) container.insertBefore(placeholder, reference);
   };
-  const begin = (row, handle, index, event) => {
+  const begin = (row, handle, event) => {
+    draggedDetailsOpen = row.tagName === "DETAILS" ? row.open : null;
+    if (draggedDetailsOpen) row.open = false;
     const rect = row.getBoundingClientRect();
-    from = index;
+    from = rows().indexOf(row);
+    if (from < 0) {
+      if (draggedDetailsOpen) row.open = true;
+      draggedDetailsOpen = null;
+      return;
+    }
     active = true;
     activeHandle = handle;
     draggedRow = row;
@@ -5847,6 +5857,7 @@ function createReorderController({ container, onMove, setIcon: setIcon2, label =
     draggedRow = null;
     placeholder = null;
     savedStyle = null;
+    draggedDetailsOpen = null;
     if (start >= 0 && target >= 0 && start !== target) void onMove(start, target);
   };
   return {
@@ -5867,7 +5878,8 @@ function createReorderController({ container, onMove, setIcon: setIcon2, label =
       handle.addEventListener("pointerdown", (event) => {
         if (event.button != null && event.button !== 0) return;
         window.clearTimeout(timer);
-        from = index;
+        from = rows().indexOf(item);
+        if (from < 0) return;
         pointerId = event.pointerId;
         pointerX = event.clientX;
         pointerY = event.clientY;
@@ -5875,10 +5887,10 @@ function createReorderController({ container, onMove, setIcon: setIcon2, label =
           handle.setPointerCapture?.(event.pointerId);
         } catch {
         }
-        if (event.pointerType === "touch") timer = window.setTimeout(() => begin(item, handle, index, event), longPressMs);
+        if (event.pointerType === "touch") timer = window.setTimeout(() => begin(item, handle, event), longPressMs);
         else {
           event.preventDefault();
-          begin(item, handle, index, event);
+          begin(item, handle, event);
         }
       });
       handle.addEventListener("pointermove", (event) => {
@@ -6069,6 +6081,13 @@ function addSelectionPillPosition(container, { Setting: Setting3, settings, t, s
   render();
 }
 
+// src/settings-section-order.ts
+function orderedSectionKeys(available, saved) {
+  const allowed = new Set(available);
+  const previous = Array.isArray(saved) ? saved.filter((key) => typeof key === "string") : [];
+  return [.../* @__PURE__ */ new Set([...previous, ...available])].filter((key) => typeof key === "string" && allowed.has(key));
+}
+
 // src/settings-tab.ts
 var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingTab2, Setting: Setting3, Notice: Notice4, TFolder: TFolder2, DEFAULT_SETTINGS: DEFAULT_SETTINGS2, cssColorToHex: cssColorToHex2, addAppearanceButton: addAppearanceButton2, createReorderController: createReorderController2, moveItem: moveItem2, LEXIS_HOME_VIEW: LEXIS_HOME_VIEW2, LEXIS_REVIEW_VIEW: LEXIS_REVIEW_VIEW2 }) => {
   class PathSuggest extends obsidian5.AbstractInputSuggest {
@@ -6174,6 +6193,15 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
         new Notice4(t("language.reload"));
         this.update();
       }));
+      const sectionsContainer = containerEl.createDiv({ cls: "lexis-settings-sections" });
+      const sections = /* @__PURE__ */ new Map();
+      const topSection = (key, title, options = {}) => {
+        const body = this.section(sectionsContainer, title, options);
+        const details = body.parentElement;
+        details.dataset.lexisSectionKey = key;
+        sections.set(key, details);
+        return body;
+      };
       const folders = this.app.vault.getAllLoadedFiles().filter((f) => f instanceof TFolder2).map((f) => f.path).filter((p) => p && p !== "/").sort();
       const mdFiles = this.app.vault.getMarkdownFiles().map((f) => f.path).sort();
       const hasSuggest = !!obsidian5.AbstractInputSuggest;
@@ -6195,7 +6223,7 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
         return [];
       })();
       const defaultEncounterFolder = `${this.app.vault.configDir}/plugins/${this.plugin.manifest.id}/encounters`;
-      const dataSection = this.section(containerEl, t("settings.dataStorage"), { open: true });
+      const dataSection = topSection("data", t("settings.dataStorage"), { open: true });
       dataSection.addClass("lexis-data-section");
       const encounterFolderSetting = new Setting3(dataSection).setName(t("settings.encounterFolder")).setDesc(t("settings.encounterFolderDesc"));
       encounterFolderSetting.settingEl.addClass("lexis-data-path-setting");
@@ -6241,7 +6269,7 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
       });
       refreshFolderActions();
       new Setting3(dataSection).setName(t("settings.pluginDataPath")).setDesc(t("settings.pluginDataPathDesc", { path: `${this.app.vault.configDir}/plugins/${this.plugin.manifest.id}/data.json` }));
-      const mobileSection = this.section(containerEl, t("settings.mobileInteractions"), { desc: t("settings.mobileSectionDesc") });
+      const mobileSection = topSection("mobile", t("settings.mobileInteractions"), { desc: t("settings.mobileSectionDesc") });
       new Setting3(mobileSection).setName(t("settings.mobileTapAction")).setDesc(t("settings.mobileTapDesc")).addDropdown((dropdown) => dropdown.addOption("popover", t("settings.mobileTapPopover")).addOption("open", t("settings.mobileTapOpen")).setValue(this.plugin.settings.mobileTapAction).onChange(async (value) => {
         this.plugin.settings.mobileTapAction = value;
         await save();
@@ -6251,7 +6279,7 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
         this.app.workspace.containerEl.ownerDocument.querySelectorAll('.workspace-leaf-content[data-type="lexis-review-view"]').forEach((view) => view.setCssProps({ "--lexis-review-bottom-space": `${value}px` }));
         await save();
       }));
-      const dictSection = this.section(containerEl, t("settings.dictionary"), { open: true });
+      const dictSection = topSection("dictionary", t("settings.dictionary"), { open: true });
       const dictHeading = new Setting3(dictSection).setDesc(t("settings.dictionaryDesc")).setHeading();
       const dictsWrap = dictSection.createDiv();
       let renderDicts;
@@ -6394,7 +6422,7 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
           void apply(v);
         }, { multi: true, sep: "," });
       });
-      const inlineSection = this.section(containerEl, t("settings.inline"), { desc: t("settings.inlineDesc") });
+      const inlineSection = topSection("inline", t("settings.inline"), { desc: t("settings.inlineDesc") });
       new Setting3(inlineSection).setName(t("settings.enableInline")).setDesc(t("settings.enableInlineDesc")).addToggle((t2) => t2.setValue(this.plugin.settings.inlineEntriesEnabled).onChange(async (v) => {
         this.plugin.settings.inlineEntriesEnabled = v;
         await save();
@@ -6576,7 +6604,7 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
         });
       };
       renderCategoryColors();
-      const hlSection = this.section(containerEl, t("settings.highlight"));
+      const hlSection = topSection("highlight", t("settings.highlight"));
       const highlightSwitch = new Setting3(hlSection).setName(t("settings.enableHighlight")).setDesc(t("settings.enableHighlightDesc"));
       const highlightOptions = hlSection.createEl("fieldset", { cls: "lexis-highlight-options" });
       const syncHighlightOptions = () => {
@@ -6767,7 +6795,7 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
         });
       };
       renderRules();
-      const cardSection = this.section(containerEl, t("settings.popover"));
+      const cardSection = topSection("popover", t("settings.popover"));
       const preview = cardSection.createDiv({ cls: "lexis-popover lexis-popover-preview" });
       const previewScroll = preview.createDiv({ cls: "lexis-popover-scroll" });
       previewScroll.createDiv({ cls: "lexis-popover-title", text: "Yalda \xB7 \u4EBA\u7269" });
@@ -6810,7 +6838,7 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
         await save();
         this.plugin._occCache.clear();
       }));
-      const addSection = this.section(containerEl, t("settings.selectionAdd"));
+      const addSection = topSection("selection-add", t("settings.selectionAdd"));
       new Setting3(addSection).setName(t("settings.selectionPill")).addToggle((toggle) => toggle.setValue(this.plugin.settings.selectionPill).onChange(async (v) => {
         this.plugin.settings.selectionPill = v;
         await save();
@@ -6862,7 +6890,7 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
           });
         });
       }
-      const fsrsSection = this.section(containerEl, t("settings.review"));
+      const fsrsSection = topSection("review", t("settings.review"));
       const syntaxTemplates2 = [
         ["flashcardInlineTemplate", "settings.flashcardInline", "{{question}}::{{answer}}"],
         ["flashcardBidirectionalTemplate", "settings.flashcardBidirectional", "{{sideA}}:::{{sideB}}"],
@@ -6928,7 +6956,7 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
         this.plugin.settings.retireCandidateDays = v;
         await save();
       }));
-      const bridgeSection = this.section(containerEl, t("settings.bridge"), { desc: t("settings.bridgeDesc") });
+      const bridgeSection = topSection("bridge", t("settings.bridge"), { desc: t("settings.bridgeDesc") });
       new Setting3(bridgeSection).setName(t("settings.enableBridge")).addToggle((t2) => t2.setValue(this.plugin.settings.bridgeEnabled).onChange(async (v) => {
         this.plugin.settings.bridgeEnabled = v;
         if (v && !this.plugin.settings.bridgeToken) this.plugin.settings.bridgeToken = this.plugin.bridge.generateToken();
@@ -6960,6 +6988,21 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
         this.plugin.bridge.restart();
         this.update();
       }));
+      const sectionOrder = orderedSectionKeys([...sections.keys()], this.plugin.settings.settingsSectionOrder);
+      for (const key of sectionOrder) sectionsContainer.appendChild(sections.get(key));
+      const sectionReorder = createReorderController2({
+        container: sectionsContainer,
+        setIcon: obsidian5.setIcon,
+        label: t("settings.reorder"),
+        onMove: async () => {
+          this.plugin.settings.settingsSectionOrder = Array.from(sectionsContainer.children).map((element) => element.dataset.lexisSectionKey).filter((key) => !!key);
+          await save();
+        }
+      });
+      sectionOrder.forEach((key, index) => {
+        const details = sections.get(key);
+        sectionReorder.attach(details, index, { handleParent: details.querySelector("summary") });
+      });
       new Setting3(containerEl).setName(t("settings.rebuild")).addButton((b) => b.setButtonText(t("settings.rebuildNow")).onClick(() => {
         void this.plugin.rebuildIndex(true);
         this.renderStats();

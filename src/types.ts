@@ -130,6 +130,7 @@ export interface LexisSettings {
   inlineCategoryOrder: string[];
   inlineFileOrder: string[];
   inlineCategoryOrderByParent: Record<string, string[]>;
+  settingsSectionOrder: string[];
   enableHighlight: boolean;
   enableLivePreview: boolean;
   highlightStyle: HighlightStyle;

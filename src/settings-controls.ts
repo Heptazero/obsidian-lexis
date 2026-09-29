@@ -26,6 +26,7 @@ function createReorderController({ container, onMove, setIcon, label = "Reorder"
   let pointerId: number | null = null;
   let activeHandle: HTMLElement | null = null;
   let draggedRow: HTMLElement | null = null;
+  let draggedDetailsOpen: boolean | null = null;
   let placeholder: HTMLElement | null = null;
   let savedStyle: string | null = null;
   let offsetX = 0;
@@ -40,6 +41,7 @@ function createReorderController({ container, onMove, setIcon, label = "Reorder"
     draggedRow.classList.remove("is-dragging", "is-floating");
     if (savedStyle == null) draggedRow.removeAttribute("style");
     else draggedRow.setAttribute("style", savedStyle);
+    if (draggedDetailsOpen != null) (draggedRow as HTMLDetailsElement).open = draggedDetailsOpen;
   };
   const floatingPosition = (x: number, y: number) => {
     if (!draggedRow) return;
@@ -70,9 +72,16 @@ function createReorderController({ container, onMove, setIcon, label = "Reorder"
     const reference = after ? target.nextSibling : target;
     if (reference !== placeholder) container.insertBefore(placeholder, reference);
   };
-  const begin = (row: HTMLElement, handle: HTMLElement, index: number, event: PointerEvent) => {
+  const begin = (row: HTMLElement, handle: HTMLElement, event: PointerEvent) => {
+    draggedDetailsOpen = row.tagName === "DETAILS" ? (row as HTMLDetailsElement).open : null;
+    if (draggedDetailsOpen) (row as HTMLDetailsElement).open = false;
     const rect = row.getBoundingClientRect();
-    from = index;
+    from = rows().indexOf(row);
+    if (from < 0) {
+      if (draggedDetailsOpen) (row as HTMLDetailsElement).open = true;
+      draggedDetailsOpen = null;
+      return;
+    }
     active = true;
     activeHandle = handle;
     draggedRow = row;
@@ -118,6 +127,7 @@ function createReorderController({ container, onMove, setIcon, label = "Reorder"
     draggedRow = null;
     placeholder = null;
     savedStyle = null;
+    draggedDetailsOpen = null;
     if (start >= 0 && target >= 0 && start !== target) void onMove(start, target);
   };
 
@@ -138,15 +148,16 @@ function createReorderController({ container, onMove, setIcon, label = "Reorder"
       handle.addEventListener("pointerdown", (event) => {
         if (event.button != null && event.button !== 0) return;
         window.clearTimeout(timer);
-        from = index;
+        from = rows().indexOf(item);
+        if (from < 0) return;
         pointerId = event.pointerId;
         pointerX = event.clientX;
         pointerY = event.clientY;
         try { handle.setPointerCapture?.(event.pointerId); } catch { /* Pointer capture is optional. */ }
-        if (event.pointerType === "touch") timer = window.setTimeout(() => begin(item, handle, index, event), longPressMs);
+        if (event.pointerType === "touch") timer = window.setTimeout(() => begin(item, handle, event), longPressMs);
         else {
           event.preventDefault();
-          begin(item, handle, index, event);
+          begin(item, handle, event);
         }
       });
       handle.addEventListener("pointermove", (event) => {

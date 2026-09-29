@@ -66,6 +66,9 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     font-size: 12px;
     color: var(--text-muted);
 }
+.lexis-settings-sections > .lexis-settings-section > summary > .lexis-drag-handle {
+    align-self: center;
+}
 .lexis-settings-section-body {
     padding-bottom: 10px;
     border-top: 1px solid var(--background-modifier-border);
@@ -318,6 +321,9 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     .lexis-settings-section-hint {
         flex-basis: 100%;
         padding-left: 20px;
+    }
+    .lexis-settings-sections > .lexis-settings-section > summary > .lexis-settings-section-hint {
+        order: 101;
     }
     .lexis-settings-subgroup {
         margin-left: 4px;

@@ -4,6 +4,7 @@ import type { App, ColorComponent, MetadataCache, Plugin, Setting, SettingDefini
 import type { TranslationVars } from "./i18n";
 import type { HighlightStyle, InlineCategoryOccurrence, LexisSettings, LexisStats } from "./types";
 import { addSelectionPillPosition } from "./settings-selection-pill";
+import { orderedSectionKeys } from "./settings-section-order";
 
 interface SettingsRuntime extends Plugin {
   settings: LexisSettings;
@@ -187,6 +188,15 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
           this.update();
         }));
 
+      const sectionsContainer = containerEl.createDiv({ cls: "lexis-settings-sections" });
+      const sections = new Map<string, HTMLElement>();
+      const topSection = (key: string, title: string, options: { open?: boolean; desc?: string } = {}) => {
+        const body = this.section(sectionsContainer, title, options);
+        const details = body.parentElement;
+        details.dataset.lexisSectionKey = key;
+        sections.set(key, details);
+        return body;
+      };
       const folders = this.app.vault.getAllLoadedFiles().filter((f) => f instanceof TFolder).map((f) => f.path).filter((p) => p && p !== "/").sort();
       const mdFiles = this.app.vault.getMarkdownFiles().map((f) => f.path).sort();
       const hasSuggest = !!obsidian.AbstractInputSuggest;
@@ -203,7 +213,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
         return [];
       })();
       const defaultEncounterFolder = `${this.app.vault.configDir}/plugins/${this.plugin.manifest.id}/encounters`;
-      const dataSection = this.section(containerEl, t("settings.dataStorage"), { open: true });
+      const dataSection = topSection("data", t("settings.dataStorage"), { open: true });
       dataSection.addClass("lexis-data-section");
       const encounterFolderSetting = new Setting(dataSection).setName(t("settings.encounterFolder")).setDesc(t("settings.encounterFolderDesc"));
       encounterFolderSetting.settingEl.addClass("lexis-data-path-setting");
@@ -238,7 +248,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       new Setting(dataSection).setName(t("settings.pluginDataPath"))
         .setDesc(t("settings.pluginDataPathDesc", { path: `${this.app.vault.configDir}/plugins/${this.plugin.manifest.id}/data.json` }));
 
-      const mobileSection = this.section(containerEl, t("settings.mobileInteractions"), { desc: t("settings.mobileSectionDesc") });
+      const mobileSection = topSection("mobile", t("settings.mobileInteractions"), { desc: t("settings.mobileSectionDesc") });
       new Setting(mobileSection).setName(t("settings.mobileTapAction")).setDesc(t("settings.mobileTapDesc"))
         .addDropdown((dropdown) => dropdown
           .addOption("popover", t("settings.mobileTapPopover"))
@@ -259,7 +269,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
             await save();
           }));
 
-      const dictSection = this.section(containerEl, t("settings.dictionary"), { open: true });
+      const dictSection = topSection("dictionary", t("settings.dictionary"), { open: true });
       const dictHeading = new Setting(dictSection).setDesc(t("settings.dictionaryDesc")).setHeading();
       const dictsWrap = dictSection.createDiv();
       let renderDicts: () => void;
@@ -365,7 +375,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
           if (hasSuggest) new PathSuggest(this.app, t.inputEl, () => allProps, (v) => { t.setValue(v); void apply(v); }, { multi: true, sep: "," });
         });
 
-      const inlineSection = this.section(containerEl, t("settings.inline"), { desc: t("settings.inlineDesc") });
+      const inlineSection = topSection("inline", t("settings.inline"), { desc: t("settings.inlineDesc") });
       new Setting(inlineSection).setName(t("settings.enableInline")).setDesc(t("settings.enableInlineDesc"))
         .addToggle((t) => t.setValue(this.plugin.settings.inlineEntriesEnabled).onChange(async (v) => { this.plugin.settings.inlineEntriesEnabled = v; await save(); await this.plugin.rebuildIndex(false); this.renderStats(); }));
       new Setting(inlineSection).setName(t("settings.inlineDelimiter")).setDesc(t("settings.inlineDelimiterDesc"))
@@ -515,7 +525,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       };
       renderCategoryColors();
 
-      const hlSection = this.section(containerEl, t("settings.highlight"));
+      const hlSection = topSection("highlight", t("settings.highlight"));
       const highlightSwitch = new Setting(hlSection).setName(t("settings.enableHighlight")).setDesc(t("settings.enableHighlightDesc"));
       const highlightOptions = hlSection.createEl("fieldset", { cls: "lexis-highlight-options" });
       const syncHighlightOptions = () => {
@@ -636,7 +646,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       };
       renderRules();
 
-      const cardSection = this.section(containerEl, t("settings.popover"));
+      const cardSection = topSection("popover", t("settings.popover"));
       const preview = cardSection.createDiv({ cls: "lexis-popover lexis-popover-preview" });
       const previewScroll = preview.createDiv({ cls: "lexis-popover-scroll" });
       previewScroll.createDiv({ cls: "lexis-popover-title", text: "Yalda · 人物" });
@@ -660,7 +670,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       new Setting(cardSection).setName(t("settings.occurrenceScope")).setDesc(t("settings.occurrenceScopeDesc"))
         .addText((input) => input.setPlaceholder(t("settings.wholeVault")).setValue(this.plugin.settings.occurrenceFolders).onChange(async (v) => { this.plugin.settings.occurrenceFolders = v.trim(); await save(); this.plugin._occCache.clear(); }));
 
-      const addSection = this.section(containerEl, t("settings.selectionAdd"));
+      const addSection = topSection("selection-add", t("settings.selectionAdd"));
       new Setting(addSection).setName(t("settings.selectionPill"))
         .addToggle((toggle) => toggle.setValue(this.plugin.settings.selectionPill).onChange(async (v) => { this.plugin.settings.selectionPill = v; await save(); if (!v) this.plugin.removeSelPill(); }));
       addSelectionPillPosition(addSection, { Setting, settings: this.plugin.settings, t, save });
@@ -706,7 +716,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
           });
       }
 
-      const fsrsSection = this.section(containerEl, t("settings.review"));
+      const fsrsSection = topSection("review", t("settings.review"));
       const syntaxTemplates: Array<[keyof Pick<LexisSettings, "flashcardInlineTemplate" | "flashcardBidirectionalTemplate" | "flashcardBlockTemplate" | "flashcardClozeTemplate">, string, string]> = [
         ["flashcardInlineTemplate", "settings.flashcardInline", "{{question}}::{{answer}}"],
         ["flashcardBidirectionalTemplate", "settings.flashcardBidirectional", "{{sideA}}:::{{sideB}}"],
@@ -760,7 +770,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
         .addSlider((s) => s.setLimits(1, 30, 1).setValue(this.plugin.settings.hoverFeedbackDays).onChange(async (v) => { this.plugin.settings.hoverFeedbackDays = v; await save(); }));
       new Setting(fsrsSection).setName(t("settings.retireDays")).setDesc(t("settings.retireDaysDesc"))
         .addSlider((s) => s.setLimits(14, 365, 1).setValue(this.plugin.settings.retireCandidateDays).onChange(async (v) => { this.plugin.settings.retireCandidateDays = v; await save(); }));
-      const bridgeSection = this.section(containerEl, t("settings.bridge"), { desc: t("settings.bridgeDesc") });
+      const bridgeSection = topSection("bridge", t("settings.bridge"), { desc: t("settings.bridgeDesc") });
       new Setting(bridgeSection).setName(t("settings.enableBridge"))
         .addToggle((t) => t.setValue(this.plugin.settings.bridgeEnabled).onChange(async (v) => {
           this.plugin.settings.bridgeEnabled = v;
@@ -776,6 +786,24 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
         .addText((input) => { input.setValue(this.plugin.settings.bridgeToken || t("settings.tokenPending")).setDisabled(true); input.inputEl.addClass("lexis-bridge-token-input"); })
         .addExtraButton((b) => b.setIcon("copy").setTooltip(t("settings.copyToken")).onClick(async () => { if (this.plugin.settings.bridgeToken) { await navigator.clipboard.writeText(this.plugin.settings.bridgeToken); new Notice(t("notice.tokenCopied")); } }))
         .addExtraButton((b) => b.setIcon("refresh-cw").setTooltip(t("settings.regenerateToken")).onClick(async () => { this.plugin.settings.bridgeToken = this.plugin.bridge.generateToken(); await save(); this.plugin.bridge.restart(); this.update(); }));
+
+      const sectionOrder = orderedSectionKeys([...sections.keys()], this.plugin.settings.settingsSectionOrder);
+      for (const key of sectionOrder) sectionsContainer.appendChild(sections.get(key));
+      const sectionReorder = createReorderController({
+        container: sectionsContainer,
+        setIcon: obsidian.setIcon,
+        label: t("settings.reorder"),
+        onMove: async () => {
+          this.plugin.settings.settingsSectionOrder = Array.from(sectionsContainer.children)
+            .map((element) => (element as HTMLElement).dataset.lexisSectionKey)
+            .filter((key): key is string => !!key);
+          await save();
+        },
+      });
+      sectionOrder.forEach((key, index) => {
+        const details = sections.get(key);
+        sectionReorder.attach(details, index, { handleParent: details.querySelector("summary") });
+      });
 
       new Setting(containerEl).setName(t("settings.rebuild")).addButton((b) => b.setButtonText(t("settings.rebuildNow")).onClick(() => { void this.plugin.rebuildIndex(true); this.renderStats(); }));
       this.statsEl = containerEl.createEl("p", { cls: "lexis-stats" });

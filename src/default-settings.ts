@@ -22,6 +22,7 @@ export const DEFAULT_SETTINGS: DefaultLexisSettings = {
   inlineCategoryOrder: [],
   inlineFileOrder: [],
   inlineCategoryOrderByParent: {},
+  settingsSectionOrder: [],
   enableHighlight: true,
   enableLivePreview: true,
   highlightStyle: "wavy",
