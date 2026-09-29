@@ -541,7 +541,7 @@
     body.innerHTML = "";
     box.classList.toggle("has-corner-actions", !!(data && data.ok && !data.inline));
     if (!data || !data.ok) {
-      if (data?.error === "request-timeout") body.textContent = "加载超时，请重新悬浮";
+      if (data?.error === "request-timeout") body.textContent = "卡片加载超时，请检查 Obsidian 连接";
       else body.textContent = data?.offline ? "Obsidian 未连接(开着且桥接已启用?)" : "未找到这个词";
       return;
     }
@@ -806,6 +806,56 @@
       extra.className = "lexis-web-pop-extra";
       extra.innerHTML = data.extraHtml;
       body.appendChild(extra);
+    }
+    loadOccurrences(box, box.dataset.k);
+  }
+
+  async function loadOccurrences(box, key) {
+    const placeholders = [...box.querySelectorAll(".lexis-web-occ-pending")];
+    if (!placeholders.length) return;
+    const retry = async () => {
+      for (const el of placeholders) { el.textContent = "出处加载中…"; el.removeAttribute("role"); el.removeAttribute("tabindex"); el.onclick = null; el.onkeydown = null; }
+      let result;
+      try { result = await chrome.runtime.sendMessage({ type: "occurrences", key }); }
+      catch (_error) { result = { ok: false, error: "offline" }; }
+      if (!box.isConnected || box.dataset.k !== key) return;
+      if (result?.ok) {
+        installMathCss(box.getRootNode(), result.mathCss);
+        for (const el of placeholders) {
+          if (!el.isConnected) continue;
+          const fragment = document.createElement("div");
+          fragment.innerHTML = result.html || "";
+          el.replaceWith(...fragment.childNodes);
+        }
+        if (popHost && currentSpan) position(popHost, currentSpan);
+      } else {
+        for (const el of placeholders) {
+          if (!el.isConnected) continue;
+          el.textContent = "出处暂未加载 · 点击重试";
+          el.setAttribute("role", "button");
+          el.setAttribute("tabindex", "0");
+          el.onclick = retry;
+          el.onkeydown = (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); void retry(); } };
+        }
+      }
+    };
+    await retry();
+  }
+
+  async function preloadVisibleDetails() {
+    void popoverSheet().catch(() => null);
+    const keys = new Set();
+    for (const span of document.querySelectorAll(`.${HL}`)) {
+      const rect = span.getBoundingClientRect();
+      if (rect.bottom < 0 || rect.top > innerHeight || rect.right < 0 || rect.left > innerWidth) continue;
+      const key = span.dataset.k;
+      if (!key || detailCache.has(key) || keys.has(key)) continue;
+      keys.add(key);
+      if (keys.size >= 4) break;
+    }
+    for (const key of keys) {
+      const result = await chrome.runtime.sendMessage({ type: "detail", key }).catch(() => null);
+      if (result?.ok) detailCache.set(key, result);
     }
   }
 
@@ -1125,8 +1175,11 @@
   document.addEventListener("scroll", hideSelBtn, { passive: true });
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message?.type !== "lexis-page-context") return;
-    sendResponse({ site: currentSite });
+    if (message?.type === "lexis-page-context") sendResponse({ site: currentSite });
+    if (message?.type === "lexis-preload-visible") {
+      void preloadVisibleDetails();
+      sendResponse({ ok: true });
+    }
   });
 
   // ---- 启动 / 配置变化 ----

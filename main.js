@@ -2448,6 +2448,7 @@ function createBridgeServer({ Notice: Notice4, Platform: Platform3 }) {
       if (!plugin.settings.bridgeToken || token !== plugin.settings.bridgeToken) return send(401, { ok: false, error: "bad-token" });
       if (path === "/words" && req.method === "GET") return send(200, plugin.bridgeWordList());
       if (path === "/word" && req.method === "GET") return send(200, await plugin.bridgeWordDetail(url.searchParams.get("key") || url.searchParams.get("w")));
+      if (path === "/occurrences" && req.method === "GET") return send(200, await plugin.bridgeWordOccurrences(url.searchParams.get("key")));
       if (path === "/word" && req.method === "DELETE") return send(200, await plugin.bridgeDeleteWord(url.searchParams.get("key") || ""));
       if (path === "/add" && req.method === "POST") return send(200, await plugin.bridgeAddWord(await this.readBody(req)));
       if (path === "/tag" && req.method === "POST") return send(200, await plugin.bridgeTagWord(await this.readBody(req)));
@@ -2973,6 +2974,13 @@ ${line}`);
         mathCss: html.includes("<mjx-container") ? this.bridgeMathCss() : ""
       };
     }
+    async bridgeWordOccurrences(key) {
+      const k = this.resolveIndexKey(textValue(key));
+      const entry = this.index.get(k);
+      if (!entry || entry.inline) return { ok: false, error: "not-found" };
+      const html = await this.lexisBlockHtml(entry.file, entry.display, "occ");
+      return { ok: true, html, mathCss: html.includes("<mjx-container") ? this.bridgeMathCss() : "" };
+    }
     bridgeOlink(path, base) {
       const vault = encodeURIComponent(this.app.vault.getName());
       return `<a class="lexis-web-ilink" href="obsidian://open?vault=${vault}&file=${encodeURIComponent(path)}">${escHtml(base)}</a>`;
@@ -3053,7 +3061,7 @@ ${line}`);
       for (let i = 0; i < blocks.length; i++) {
         const marker = `@@LEXIS${i}@@`;
         const host = Array.from(div.querySelectorAll("p, div, li")).find((element) => element.textContent.trim() === marker);
-        const html = await this.lexisBlockHtml(file, display, blocks[i]);
+        const html = await this.lexisBlockHtml(file, display, blocks[i], true);
         if (!host) continue;
         if (!html || !html.trim()) {
           const prev = host.previousElementSibling;
@@ -3102,7 +3110,7 @@ ${line}`);
       return out;
     }
     // 单个 ```lexis 块 → HTML(对应 renderLexisBlock 的各模式,带 obsidian:// 链接)
-    async lexisBlockHtml(file, display, src) {
+    async lexisBlockHtml(file, display, src, deferOccurrences = false) {
       const parts = (src || "").trim().split(/\s+/).filter(Boolean);
       const m = (parts[0] || "").toLowerCase();
       const typeArg = parts.slice(1).join(" ");
@@ -3159,7 +3167,8 @@ ${line}`);
         } catch {
         }
       }
-      if (showOcc) {
+      if (showOcc && deferOccurrences) html += `<div class="lexis-web-occ-pending">\u51FA\u5904\u52A0\u8F7D\u4E2D\u2026</div>`;
+      else if (showOcc) {
         try {
           const list = await this.findOccurrences(display);
           const curated = await this.getCuratedSourcePaths(file);
@@ -3176,7 +3185,7 @@ ${line}`);
               rendered.push({ d, o });
             }
             try {
-              await finishRenderMath2();
+              await withTimeout(finishRenderMath2(), 3e3);
             } catch {
             }
             for (const { d, o } of rendered) {

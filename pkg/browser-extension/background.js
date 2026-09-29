@@ -3,8 +3,9 @@
 if (typeof importScripts === "function") importScripts("config.js");
 const { defaultConnection, normalizePort } = globalThis.LexisWebConfig;
 const DEFAULT_CFG = { ...defaultConnection, token: "", highlight: true, showMemoryCurve: true, color: "#7c5cff", style: "wavy" };
-const REQUEST_TIMEOUT_MS = 8000;
-let activeDetailController = null;
+const REQUEST_TIMEOUT_MS = 15000;
+const OCCURRENCE_TIMEOUT_MS = 30000;
+const inFlight = new Map();
 
 async function getCfg() {
   const { cfg } = await chrome.storage.local.get("cfg");
@@ -14,9 +15,10 @@ async function getCfg() {
 }
 function base(cfg) { return `http://${cfg.host}:${cfg.port}`; }
 
-async function fetchJson(url, options = {}, controller = new AbortController()) {
+async function fetchJson(url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
   let timedOut = false;
-  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
   try {
     const response = await fetch(url, { ...options, signal: controller.signal });
     return await response.json();
@@ -28,7 +30,7 @@ async function fetchJson(url, options = {}, controller = new AbortController()) 
   }
 }
 
-async function api(cfg, path, { query, method = "GET", body, controller } = {}) {
+async function api(cfg, path, { query, method = "GET", body, timeoutMs } = {}) {
   const u = new URL(base(cfg) + path);
   if (query) for (const k in query) u.searchParams.set(k, query[k]);
   const headers = {};
@@ -39,7 +41,16 @@ async function api(cfg, path, { query, method = "GET", body, controller } = {}) 
     headers,
     body: body == null ? undefined : JSON.stringify(body),
     cache: "no-store",
-  }, controller);
+  }, timeoutMs);
+}
+
+function sharedRequest(type, key, request) {
+  const id = `${type}:${key}`;
+  if (!inFlight.has(id)) {
+    const pending = request().finally(() => inFlight.delete(id));
+    inFlight.set(id, pending);
+  }
+  return inFlight.get(id);
 }
 
 async function flushPending(cfg) {
@@ -78,14 +89,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         return;
       }
       if (msg.type === "detail") {
-        activeDetailController?.abort();
-        const controller = new AbortController();
-        activeDetailController = controller;
-        try {
-          sendResponse(await api(cfg, "/word", { query: { key: msg.key }, controller }));
-        } finally {
-          if (activeDetailController === controller) activeDetailController = null;
-        }
+        sendResponse(await sharedRequest("detail", msg.key, () => api(cfg, "/word", { query: { key: msg.key } })));
+        return;
+      }
+      if (msg.type === "occurrences") {
+        sendResponse(await sharedRequest("occurrences", msg.key, () => api(cfg, "/occurrences", { query: { key: msg.key }, timeoutMs: OCCURRENCE_TIMEOUT_MS })));
         return;
       }
       if (msg.type === "delete") {

@@ -159,6 +159,7 @@ class LexisPlugin extends Plugin {
   declare updateStatusBar: () => void;
   declare bridgeWordList: () => unknown;
   declare bridgeWordDetail: (key: string | null) => Promise<unknown>;
+  declare bridgeWordOccurrences: (key: string | null) => Promise<unknown>;
   declare bridgeDeleteWord: (key: string) => Promise<unknown>;
   declare bridgeAddWord: (payload: Record<string, unknown>) => Promise<unknown>;
   declare bridgeTagWord: (payload: Record<string, unknown>) => Promise<unknown>;

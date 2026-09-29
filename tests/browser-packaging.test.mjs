@@ -21,8 +21,12 @@ test("bounds browser detail requests and delays the loading label", async () => 
   assert.match(background, /AbortController/);
   assert.match(background, /request-timeout/);
   assert.match(background, /request-cancelled/);
+  assert.doesNotMatch(background, /activeDetailController/);
+  assert.match(background, /sharedRequest\("detail"/);
+  assert.match(background, /sharedRequest\("occurrences"/);
   assert.match(content, /Math\.max\(120,/);
   assert.match(content, /}, 180\);/);
-  assert.match(content, /加载超时，请重新悬浮/);
+  assert.match(content, /出处暂未加载 · 点击重试/);
+  assert.match(content, /lexis-preload-visible/);
   assert.doesNotMatch(content, /lexis-web-pop-body">加载中/);
 });

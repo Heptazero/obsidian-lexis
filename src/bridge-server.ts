@@ -38,6 +38,7 @@ interface BridgePlugin {
   updateStatusBar(): void;
   bridgeWordList(): unknown;
   bridgeWordDetail(key: string | null): Promise<unknown>;
+  bridgeWordOccurrences(key: string | null): Promise<unknown>;
   bridgeDeleteWord(key: string): Promise<unknown>;
   bridgeAddWord(payload: Record<string, unknown>): Promise<unknown>;
   bridgeTagWord(payload: Record<string, unknown>): Promise<unknown>;
@@ -128,6 +129,7 @@ function createBridgeServer({ Notice, Platform }: BridgeServerDeps) {
       if (!plugin.settings.bridgeToken || token !== plugin.settings.bridgeToken) return send(401, { ok: false, error: "bad-token" });
       if (path === "/words" && req.method === "GET") return send(200, plugin.bridgeWordList());
       if (path === "/word" && req.method === "GET") return send(200, await plugin.bridgeWordDetail(url.searchParams.get("key") || url.searchParams.get("w")));
+      if (path === "/occurrences" && req.method === "GET") return send(200, await plugin.bridgeWordOccurrences(url.searchParams.get("key")));
       if (path === "/word" && req.method === "DELETE") return send(200, await plugin.bridgeDeleteWord(url.searchParams.get("key") || ""));
       if (path === "/add" && req.method === "POST") return send(200, await plugin.bridgeAddWord(await this.readBody(req)));
       if (path === "/tag" && req.method === "POST") return send(200, await plugin.bridgeTagWord(await this.readBody(req)));

@@ -507,6 +507,13 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, recentR
       markdown: body, html, mathCss: html.includes("<mjx-container") ? this.bridgeMathCss() : "",
     };
   }
+  async bridgeWordOccurrences(key: unknown) {
+    const k = this.resolveIndexKey(textValue(key));
+    const entry = this.index.get(k);
+    if (!entry || entry.inline) return { ok: false, error: "not-found" };
+    const html = await this.lexisBlockHtml(entry.file, entry.display, "occ");
+    return { ok: true, html, mathCss: html.includes("<mjx-container") ? this.bridgeMathCss() : "" };
+  }
   bridgeOlink(path: string, base: string) {
     const vault = encodeURIComponent(this.app.vault.getName());
     return `<a class="lexis-web-ilink" href="obsidian://open?vault=${vault}&file=${encodeURIComponent(path)}">${escHtml(base)}</a>`;
@@ -569,7 +576,7 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, recentR
     for (let i = 0; i < blocks.length; i++) {
       const marker = `@@LEXIS${i}@@`;
       const host = Array.from(div.querySelectorAll<HTMLElement>("p, div, li")).find((element) => element.textContent.trim() === marker);
-      const html = await this.lexisBlockHtml(file, display, blocks[i]);
+      const html = await this.lexisBlockHtml(file, display, blocks[i], true);
       if (!host) continue;
       if (!html || !html.trim()) {
         // 块为空 → 连同它紧挨着的空标题一起去掉(等价于 compactSections 丢空段)
@@ -612,7 +619,7 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, recentR
     return out;
   }
   // 单个 ```lexis 块 → HTML(对应 renderLexisBlock 的各模式,带 obsidian:// 链接)
-  async lexisBlockHtml(file: ObsidianTFile, display: string, src: string): Promise<string> {
+  async lexisBlockHtml(file: ObsidianTFile, display: string, src: string, deferOccurrences = false): Promise<string> {
     const parts = (src || "").trim().split(/\s+/).filter(Boolean);
     const m = (parts[0] || "").toLowerCase();
     const typeArg = parts.slice(1).join(" ");
@@ -661,7 +668,8 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, recentR
         }
       } catch { /* Related links are supplemental card content. */ }
     }
-    if (showOcc) {
+    if (showOcc && deferOccurrences) html += `<div class="lexis-web-occ-pending">出处加载中…</div>`;
+    else if (showOcc) {
       try {
         const list = await this.findOccurrences(display);
         const curated = await this.getCuratedSourcePaths(file);
@@ -677,7 +685,7 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, recentR
             await renderLexisMarkdown(this.app, o.sentence, d, file.path, comp);
             rendered.push({ d, o });
           }
-          try { await finishRenderMath(); } catch { /* Occurrence text can render without MathJax. */ }
+          try { await withTimeout(finishRenderMath(), 3000); } catch { /* Occurrence text can render without MathJax. */ }
           for (const { d, o } of rendered) {
             this.boldMatchesInPlace(d, display);
             html += `<div class="lexis-web-occ">${d.innerHTML} <span class="lexis-web-occ-src">— ${olink(this.occurrenceLinkPath(o), this.occurrenceLabel(o))}</span></div>`;

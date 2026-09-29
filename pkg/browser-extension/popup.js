@@ -79,7 +79,12 @@ async function load() {
   toggleObsidianStyle();
   renderDictionaries();
   renderMeta(meta, pendingAdds);
-  autoSyncIfStale(meta);
+  void autoSyncIfStale(meta).then((connected) => { if (connected) void preloadCurrentPage(); });
+}
+
+async function preloadCurrentPage() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+  if (tab?.id) await chrome.tabs.sendMessage(tab.id, { type: "lexis-preload-visible" }).catch(() => null);
 }
 
 function toggleObsidianStyle() {
@@ -88,11 +93,11 @@ function toggleObsidianStyle() {
 }
 
 async function autoSyncIfStale(meta) {
-  if (!cfg.token) return;
+  if (!cfg.token) return false;
   let ping;
-  try { ping = await chrome.runtime.sendMessage({ type: "ping" }); } catch (e) { return; }
-  if (!ping || !ping.ok) return;
-  if (meta && meta.version === ping.version && meta.count != null && meta.schema === 2) return;
+  try { ping = await chrome.runtime.sendMessage({ type: "ping" }); } catch (e) { return false; }
+  if (!ping || !ping.ok) return false;
+  if (meta && meta.version === ping.version && meta.count != null && meta.schema === 2) return true;
   const r = await chrome.runtime.sendMessage({ type: "sync" }).catch(() => null);
   if (r && r.ok) {
     const data = await chrome.storage.local.get(["meta", "pendingAdds", "styleConfig"]);
@@ -102,6 +107,7 @@ async function autoSyncIfStale(meta) {
     toggleObsidianStyle();
     renderDictionaries();
   }
+  return !!(r && r.ok);
 }
 
 function renderMeta(meta, pendingAdds) {
@@ -181,6 +187,7 @@ $("sync").addEventListener("click", async () => {
     hasStyleConfig = !!styleCfg;
     toggleObsidianStyle();
     renderDictionaries();
+    void preloadCurrentPage();
   }
   else if (r && r.error === "bad-token") status("令牌错误", "err");
   else status("同步失败：请检查 Obsidian 和桥接", "err");
