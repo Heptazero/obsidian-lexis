@@ -19,7 +19,7 @@ async function loadReaderInteractions() {
       name: "obsidian-stub",
       setup(buildApi) {
         buildApi.onResolve({ filter: /^obsidian$/ }, () => ({ path: "obsidian", namespace: "stub" }));
-        buildApi.onLoad({ filter: /.*/, namespace: "stub" }, () => ({ contents: "export class MarkdownView {}; export class Menu {}" }));
+        buildApi.onLoad({ filter: /.*/, namespace: "stub" }, () => ({ contents: "export class MarkdownView {}; export class Menu {}; export const Platform = { isMobile: true }" }));
       },
     }],
   });
@@ -55,4 +55,46 @@ test("does not open a highlight while text remains selected", async () => {
   assert.equal(hasExpandedSelection(element), true);
   selection.isCollapsed = true;
   assert.equal(hasExpandedSelection(element), false);
+});
+
+test("mobile PDF tap opens once without treating scroll, long press, or selection as a tap", async () => {
+  const { createReaderInteractions } = await loadReaderInteractions();
+  const { onPointerDown, onPointerMove, onPointerUp } = createReaderInteractions();
+  const selection = { isCollapsed: true, rangeCount: 0 };
+  const target = {
+    dataset: { lexisKey: "entry" },
+    isConnected: true,
+    ownerDocument: { defaultView: { getSelection: () => selection } },
+  };
+  const activated = [];
+  const reader = {
+    _mobileTapStart: null,
+    _mobileTapClick: null,
+    index: new Map([["entry", {}]]),
+    highlightTarget: () => target,
+    activateHighlight: (highlight) => activated.push(highlight),
+  };
+  const pointer = (x, y, timeStamp) => ({
+    pointerId: 1, pointerType: "touch", clientX: x, clientY: y, timeStamp,
+    preventDefault() {}, stopPropagation() {},
+  });
+  const start = () => onPointerDown.value.call(reader, { ...pointer(10, 10, 0), isPrimary: true });
+
+  start();
+  onPointerUp.value.call(reader, pointer(13, 11, 120));
+  assert.deepEqual(activated, [target]);
+  assert.ok(reader._mobileTapClick);
+
+  start();
+  onPointerUp.value.call(reader, pointer(30, 10, 120));
+  start();
+  onPointerMove.value.call(reader, pointer(30, 10, 60));
+  onPointerUp.value.call(reader, pointer(10, 10, 120));
+  start();
+  onPointerUp.value.call(reader, pointer(10, 10, 600));
+  start();
+  selection.isCollapsed = false;
+  selection.rangeCount = 1;
+  onPointerUp.value.call(reader, pointer(10, 10, 120));
+  assert.equal(activated.length, 1);
 });

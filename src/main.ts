@@ -113,6 +113,8 @@ class LexisPlugin extends Plugin {
   declare _reviewSessions: WeakMap<object, unknown>;
   declare _workspaceDocuments: WorkspaceDocuments;
   declare _selPill: HTMLElement | null;
+  declare _mobileTapStart: { pointerId: number; x: number; y: number; time: number; target: HTMLElement } | null;
+  declare _mobileTapClick: { x: number; y: number; time: number } | null;
   declare highlightElement: (el: HTMLElement, ctx: obsidian.MarkdownPostProcessorContext) => void;
   declare renderLexisBlock: (el: HTMLElement, ctx: obsidian.MarkdownPostProcessorContext, src: string) => Promise<void>;
   declare renderHeatmap: (el: HTMLElement) => void;
@@ -126,6 +128,10 @@ class LexisPlugin extends Plugin {
   declare onMouseMove: (event: MouseEvent) => void;
   declare onMouseOut: (event: MouseEvent) => void;
   declare onClick: (event: MouseEvent) => void;
+  declare onPointerDown: (event: PointerEvent) => void;
+  declare onPointerMove: (event: PointerEvent) => void;
+  declare onPointerUp: (event: PointerEvent) => void;
+  declare onPointerCancel: () => void;
   declare maybeShowSelPill: (event: MouseEvent) => void;
   declare removePopover: () => void;
   declare removeSelPill: () => void;
@@ -199,6 +205,8 @@ class LexisPlugin extends Plugin {
     this._hideTimer = null;
     this._showTimer = null;
     this._showTarget = null;
+    this._mobileTapStart = null;
+    this._mobileTapClick = null;
     this._occCache = new Map();
     this.occurrenceSearch = createOccurrenceSearch({
       app: this.app,
@@ -323,9 +331,14 @@ class LexisPlugin extends Plugin {
       mouseover: (event) => this.onMouseOver(event),
       mouseout: (event) => this.onMouseOut(event),
       click: (event) => this.onClick(event),
+      pointerdown: (event) => this.onPointerDown(event),
+      pointermove: (event) => this.onPointerMove(event),
+      pointerup: (event) => this.onPointerUp(event),
+      pointercancel: () => this.onPointerCancel(),
       mouseup: (event) => this.maybeShowSelPill(event),
       escape: () => this.removeSelPill(),
       scroll: (event) => {
+        this._mobileTapStart = null;
         const target = event.target;
         const node = target && typeof target === "object" && "nodeType" in target ? target as Node : null;
         if (this._popover && node && this._popover.contains(node)) return;

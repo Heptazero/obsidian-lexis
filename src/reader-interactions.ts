@@ -51,6 +51,8 @@ function createReaderInteractions(): PropertyDescriptorMap {
   declare _popoverComp: ObsidianComponent | null;
   declare _selPill: HTMLElement | null;
   declare _aliasSearch: AliasComboboxController | null;
+  declare _mobileTapStart: { pointerId: number; x: number; y: number; time: number; target: HTMLElement } | null;
+  declare _mobileTapClick: { x: number; y: number; time: number } | null;
   declare addWordFromSelection: (text: string, editor: Editor | null, view: MarkdownView | null, folder?: string, options?: AddWordOptions) => Promise<void>;
   declare attachAlias: (aliasText: string, file: ObsidianTFile) => Promise<void>;
   declare extractSentence: (content: string, index: number) => string;
@@ -72,6 +74,7 @@ function createReaderInteractions(): PropertyDescriptorMap {
     return closestHighlight(event.target) || pdfHighlightAt(event);
   }
   onMouseMove(event: MouseEvent): void {
+    if (obsidian.Platform.isMobile) return;
     const target = pdfHighlightAt(event);
     if (target === this._pdfHoverTarget) return;
     if (this._pdfHoverTarget) {
@@ -83,6 +86,7 @@ function createReaderInteractions(): PropertyDescriptorMap {
     if (target) this.onMouseOver(event);
   }
   onMouseOver(e: MouseEvent): void {
+    if (obsidian.Platform.isMobile) return;
     const t = this.highlightTarget(e);
     if (!t) return;
     if ((e.buttons & 1) || hasExpandedSelection(t)) return;
@@ -99,6 +103,7 @@ function createReaderInteractions(): PropertyDescriptorMap {
     if (delay) this._showTimer = window.setTimeout(open, delay); else open();
   }
   onMouseOut(e: MouseEvent): void {
+    if (obsidian.Platform.isMobile) return;
     const t = this.highlightTarget(e);
     if (!t) return;
     if (this._showTarget === t) {
@@ -108,15 +113,63 @@ function createReaderInteractions(): PropertyDescriptorMap {
     }
     if (this._popover?.dataset.lexisKey === t.dataset.lexisKey) this.scheduleHide();
   }
+  onPointerDown(e: PointerEvent): void {
+    if (!obsidian.Platform.isMobile || e.pointerType !== "touch") return;
+    if (!e.isPrimary || this._mobileTapStart) { this._mobileTapStart = null; return; }
+    const target = this.highlightTarget(e);
+    this._mobileTapStart = target && !hasExpandedSelection(target)
+      ? { pointerId: e.pointerId, x: e.clientX, y: e.clientY, time: e.timeStamp, target }
+      : null;
+  }
+  onPointerMove(e: PointerEvent): void {
+    const start = this._mobileTapStart;
+    if (start?.pointerId === e.pointerId && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 12) {
+      this._mobileTapStart = null;
+    }
+  }
+  onPointerUp(e: PointerEvent): void {
+    const start = this._mobileTapStart;
+    this._mobileTapStart = null;
+    if (!start || e.pointerId !== start.pointerId || e.pointerType !== "touch") return;
+    if (e.timeStamp - start.time > 500 || Math.hypot(e.clientX - start.x, e.clientY - start.y) > 12) return;
+    const target = start.target.isConnected ? start.target : this.highlightTarget(e);
+    if (!target || hasExpandedSelection(target) || !this.index.has(target.dataset.lexisKey)) return;
+    this._mobileTapClick = { x: e.clientX, y: e.clientY, time: Date.now() };
+    e.preventDefault();
+    e.stopPropagation();
+    this.activateHighlight(target, false);
+  }
+  onPointerCancel(): void {
+    this._mobileTapStart = null;
+  }
+  activateHighlight(target: HTMLElement, newTab: boolean): void {
+    const entry = this.index.get(target.dataset.lexisKey);
+    if (!entry) return;
+    if (obsidian.Platform.isMobile && this.settings.mobileTapAction !== "open") {
+      void this.showPopover(target);
+    } else if (entry.inline) {
+      void this.openInlineEntry(entry, newTab);
+    } else {
+      void this.app.workspace.getLeaf(newTab ? "tab" : false).openFile(entry.file);
+      this.removePopover();
+    }
+  }
   onClick(e: MouseEvent): void {
+    const recentTap = this._mobileTapClick;
+    if (recentTap && Date.now() - recentTap.time < 700
+      && Math.hypot(e.clientX - recentTap.x, e.clientY - recentTap.y) < 20
+      && !eventElement(e.target)?.closest(".lexis-popover")) {
+      this._mobileTapClick = null;
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     const t = this.highlightTarget(e);
     if (t) {
       if (hasExpandedSelection(t)) return;
-      const entry = this.index.get(t.dataset.lexisKey);
-      if (entry) {
+      if (this.index.has(t.dataset.lexisKey)) {
         e.preventDefault();
-        if (entry.inline) void this.openInlineEntry(entry, e.ctrlKey || e.metaKey);
-        else { void this.app.workspace.getLeaf(e.ctrlKey || e.metaKey ? "tab" : false).openFile(entry.file); this.removePopover(); }
+        this.activateHighlight(t, e.ctrlKey || e.metaKey);
       }
     } else if (this._popover && !this._popover.contains(eventElement(e.target))) this.removePopover();
   }

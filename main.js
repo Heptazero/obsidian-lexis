@@ -72,6 +72,7 @@ var DEFAULT_SETTINGS = {
   popoverMaxHeight: 420,
   popoverFontSize: 14,
   hoverDelayMs: 250,
+  mobileTapAction: "popover",
   fadeByMemory: true,
   fadeFloor: 0.25,
   hoverFeedback: true,
@@ -906,6 +907,11 @@ var MESSAGES = {
   "settings.popoverFont": { zh: "\u5361\u7247\u5B57\u53F7", en: "Card font size" },
   "settings.hoverDelay": { zh: "\u60AC\u6D6E\u5EF6\u8FDF", en: "Hover delay" },
   "settings.hoverDelayDesc": { zh: "0 \u4E3A\u7ACB\u5373\u663E\u793A\u3002", en: "0 shows the card immediately." },
+  "settings.mobileInteractions": { zh: "\u79FB\u52A8\u7AEF\u64CD\u4F5C", en: "Mobile interactions" },
+  "settings.mobileTapAction": { zh: "\u8F7B\u70B9\u9AD8\u4EAE", en: "Tap a highlight" },
+  "settings.mobileTapDesc": { zh: "\u663E\u793A\u5361\u7247\u540E\uFF0C\u70B9\u6807\u9898\u53EF\u6253\u5F00\u8BCD\u6761\u3002", en: "After opening the card, tap its title to open the entry." },
+  "settings.mobileTapPopover": { zh: "\u663E\u793A\u5361\u7247", en: "Show card" },
+  "settings.mobileTapOpen": { zh: "\u76F4\u63A5\u8DF3\u8F6C", en: "Open note directly" },
   "settings.showRelated": { zh: "\u663E\u793A\u76F8\u5173\u8BCD", en: "Show related entries" },
   "settings.showOccurrences": { zh: "\u663E\u793A\u300C\u51FA\u73B0\u8FC7\u7684\u5730\u65B9\u300D", en: "Show occurrences" },
   "settings.showOccurrencesDesc": { zh: "\u5168\u6587\u641C\u7D22\uFF0C\u65E0\u9700\u53CC\u94FE\u3002", en: "Full-text search; links are not required." },
@@ -2358,7 +2364,7 @@ function createOccurrenceSearch(options) {
 }
 
 // src/bridge-server.ts
-function createBridgeServer({ Notice: Notice4, Platform: Platform2 }) {
+function createBridgeServer({ Notice: Notice4, Platform: Platform3 }) {
   class LexisBridge2 {
     constructor(plugin) {
       this.plugin = plugin;
@@ -2374,7 +2380,7 @@ function createBridgeServer({ Notice: Notice4, Platform: Platform2 }) {
     }
     start() {
       if (this.server) return;
-      if (!Platform2.isDesktopApp) {
+      if (!Platform3.isDesktopApp) {
         new Notice4(this.plugin.t("notice.desktopBridge"));
         return;
       }
@@ -4571,6 +4577,7 @@ function createReaderInteractions() {
       return closestHighlight(event.target) || pdfHighlightAt(event);
     }
     onMouseMove(event) {
+      if (obsidian2.Platform.isMobile) return;
       const target = pdfHighlightAt(event);
       if (target === this._pdfHoverTarget) return;
       if (this._pdfHoverTarget) {
@@ -4582,6 +4589,7 @@ function createReaderInteractions() {
       if (target) this.onMouseOver(event);
     }
     onMouseOver(e) {
+      if (obsidian2.Platform.isMobile) return;
       const t = this.highlightTarget(e);
       if (!t) return;
       if (e.buttons & 1 || hasExpandedSelection(t)) return;
@@ -4599,6 +4607,7 @@ function createReaderInteractions() {
       else open();
     }
     onMouseOut(e) {
+      if (obsidian2.Platform.isMobile) return;
       const t = this.highlightTarget(e);
       if (!t) return;
       if (this._showTarget === t) {
@@ -4608,18 +4617,62 @@ function createReaderInteractions() {
       }
       if (this._popover?.dataset.lexisKey === t.dataset.lexisKey) this.scheduleHide();
     }
+    onPointerDown(e) {
+      if (!obsidian2.Platform.isMobile || e.pointerType !== "touch") return;
+      if (!e.isPrimary || this._mobileTapStart) {
+        this._mobileTapStart = null;
+        return;
+      }
+      const target = this.highlightTarget(e);
+      this._mobileTapStart = target && !hasExpandedSelection(target) ? { pointerId: e.pointerId, x: e.clientX, y: e.clientY, time: e.timeStamp, target } : null;
+    }
+    onPointerMove(e) {
+      const start = this._mobileTapStart;
+      if (start?.pointerId === e.pointerId && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 12) {
+        this._mobileTapStart = null;
+      }
+    }
+    onPointerUp(e) {
+      const start = this._mobileTapStart;
+      this._mobileTapStart = null;
+      if (!start || e.pointerId !== start.pointerId || e.pointerType !== "touch") return;
+      if (e.timeStamp - start.time > 500 || Math.hypot(e.clientX - start.x, e.clientY - start.y) > 12) return;
+      const target = start.target.isConnected ? start.target : this.highlightTarget(e);
+      if (!target || hasExpandedSelection(target) || !this.index.has(target.dataset.lexisKey)) return;
+      this._mobileTapClick = { x: e.clientX, y: e.clientY, time: Date.now() };
+      e.preventDefault();
+      e.stopPropagation();
+      this.activateHighlight(target, false);
+    }
+    onPointerCancel() {
+      this._mobileTapStart = null;
+    }
+    activateHighlight(target, newTab) {
+      const entry = this.index.get(target.dataset.lexisKey);
+      if (!entry) return;
+      if (obsidian2.Platform.isMobile && this.settings.mobileTapAction !== "open") {
+        void this.showPopover(target);
+      } else if (entry.inline) {
+        void this.openInlineEntry(entry, newTab);
+      } else {
+        void this.app.workspace.getLeaf(newTab ? "tab" : false).openFile(entry.file);
+        this.removePopover();
+      }
+    }
     onClick(e) {
+      const recentTap = this._mobileTapClick;
+      if (recentTap && Date.now() - recentTap.time < 700 && Math.hypot(e.clientX - recentTap.x, e.clientY - recentTap.y) < 20 && !eventElement(e.target)?.closest(".lexis-popover")) {
+        this._mobileTapClick = null;
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       const t = this.highlightTarget(e);
       if (t) {
         if (hasExpandedSelection(t)) return;
-        const entry = this.index.get(t.dataset.lexisKey);
-        if (entry) {
+        if (this.index.has(t.dataset.lexisKey)) {
           e.preventDefault();
-          if (entry.inline) void this.openInlineEntry(entry, e.ctrlKey || e.metaKey);
-          else {
-            void this.app.workspace.getLeaf(e.ctrlKey || e.metaKey ? "tab" : false).openFile(entry.file);
-            this.removePopover();
-          }
+          this.activateHighlight(t, e.ctrlKey || e.metaKey);
         }
       } else if (this._popover && !this._popover.contains(eventElement(e.target))) this.removePopover();
     }
@@ -6527,6 +6580,11 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
         await save();
         this.plugin._occCache.clear();
       }));
+      const mobileSection = this.section(containerEl, t("settings.mobileInteractions"));
+      new Setting3(mobileSection).setName(t("settings.mobileTapAction")).setDesc(t("settings.mobileTapDesc")).addDropdown((dropdown) => dropdown.addOption("popover", t("settings.mobileTapPopover")).addOption("open", t("settings.mobileTapOpen")).setValue(this.plugin.settings.mobileTapAction).onChange(async (value) => {
+        this.plugin.settings.mobileTapAction = value;
+        await save();
+      }));
       const addSection = this.section(containerEl, t("settings.selectionAdd"));
       new Setting3(addSection).setName(t("settings.selectionPill")).addToggle((toggle) => toggle.setValue(this.plugin.settings.selectionPill).onChange(async (v) => {
         this.plugin.settings.selectionPill = v;
@@ -7292,6 +7350,10 @@ var WorkspaceDocuments = class {
     this.plugin.registerDomEvent(document2, "mouseover", (event) => this.callbacks.mouseover(event));
     this.plugin.registerDomEvent(document2, "mouseout", (event) => this.callbacks.mouseout(event));
     this.plugin.registerDomEvent(document2, "click", (event) => this.callbacks.click(event));
+    this.plugin.registerDomEvent(document2, "pointerdown", (event) => this.callbacks.pointerdown(event), { capture: true });
+    this.plugin.registerDomEvent(document2, "pointermove", (event) => this.callbacks.pointermove(event), { capture: true });
+    this.plugin.registerDomEvent(document2, "pointerup", (event) => this.callbacks.pointerup(event), { capture: true });
+    this.plugin.registerDomEvent(document2, "pointercancel", () => this.callbacks.pointercancel(), { capture: true });
     this.plugin.registerDomEvent(document2, "mouseup", (event) => this.callbacks.mouseup(event));
     this.plugin.registerDomEvent(document2, "keydown", (event) => {
       if (event.key === "Escape") this.callbacks.escape();
@@ -7455,6 +7517,8 @@ var LexisPlugin = class extends import_obsidian9.Plugin {
     this._hideTimer = null;
     this._showTimer = null;
     this._showTarget = null;
+    this._mobileTapStart = null;
+    this._mobileTapClick = null;
     this._occCache = /* @__PURE__ */ new Map();
     this.occurrenceSearch = createOccurrenceSearch({
       app: this.app,
@@ -7577,9 +7641,14 @@ var LexisPlugin = class extends import_obsidian9.Plugin {
       mouseover: (event) => this.onMouseOver(event),
       mouseout: (event) => this.onMouseOut(event),
       click: (event) => this.onClick(event),
+      pointerdown: (event) => this.onPointerDown(event),
+      pointermove: (event) => this.onPointerMove(event),
+      pointerup: (event) => this.onPointerUp(event),
+      pointercancel: () => this.onPointerCancel(),
       mouseup: (event) => this.maybeShowSelPill(event),
       escape: () => this.removeSelPill(),
       scroll: (event) => {
+        this._mobileTapStart = null;
         const target = event.target;
         const node = target && typeof target === "object" && "nodeType" in target ? target : null;
         if (this._popover && node && this._popover.contains(node)) return;

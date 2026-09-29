@@ -584,6 +584,14 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       new Setting(cardSection).setName(t("settings.occurrenceScope")).setDesc(t("settings.occurrenceScopeDesc"))
         .addText((input) => input.setPlaceholder(t("settings.wholeVault")).setValue(this.plugin.settings.occurrenceFolders).onChange(async (v) => { this.plugin.settings.occurrenceFolders = v.trim(); await save(); this.plugin._occCache.clear(); }));
 
+      const mobileSection = this.section(containerEl, t("settings.mobileInteractions"));
+      new Setting(mobileSection).setName(t("settings.mobileTapAction")).setDesc(t("settings.mobileTapDesc"))
+        .addDropdown((dropdown) => dropdown
+          .addOption("popover", t("settings.mobileTapPopover"))
+          .addOption("open", t("settings.mobileTapOpen"))
+          .setValue(this.plugin.settings.mobileTapAction)
+          .onChange(async (value) => { this.plugin.settings.mobileTapAction = value as LexisSettings["mobileTapAction"]; await save(); }));
+
       const addSection = this.section(containerEl, t("settings.selectionAdd"));
       new Setting(addSection).setName(t("settings.selectionPill"))
         .addToggle((toggle) => toggle.setValue(this.plugin.settings.selectionPill).onChange(async (v) => { this.plugin.settings.selectionPill = v; await save(); if (!v) this.plugin.removeSelPill(); }));

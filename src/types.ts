@@ -139,6 +139,7 @@ export interface LexisSettings {
   popoverMaxHeight: number;
   popoverFontSize: number;
   hoverDelayMs: number;
+  mobileTapAction: "popover" | "open";
   fadeByMemory: boolean;
   fadeFloor: number;
   hoverFeedback: boolean;

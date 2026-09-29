@@ -5,6 +5,10 @@ interface WorkspaceDocumentCallbacks {
   mouseover(event: MouseEvent): void;
   mouseout(event: MouseEvent): void;
   click(event: MouseEvent): void;
+  pointerdown(event: PointerEvent): void;
+  pointermove(event: PointerEvent): void;
+  pointerup(event: PointerEvent): void;
+  pointercancel(): void;
   mouseup(event: MouseEvent): void;
   escape(): void;
   scroll(event: Event): void;
@@ -56,6 +60,10 @@ export class WorkspaceDocuments {
     this.plugin.registerDomEvent(document, "mouseover", (event) => this.callbacks.mouseover(event));
     this.plugin.registerDomEvent(document, "mouseout", (event) => this.callbacks.mouseout(event));
     this.plugin.registerDomEvent(document, "click", (event) => this.callbacks.click(event));
+    this.plugin.registerDomEvent(document, "pointerdown", (event) => this.callbacks.pointerdown(event), { capture: true });
+    this.plugin.registerDomEvent(document, "pointermove", (event) => this.callbacks.pointermove(event), { capture: true });
+    this.plugin.registerDomEvent(document, "pointerup", (event) => this.callbacks.pointerup(event), { capture: true });
+    this.plugin.registerDomEvent(document, "pointercancel", () => this.callbacks.pointercancel(), { capture: true });
     this.plugin.registerDomEvent(document, "mouseup", (event) => this.callbacks.mouseup(event));
     this.plugin.registerDomEvent(document, "keydown", (event) => {
       if (event.key === "Escape") this.callbacks.escape();
