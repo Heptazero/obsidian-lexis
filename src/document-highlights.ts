@@ -250,7 +250,7 @@ function createDocumentHighlights(): PropertyDescriptorMap {
     this._pdfObservedLayers = new WeakSet();
     this._pdfObservedSizes = new WeakMap();
     const MutationObserverConstructor = observerWindow.MutationObserver;
-    if (!this.settings.enablePdfHighlight || !MutationObserverConstructor) return;
+    if (!this.settings.enableHighlight || !this.settings.enablePdfHighlight || !MutationObserverConstructor) return;
     this._pdfPending = new Set();
     const flush = () => {
       this._pdfRaf = 0;

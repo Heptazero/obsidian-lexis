@@ -71,6 +71,30 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     border-top: 1px solid var(--background-modifier-border);
 }
 .lexis-settings-section-body .setting-item:first-child { border-top: none; }
+.lexis-data-path-setting { flex-wrap: wrap; }
+.lexis-data-path-setting .setting-item-info { flex: 1 1 180px; }
+.lexis-data-path-setting .setting-item-control { flex: 1 1 260px; min-width: 0; }
+.lexis-data-path-setting input { width: 100%; }
+.lexis-data-section .setting-item-description { overflow-wrap: anywhere; }
+.lexis-highlight-options {
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+.lexis-highlight-options.is-disabled { opacity: .5; }
+.lexis-settings-subgroup {
+    margin: 8px 0 12px 18px;
+    padding-left: 14px;
+    border-left: 1px solid var(--background-modifier-border);
+}
+.lexis-settings-subheading {
+    padding: 6px 0 2px;
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+    font-weight: 600;
+}
+.lexis-settings-subheading + .setting-item { border-top: none; }
 
 .lexis-template-setting {
     align-items: flex-start;

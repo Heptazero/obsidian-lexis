@@ -202,6 +202,54 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
         } catch { /* Suggestions are optional. */ }
         return [];
       })();
+      const defaultEncounterFolder = `${this.app.vault.configDir}/plugins/${this.plugin.manifest.id}/encounters`;
+      const dataSection = this.section(containerEl, t("settings.dataStorage"), { open: true });
+      dataSection.addClass("lexis-data-section");
+      const encounterFolderSetting = new Setting(dataSection).setName(t("settings.encounterFolder")).setDesc(t("settings.encounterFolderDesc"));
+      encounterFolderSetting.settingEl.addClass("lexis-data-path-setting");
+      encounterFolderSetting
+        .addText((input) => {
+          const apply = async () => {
+            const previous = this.plugin.settings.encounterFolder;
+            try {
+              const value = input.getValue().trim();
+              await this.plugin.setEncounterFolder(value === defaultEncounterFolder ? "" : value);
+              input.setValue(this.plugin.settings.encounterFolder || defaultEncounterFolder);
+              if (previous !== this.plugin.settings.encounterFolder) new Notice(t("settings.encounterFolderSaved"));
+            } catch (error) {
+              input.setValue(previous || defaultEncounterFolder);
+              new Notice(t("settings.encounterFolderError", { error: error instanceof Error ? error.message : typeof error === "string" ? error : "Unknown error" }));
+            }
+          };
+          input.setValue(this.plugin.settings.encounterFolder || defaultEncounterFolder);
+          input.inputEl.addEventListener("change", () => { void apply(); });
+          input.inputEl.addEventListener("keydown", (event) => { if (event.key === "Enter") input.inputEl.blur(); });
+          if (hasSuggest) new PathSuggest(this.app, input.inputEl, () => folders, (value) => { input.setValue(value); void apply(); });
+        });
+      new Setting(dataSection).setName(t("settings.pluginDataPath"))
+        .setDesc(t("settings.pluginDataPathDesc", { path: `${this.app.vault.configDir}/plugins/${this.plugin.manifest.id}/data.json` }));
+
+      const mobileSection = this.section(containerEl, t("settings.mobileInteractions"), { desc: t("settings.mobileSectionDesc") });
+      new Setting(mobileSection).setName(t("settings.mobileTapAction")).setDesc(t("settings.mobileTapDesc"))
+        .addDropdown((dropdown) => dropdown
+          .addOption("popover", t("settings.mobileTapPopover"))
+          .addOption("open", t("settings.mobileTapOpen"))
+          .setValue(this.plugin.settings.mobileTapAction)
+          .onChange(async (value) => { this.plugin.settings.mobileTapAction = value as LexisSettings["mobileTapAction"]; await save(); }));
+      new Setting(mobileSection).setName(t("settings.ratingOffset")).setDesc(t("settings.ratingOffsetDesc"))
+        .addSlider((s) => s
+          .setLimits(0, 200, 5)
+          .setValue(this.plugin.settings.reviewBottomSpace)
+          .setInstant(true)
+          .setDisplayFormat((value) => `${value}px`)
+          .onChange(async (value) => {
+            this.plugin.settings.reviewBottomSpace = value;
+            this.app.workspace.containerEl.ownerDocument
+              .querySelectorAll<HTMLElement>('.workspace-leaf-content[data-type="lexis-review-view"]')
+              .forEach((view) => view.setCssProps({ "--lexis-review-bottom-space": `${value}px` }));
+            await save();
+          }));
+
       const dictSection = this.section(containerEl, t("settings.dictionary"), { open: true });
       const dictHeading = new Setting(dictSection).setDesc(t("settings.dictionaryDesc")).setHeading();
       const dictsWrap = dictSection.createDiv();
@@ -461,23 +509,43 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       renderCategoryColors();
 
       const hlSection = this.section(containerEl, t("settings.highlight"));
-      new Setting(hlSection).setName(t("settings.enableHighlight")).addToggle((toggle) => toggle.setValue(this.plugin.settings.enableHighlight).onChange(async (v) => { this.plugin.settings.enableHighlight = v; await save(); refresh(); }));
-      new Setting(hlSection).setName(t("settings.livePreview")).setDesc(this.plugin.liveAvailable ? "" : t("settings.unsupported"))
+      const highlightSwitch = new Setting(hlSection).setName(t("settings.enableHighlight")).setDesc(t("settings.enableHighlightDesc"));
+      const highlightOptions = hlSection.createEl("fieldset", { cls: "lexis-highlight-options" });
+      const syncHighlightOptions = () => {
+        highlightOptions.disabled = !this.plugin.settings.enableHighlight;
+        highlightOptions.toggleClass("is-disabled", !this.plugin.settings.enableHighlight);
+      };
+      syncHighlightOptions();
+      highlightSwitch.addToggle((toggle) => toggle.setValue(this.plugin.settings.enableHighlight).onChange(async (v) => {
+        this.plugin.settings.enableHighlight = v;
+        syncHighlightOptions();
+        if (v && this.plugin.settings.enablePdfHighlight) this.plugin.setupPdfHighlight();
+        else this.plugin.teardownPdfHighlight();
+        await save();
+        refresh();
+      }));
+      const scopeGroup = highlightOptions.createDiv({ cls: "lexis-settings-subgroup" });
+      scopeGroup.createDiv({ cls: "lexis-settings-subheading", text: t("settings.highlightScope") });
+      new Setting(scopeGroup).setName(t("settings.livePreview")).setDesc(this.plugin.liveAvailable ? "" : t("settings.unsupported"))
         .addToggle((t) => t.setValue(this.plugin.settings.enableLivePreview).setDisabled(!this.plugin.liveAvailable).onChange(async (v) => { this.plugin.settings.enableLivePreview = v; await save(); refresh(); }));
-      new Setting(hlSection).setName(t("settings.pdfHighlight")).setDesc(t("settings.pdfHighlightDesc"))
+      new Setting(scopeGroup).setName(t("settings.pdfHighlight")).setDesc(t("settings.pdfHighlightDesc"))
         .addToggle((t) => t.setValue(this.plugin.settings.enablePdfHighlight).onChange(async (v) => { this.plugin.settings.enablePdfHighlight = v; await save(); if (v) this.plugin.setupPdfHighlight(); else { this.plugin.teardownPdfHighlight(); this.plugin.rescanPdfLayers(); } }));
-      new Setting(hlSection).setName(t("settings.highlightStyle"))
+      const styleGroup = highlightOptions.createDiv({ cls: "lexis-settings-subgroup" });
+      styleGroup.createDiv({ cls: "lexis-settings-subheading", text: t("settings.highlightAppearance") });
+      new Setting(styleGroup).setName(t("settings.highlightStyle"))
         .addDropdown((dd) => dd.addOption("wavy", t("settings.wavy")).addOption("underline", t("settings.underline")).addOption("background", t("settings.background")).setValue(this.plugin.settings.highlightStyle).onChange(async (v) => { this.plugin.settings.highlightStyle = ["wavy", "underline", "background"].includes(v) ? v as HighlightStyle : "wavy"; await save(); refresh(); }));
-      new Setting(hlSection).setName(t("settings.highlightColor"))
+      new Setting(styleGroup).setName(t("settings.highlightColor"))
         .addColorPicker((cp) => { this._colorComp = cp; cp.setValue(this.plugin.settings.highlightColor || accentHex).onChange(async (v) => { this.plugin.settings.highlightColor = v; await save(); refresh(); }); })
         .addExtraButton((b) => b.setIcon("reset").setTooltip(t("settings.resetTheme")).onClick(async () => { this.plugin.settings.highlightColor = ""; this._colorComp?.setValue(accentHex); await save(); refresh(); }));
-      new Setting(hlSection).setName(t("settings.opacity"))
+      new Setting(styleGroup).setName(t("settings.opacity"))
         .addSlider((s) => s.setLimits(0.1, 1, 0.05).setValue(this.plugin.settings.highlightOpacity).onChange(async (v) => { this.plugin.settings.highlightOpacity = v; await save(); refresh(); }));
-      new Setting(hlSection).setName(t("settings.fade")).setDesc(t("settings.fadeDesc"))
+      new Setting(styleGroup).setName(t("settings.fade")).setDesc(t("settings.fadeDesc"))
         .addToggle((t) => t.setValue(this.plugin.settings.fadeByMemory).onChange(async (v) => { this.plugin.settings.fadeByMemory = v; await save(); refresh(); }));
-      new Setting(hlSection).setName(t("settings.fadeFloor"))
+      new Setting(styleGroup).setName(t("settings.fadeFloor"))
         .addSlider((s) => s.setLimits(0, 0.9, 0.05).setValue(this.plugin.settings.fadeFloor).onChange(async (v) => { this.plugin.settings.fadeFloor = v; await save(); refresh(); }));
-      const excludeSetting = new Setting(hlSection).setName(t("settings.excludeTags")).setDesc(t("settings.excludeTagsDesc"));
+      const rulesGroup = highlightOptions.createDiv({ cls: "lexis-settings-subgroup" });
+      rulesGroup.createDiv({ cls: "lexis-settings-subheading", text: t("settings.highlightRules") });
+      const excludeSetting = new Setting(rulesGroup).setName(t("settings.excludeTags")).setDesc(t("settings.excludeTagsDesc"));
       excludeSetting.settingEl.addClass("lexis-tags-setting");
       const excludeEditor = excludeSetting.controlEl.createDiv({ cls: "lexis-tag-editor" });
       const excludeChips = excludeEditor.createDiv({ cls: "lexis-tag-editor-chips" });
@@ -519,7 +587,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       if (hasSuggest) new PathSuggest(this.app, excludeInput.inputEl, () => allTags.filter((tag) => !excludedTags().includes(tag)), (value) => { void addExcludedTags(value); });
       renderExcludedTags();
 
-      const tagColorSection = this.section(containerEl, t("settings.tagColors"));
+      const tagColorSection = this.section(rulesGroup, t("settings.tagColors"));
       const rulesWrap = tagColorSection.createDiv();
       const renderRules = () => {
         rulesWrap.empty();
@@ -584,14 +652,6 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       new Setting(cardSection).setName(t("settings.occurrenceLimit")).addSlider((s) => s.setLimits(1, 15, 1).setValue(this.plugin.settings.occurrenceLimit).onChange(async (v) => { this.plugin.settings.occurrenceLimit = v; await save(); this.plugin._occCache.clear(); }));
       new Setting(cardSection).setName(t("settings.occurrenceScope")).setDesc(t("settings.occurrenceScopeDesc"))
         .addText((input) => input.setPlaceholder(t("settings.wholeVault")).setValue(this.plugin.settings.occurrenceFolders).onChange(async (v) => { this.plugin.settings.occurrenceFolders = v.trim(); await save(); this.plugin._occCache.clear(); }));
-
-      const mobileSection = this.section(containerEl, t("settings.mobileInteractions"));
-      new Setting(mobileSection).setName(t("settings.mobileTapAction")).setDesc(t("settings.mobileTapDesc"))
-        .addDropdown((dropdown) => dropdown
-          .addOption("popover", t("settings.mobileTapPopover"))
-          .addOption("open", t("settings.mobileTapOpen"))
-          .setValue(this.plugin.settings.mobileTapAction)
-          .onChange(async (value) => { this.plugin.settings.mobileTapAction = value as LexisSettings["mobileTapAction"]; await save(); }));
 
       const addSection = this.section(containerEl, t("settings.selectionAdd"));
       new Setting(addSection).setName(t("settings.selectionPill"))
@@ -686,19 +746,6 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
           this.plugin.applyReviewMetadataVisibility();
           await save();
         }));
-      new Setting(fsrsSection).setName(t("settings.ratingOffset")).setDesc(t("settings.ratingOffsetDesc"))
-        .addSlider((s) => s
-          .setLimits(0, 200, 5)
-          .setValue(this.plugin.settings.reviewBottomSpace)
-          .setInstant(true)
-          .setDisplayFormat((value) => `${value}px`)
-          .onChange(async (value) => {
-            this.plugin.settings.reviewBottomSpace = value;
-            this.app.workspace.containerEl.ownerDocument
-              .querySelectorAll<HTMLElement>('.workspace-leaf-content[data-type="lexis-review-view"]')
-              .forEach((view) => view.setCssProps({ "--lexis-review-bottom-space": `${value}px` }));
-            await save();
-          }));
       new Setting(fsrsSection).setName(t("home.start")).addButton((b) => b.setButtonText(t("settings.openReview")).setCta().onClick(() => this.plugin.openHome()));
       new Setting(fsrsSection).setName(t("settings.hoverFeedback")).setDesc(t("settings.hoverFeedbackDesc"))
         .addToggle((t) => t.setValue(this.plugin.settings.hoverFeedback).onChange(async (v) => { this.plugin.settings.hoverFeedback = v; await save(); }));
@@ -706,25 +753,6 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
         .addSlider((s) => s.setLimits(1, 30, 1).setValue(this.plugin.settings.hoverFeedbackDays).onChange(async (v) => { this.plugin.settings.hoverFeedbackDays = v; await save(); }));
       new Setting(fsrsSection).setName(t("settings.retireDays")).setDesc(t("settings.retireDaysDesc"))
         .addSlider((s) => s.setLimits(14, 365, 1).setValue(this.plugin.settings.retireCandidateDays).onChange(async (v) => { this.plugin.settings.retireCandidateDays = v; await save(); }));
-      new Setting(fsrsSection).setName(t("settings.encounterFolder")).setDesc(t("settings.encounterFolderDesc"))
-        .addText((input) => {
-          const apply = async () => {
-            const previous = this.plugin.settings.encounterFolder;
-            try {
-              await this.plugin.setEncounterFolder(input.getValue());
-              input.setValue(this.plugin.settings.encounterFolder);
-              if (previous !== this.plugin.settings.encounterFolder) new Notice(t("settings.encounterFolderSaved"));
-            } catch (error) {
-              input.setValue(previous);
-              new Notice(t("settings.encounterFolderError", { error: error instanceof Error ? error.message : typeof error === "string" ? error : "Unknown error" }));
-            }
-          };
-          input.setPlaceholder(`${this.app.vault.configDir}/plugins/${this.plugin.manifest.id}/encounters`).setValue(this.plugin.settings.encounterFolder);
-          input.inputEl.addEventListener("change", () => { void apply(); });
-          input.inputEl.addEventListener("keydown", (event) => { if (event.key === "Enter") input.inputEl.blur(); });
-          if (hasSuggest) new PathSuggest(this.app, input.inputEl, () => folders, (value) => { input.setValue(value); void apply(); });
-        });
-
       const bridgeSection = this.section(containerEl, t("settings.bridge"), { desc: t("settings.bridgeDesc") });
       new Setting(bridgeSection).setName(t("settings.enableBridge"))
         .addToggle((t) => t.setValue(this.plugin.settings.bridgeEnabled).onChange(async (v) => {

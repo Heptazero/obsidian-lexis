@@ -48,6 +48,19 @@ test("uses compact PDF backgrounds and keeps line styles thin", async () => {
   assert.deepEqual(wavy, { topOffset: 18, height: 3 });
 });
 
+test("global highlight switch also stops PDF highlight observation", async () => {
+  const { createDocumentHighlights } = await loadHighlights();
+  let observers = 0;
+  const document = { defaultView: { MutationObserver: class { constructor() { observers++; } } } };
+  const reader = {
+    settings: { enableHighlight: false, enablePdfHighlight: true },
+    teardownPdfHighlight() {},
+  };
+  createDocumentHighlights().setupPdfHighlight.value.call(reader, document);
+  assert.equal(observers, 0);
+  assert.equal(reader._pdfPending, undefined);
+});
+
 test("does not open a highlight while text remains selected", async () => {
   const { hasExpandedSelection } = await loadReaderInteractions();
   const selection = { isCollapsed: false, rangeCount: 1 };

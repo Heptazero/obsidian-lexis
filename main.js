@@ -883,8 +883,12 @@ var MESSAGES = {
   "settings.colorByHeading": { zh: "\u6309\u6807\u9898\u5206\u7C7B\u7740\u8272", en: "Color by heading" },
   "settings.colorByHeadingDesc": { zh: "\u5D4C\u5957\u6807\u9898\u7EE7\u627F\u4E0A\u7EA7\u3002", en: "Nested headings inherit from parents." },
   "settings.refreshCategories": { zh: "\u5237\u65B0\u5206\u7C7B", en: "Refresh categories" },
-  "settings.highlight": { zh: "\u9AD8\u4EAE\u5916\u89C2", en: "Highlights" },
+  "settings.highlight": { zh: "\u9AD8\u4EAE", en: "Highlights" },
   "settings.enableHighlight": { zh: "\u542F\u7528\u9AD8\u4EAE", en: "Enable highlights" },
+  "settings.enableHighlightDesc": { zh: "\u5F00\u542F\u540E\uFF0C\u9605\u8BFB\u89C6\u56FE\u59CB\u7EC8\u9AD8\u4EAE\uFF1B\u5B9E\u65F6\u9884\u89C8\u548C PDF \u53EF\u5206\u522B\u63A7\u5236\u3002", en: "When enabled, reading view is always highlighted; Live Preview and PDF can be controlled separately." },
+  "settings.highlightScope": { zh: "\u663E\u793A\u4F4D\u7F6E", en: "Where to show" },
+  "settings.highlightAppearance": { zh: "\u6837\u5F0F", en: "Appearance" },
+  "settings.highlightRules": { zh: "\u89C4\u5219", en: "Rules" },
   "settings.livePreview": { zh: "\u5B9E\u65F6\u9884\u89C8\u4E5F\u9AD8\u4EAE", en: "Highlight in Live Preview" },
   "settings.unsupported": { zh: "\u5F53\u524D\u73AF\u5883\u4E0D\u652F\u6301\u3002", en: "Not supported in this environment." },
   "settings.selectionPill": { zh: "\u5212\u8BCD\u663E\u793A\u300C\u52A0\u5165\u8BCD\u5E93\u300D", en: "Show Add to Lexis on selection" },
@@ -910,7 +914,8 @@ var MESSAGES = {
   "settings.popoverFont": { zh: "\u5361\u7247\u5B57\u53F7", en: "Card font size" },
   "settings.hoverDelay": { zh: "\u60AC\u6D6E\u5EF6\u8FDF", en: "Hover delay" },
   "settings.hoverDelayDesc": { zh: "0 \u4E3A\u7ACB\u5373\u663E\u793A\u3002", en: "0 shows the card immediately." },
-  "settings.mobileInteractions": { zh: "\u79FB\u52A8\u7AEF\u64CD\u4F5C", en: "Mobile interactions" },
+  "settings.mobileInteractions": { zh: "\u79FB\u52A8\u7AEF", en: "Mobile" },
+  "settings.mobileSectionDesc": { zh: "\u8F7B\u70B9\u9AD8\u4EAE\u4E0E\u8BC4\u5206\u680F", en: "Highlight taps and rating bar" },
   "settings.mobileTapAction": { zh: "\u8F7B\u70B9\u9AD8\u4EAE", en: "Tap a highlight" },
   "settings.mobileTapDesc": { zh: "\u663E\u793A\u5361\u7247\u540E\uFF0C\u70B9\u6807\u9898\u53EF\u6253\u5F00\u8BCD\u6761\u3002", en: "After opening the card, tap its title to open the entry." },
   "settings.mobileTapPopover": { zh: "\u663E\u793A\u5361\u7247", en: "Show card" },
@@ -971,8 +976,11 @@ var MESSAGES = {
   "settings.feedbackDaysDesc": { zh: "\u5230\u671F\u65E5\u8D85\u8FC7\u6B64\u5929\u6570\u624D\u63D0\u524D\u3002", en: "Only later due dates are pulled forward." },
   "settings.retireDays": { zh: "\u6DD8\u6C70\u5019\u9009\u9608\u503C\uFF08\u5929\uFF09", en: "Retirement threshold (days)" },
   "settings.retireDaysDesc": { zh: "\u5165\u5E93\u4E0E\u672A\u76F8\u9047\u5747\u8FBE\u5230\u6B64\u5929\u6570\u3002", en: "Both added and unseen ages must reach this value." },
+  "settings.dataStorage": { zh: "\u6570\u636E\u5B58\u50A8", en: "Data storage" },
   "settings.encounterFolder": { zh: "\u76F8\u9047\u8BB0\u5F55\u6587\u4EF6\u5939", en: "Encounter data folder" },
-  "settings.encounterFolderDesc": { zh: "\u8F93\u5165\u5E93\u5185\u6587\u4EF6\u5939\u8DEF\u5F84\uFF1B\u7559\u7A7A\u4F7F\u7528\u9ED8\u8BA4\u4F4D\u7F6E\u3002\u66F4\u6539\u65F6\u590D\u5236\u5DF2\u6709\u8BB0\u5F55\uFF0C\u539F\u6587\u4EF6\u4FDD\u7559\u3002", en: "Enter a folder path inside the vault. Blank uses the default location. Existing records are copied; originals remain." },
+  "settings.encounterFolderDesc": { zh: "\u53EF\u4FEE\u6539\u7684\u5E93\u5185\u6587\u4EF6\u5939\u8DEF\u5F84\u3002\u66F4\u6539\u65F6\u590D\u5236\u5DF2\u6709\u8BB0\u5F55\uFF0C\u539F\u6587\u4EF6\u4FDD\u7559\u3002", en: "Editable folder path inside the vault. Existing records are copied; originals remain." },
+  "settings.pluginDataPath": { zh: "\u63D2\u4EF6\u8BBE\u7F6E\u4E0E\u590D\u4E60\u65E5\u5FD7", en: "Settings and review history" },
+  "settings.pluginDataPathDesc": { zh: "Obsidian \u56FA\u5B9A\u4F4D\u7F6E\uFF1A{path}\u3002\u4E0D\u968F\u76F8\u9047\u8BB0\u5F55\u8FC1\u79FB\u3002", en: "Obsidian-managed path: {path}. This does not move with encounter data." },
   "settings.encounterFolderSaved": { zh: "\u76F8\u9047\u8BB0\u5F55\u5DF2\u5207\u6362\u6587\u4EF6\u5939", en: "Encounter folder updated" },
   "settings.encounterFolderError": { zh: "\u65E0\u6CD5\u5207\u6362\u76F8\u9047\u8BB0\u5F55\u6587\u4EF6\u5939\uFF1A{error}", en: "Could not change encounter folder: {error}" },
   "home.encounterDataError": { zh: "\u76F8\u9047\u8BB0\u5F55\u8BFB\u53D6\u5931\u8D25\uFF0C\u6682\u4E0D\u8BA1\u7B97\u6DD8\u6C70\u5019\u9009\u3002", en: "Encounter history could not be read. Retirement candidates are unavailable." },
@@ -4161,7 +4169,7 @@ function createDocumentHighlights() {
       this._pdfObservedLayers = /* @__PURE__ */ new WeakSet();
       this._pdfObservedSizes = /* @__PURE__ */ new WeakMap();
       const MutationObserverConstructor = observerWindow.MutationObserver;
-      if (!this.settings.enablePdfHighlight || !MutationObserverConstructor) return;
+      if (!this.settings.enableHighlight || !this.settings.enablePdfHighlight || !MutationObserverConstructor) return;
       this._pdfPending = /* @__PURE__ */ new Set();
       const flush = () => {
         this._pdfRaf = 0;
@@ -6160,6 +6168,47 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
         }
         return [];
       })();
+      const defaultEncounterFolder = `${this.app.vault.configDir}/plugins/${this.plugin.manifest.id}/encounters`;
+      const dataSection = this.section(containerEl, t("settings.dataStorage"), { open: true });
+      dataSection.addClass("lexis-data-section");
+      const encounterFolderSetting = new Setting3(dataSection).setName(t("settings.encounterFolder")).setDesc(t("settings.encounterFolderDesc"));
+      encounterFolderSetting.settingEl.addClass("lexis-data-path-setting");
+      encounterFolderSetting.addText((input) => {
+        const apply = async () => {
+          const previous = this.plugin.settings.encounterFolder;
+          try {
+            const value = input.getValue().trim();
+            await this.plugin.setEncounterFolder(value === defaultEncounterFolder ? "" : value);
+            input.setValue(this.plugin.settings.encounterFolder || defaultEncounterFolder);
+            if (previous !== this.plugin.settings.encounterFolder) new Notice4(t("settings.encounterFolderSaved"));
+          } catch (error) {
+            input.setValue(previous || defaultEncounterFolder);
+            new Notice4(t("settings.encounterFolderError", { error: error instanceof Error ? error.message : typeof error === "string" ? error : "Unknown error" }));
+          }
+        };
+        input.setValue(this.plugin.settings.encounterFolder || defaultEncounterFolder);
+        input.inputEl.addEventListener("change", () => {
+          void apply();
+        });
+        input.inputEl.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") input.inputEl.blur();
+        });
+        if (hasSuggest) new PathSuggest(this.app, input.inputEl, () => folders, (value) => {
+          input.setValue(value);
+          void apply();
+        });
+      });
+      new Setting3(dataSection).setName(t("settings.pluginDataPath")).setDesc(t("settings.pluginDataPathDesc", { path: `${this.app.vault.configDir}/plugins/${this.plugin.manifest.id}/data.json` }));
+      const mobileSection = this.section(containerEl, t("settings.mobileInteractions"), { desc: t("settings.mobileSectionDesc") });
+      new Setting3(mobileSection).setName(t("settings.mobileTapAction")).setDesc(t("settings.mobileTapDesc")).addDropdown((dropdown) => dropdown.addOption("popover", t("settings.mobileTapPopover")).addOption("open", t("settings.mobileTapOpen")).setValue(this.plugin.settings.mobileTapAction).onChange(async (value) => {
+        this.plugin.settings.mobileTapAction = value;
+        await save();
+      }));
+      new Setting3(mobileSection).setName(t("settings.ratingOffset")).setDesc(t("settings.ratingOffsetDesc")).addSlider((s) => s.setLimits(0, 200, 5).setValue(this.plugin.settings.reviewBottomSpace).setInstant(true).setDisplayFormat((value) => `${value}px`).onChange(async (value) => {
+        this.plugin.settings.reviewBottomSpace = value;
+        this.app.workspace.containerEl.ownerDocument.querySelectorAll('.workspace-leaf-content[data-type="lexis-review-view"]').forEach((view) => view.setCssProps({ "--lexis-review-bottom-space": `${value}px` }));
+        await save();
+      }));
       const dictSection = this.section(containerEl, t("settings.dictionary"), { open: true });
       const dictHeading = new Setting3(dictSection).setDesc(t("settings.dictionaryDesc")).setHeading();
       const dictsWrap = dictSection.createDiv();
@@ -6488,17 +6537,29 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
       };
       renderCategoryColors();
       const hlSection = this.section(containerEl, t("settings.highlight"));
-      new Setting3(hlSection).setName(t("settings.enableHighlight")).addToggle((toggle) => toggle.setValue(this.plugin.settings.enableHighlight).onChange(async (v) => {
+      const highlightSwitch = new Setting3(hlSection).setName(t("settings.enableHighlight")).setDesc(t("settings.enableHighlightDesc"));
+      const highlightOptions = hlSection.createEl("fieldset", { cls: "lexis-highlight-options" });
+      const syncHighlightOptions = () => {
+        highlightOptions.disabled = !this.plugin.settings.enableHighlight;
+        highlightOptions.toggleClass("is-disabled", !this.plugin.settings.enableHighlight);
+      };
+      syncHighlightOptions();
+      highlightSwitch.addToggle((toggle) => toggle.setValue(this.plugin.settings.enableHighlight).onChange(async (v) => {
         this.plugin.settings.enableHighlight = v;
+        syncHighlightOptions();
+        if (v && this.plugin.settings.enablePdfHighlight) this.plugin.setupPdfHighlight();
+        else this.plugin.teardownPdfHighlight();
         await save();
         refresh();
       }));
-      new Setting3(hlSection).setName(t("settings.livePreview")).setDesc(this.plugin.liveAvailable ? "" : t("settings.unsupported")).addToggle((t2) => t2.setValue(this.plugin.settings.enableLivePreview).setDisabled(!this.plugin.liveAvailable).onChange(async (v) => {
+      const scopeGroup = highlightOptions.createDiv({ cls: "lexis-settings-subgroup" });
+      scopeGroup.createDiv({ cls: "lexis-settings-subheading", text: t("settings.highlightScope") });
+      new Setting3(scopeGroup).setName(t("settings.livePreview")).setDesc(this.plugin.liveAvailable ? "" : t("settings.unsupported")).addToggle((t2) => t2.setValue(this.plugin.settings.enableLivePreview).setDisabled(!this.plugin.liveAvailable).onChange(async (v) => {
         this.plugin.settings.enableLivePreview = v;
         await save();
         refresh();
       }));
-      new Setting3(hlSection).setName(t("settings.pdfHighlight")).setDesc(t("settings.pdfHighlightDesc")).addToggle((t2) => t2.setValue(this.plugin.settings.enablePdfHighlight).onChange(async (v) => {
+      new Setting3(scopeGroup).setName(t("settings.pdfHighlight")).setDesc(t("settings.pdfHighlightDesc")).addToggle((t2) => t2.setValue(this.plugin.settings.enablePdfHighlight).onChange(async (v) => {
         this.plugin.settings.enablePdfHighlight = v;
         await save();
         if (v) this.plugin.setupPdfHighlight();
@@ -6507,12 +6568,14 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
           this.plugin.rescanPdfLayers();
         }
       }));
-      new Setting3(hlSection).setName(t("settings.highlightStyle")).addDropdown((dd) => dd.addOption("wavy", t("settings.wavy")).addOption("underline", t("settings.underline")).addOption("background", t("settings.background")).setValue(this.plugin.settings.highlightStyle).onChange(async (v) => {
+      const styleGroup = highlightOptions.createDiv({ cls: "lexis-settings-subgroup" });
+      styleGroup.createDiv({ cls: "lexis-settings-subheading", text: t("settings.highlightAppearance") });
+      new Setting3(styleGroup).setName(t("settings.highlightStyle")).addDropdown((dd) => dd.addOption("wavy", t("settings.wavy")).addOption("underline", t("settings.underline")).addOption("background", t("settings.background")).setValue(this.plugin.settings.highlightStyle).onChange(async (v) => {
         this.plugin.settings.highlightStyle = ["wavy", "underline", "background"].includes(v) ? v : "wavy";
         await save();
         refresh();
       }));
-      new Setting3(hlSection).setName(t("settings.highlightColor")).addColorPicker((cp) => {
+      new Setting3(styleGroup).setName(t("settings.highlightColor")).addColorPicker((cp) => {
         this._colorComp = cp;
         cp.setValue(this.plugin.settings.highlightColor || accentHex).onChange(async (v) => {
           this.plugin.settings.highlightColor = v;
@@ -6525,22 +6588,24 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
         await save();
         refresh();
       }));
-      new Setting3(hlSection).setName(t("settings.opacity")).addSlider((s) => s.setLimits(0.1, 1, 0.05).setValue(this.plugin.settings.highlightOpacity).onChange(async (v) => {
+      new Setting3(styleGroup).setName(t("settings.opacity")).addSlider((s) => s.setLimits(0.1, 1, 0.05).setValue(this.plugin.settings.highlightOpacity).onChange(async (v) => {
         this.plugin.settings.highlightOpacity = v;
         await save();
         refresh();
       }));
-      new Setting3(hlSection).setName(t("settings.fade")).setDesc(t("settings.fadeDesc")).addToggle((t2) => t2.setValue(this.plugin.settings.fadeByMemory).onChange(async (v) => {
+      new Setting3(styleGroup).setName(t("settings.fade")).setDesc(t("settings.fadeDesc")).addToggle((t2) => t2.setValue(this.plugin.settings.fadeByMemory).onChange(async (v) => {
         this.plugin.settings.fadeByMemory = v;
         await save();
         refresh();
       }));
-      new Setting3(hlSection).setName(t("settings.fadeFloor")).addSlider((s) => s.setLimits(0, 0.9, 0.05).setValue(this.plugin.settings.fadeFloor).onChange(async (v) => {
+      new Setting3(styleGroup).setName(t("settings.fadeFloor")).addSlider((s) => s.setLimits(0, 0.9, 0.05).setValue(this.plugin.settings.fadeFloor).onChange(async (v) => {
         this.plugin.settings.fadeFloor = v;
         await save();
         refresh();
       }));
-      const excludeSetting = new Setting3(hlSection).setName(t("settings.excludeTags")).setDesc(t("settings.excludeTagsDesc"));
+      const rulesGroup = highlightOptions.createDiv({ cls: "lexis-settings-subgroup" });
+      rulesGroup.createDiv({ cls: "lexis-settings-subheading", text: t("settings.highlightRules") });
+      const excludeSetting = new Setting3(rulesGroup).setName(t("settings.excludeTags")).setDesc(t("settings.excludeTagsDesc"));
       excludeSetting.settingEl.addClass("lexis-tags-setting");
       const excludeEditor = excludeSetting.controlEl.createDiv({ cls: "lexis-tag-editor" });
       const excludeChips = excludeEditor.createDiv({ cls: "lexis-tag-editor-chips" });
@@ -6593,7 +6658,7 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
         void addExcludedTags(value);
       });
       renderExcludedTags();
-      const tagColorSection = this.section(containerEl, t("settings.tagColors"));
+      const tagColorSection = this.section(rulesGroup, t("settings.tagColors"));
       const rulesWrap = tagColorSection.createDiv();
       const renderRules = () => {
         rulesWrap.empty();
@@ -6705,11 +6770,6 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
         await save();
         this.plugin._occCache.clear();
       }));
-      const mobileSection = this.section(containerEl, t("settings.mobileInteractions"));
-      new Setting3(mobileSection).setName(t("settings.mobileTapAction")).setDesc(t("settings.mobileTapDesc")).addDropdown((dropdown) => dropdown.addOption("popover", t("settings.mobileTapPopover")).addOption("open", t("settings.mobileTapOpen")).setValue(this.plugin.settings.mobileTapAction).onChange(async (value) => {
-        this.plugin.settings.mobileTapAction = value;
-        await save();
-      }));
       const addSection = this.section(containerEl, t("settings.selectionAdd"));
       new Setting3(addSection).setName(t("settings.selectionPill")).addToggle((toggle) => toggle.setValue(this.plugin.settings.selectionPill).onChange(async (v) => {
         this.plugin.settings.selectionPill = v;
@@ -6815,11 +6875,6 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
         this.plugin.applyReviewMetadataVisibility();
         await save();
       }));
-      new Setting3(fsrsSection).setName(t("settings.ratingOffset")).setDesc(t("settings.ratingOffsetDesc")).addSlider((s) => s.setLimits(0, 200, 5).setValue(this.plugin.settings.reviewBottomSpace).setInstant(true).setDisplayFormat((value) => `${value}px`).onChange(async (value) => {
-        this.plugin.settings.reviewBottomSpace = value;
-        this.app.workspace.containerEl.ownerDocument.querySelectorAll('.workspace-leaf-content[data-type="lexis-review-view"]').forEach((view) => view.setCssProps({ "--lexis-review-bottom-space": `${value}px` }));
-        await save();
-      }));
       new Setting3(fsrsSection).setName(t("home.start")).addButton((b) => b.setButtonText(t("settings.openReview")).setCta().onClick(() => this.plugin.openHome()));
       new Setting3(fsrsSection).setName(t("settings.hoverFeedback")).setDesc(t("settings.hoverFeedbackDesc")).addToggle((t2) => t2.setValue(this.plugin.settings.hoverFeedback).onChange(async (v) => {
         this.plugin.settings.hoverFeedback = v;
@@ -6833,30 +6888,6 @@ var createSettingsTab = ({ obsidian: obsidian5, PluginSettingTab: PluginSettingT
         this.plugin.settings.retireCandidateDays = v;
         await save();
       }));
-      new Setting3(fsrsSection).setName(t("settings.encounterFolder")).setDesc(t("settings.encounterFolderDesc")).addText((input) => {
-        const apply = async () => {
-          const previous = this.plugin.settings.encounterFolder;
-          try {
-            await this.plugin.setEncounterFolder(input.getValue());
-            input.setValue(this.plugin.settings.encounterFolder);
-            if (previous !== this.plugin.settings.encounterFolder) new Notice4(t("settings.encounterFolderSaved"));
-          } catch (error) {
-            input.setValue(previous);
-            new Notice4(t("settings.encounterFolderError", { error: error instanceof Error ? error.message : typeof error === "string" ? error : "Unknown error" }));
-          }
-        };
-        input.setPlaceholder(`${this.app.vault.configDir}/plugins/${this.plugin.manifest.id}/encounters`).setValue(this.plugin.settings.encounterFolder);
-        input.inputEl.addEventListener("change", () => {
-          void apply();
-        });
-        input.inputEl.addEventListener("keydown", (event) => {
-          if (event.key === "Enter") input.inputEl.blur();
-        });
-        if (hasSuggest) new PathSuggest(this.app, input.inputEl, () => folders, (value) => {
-          input.setValue(value);
-          void apply();
-        });
-      });
       const bridgeSection = this.section(containerEl, t("settings.bridge"), { desc: t("settings.bridgeDesc") });
       new Setting3(bridgeSection).setName(t("settings.enableBridge")).addToggle((t2) => t2.setValue(this.plugin.settings.bridgeEnabled).onChange(async (v) => {
         this.plugin.settings.bridgeEnabled = v;
