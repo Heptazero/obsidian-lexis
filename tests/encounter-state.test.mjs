@@ -38,15 +38,31 @@ test("merges device-owned snapshots by latest change and honors deletion", async
   const folder = ".obsidian/plugins/lexis/encounters";
   const macId = "a".repeat(32);
   const windowsId = "b".repeat(32);
-  const mac = new EncounterStore(io, folder, macId);
-  const windows = new EncounterStore(io, folder, windowsId);
+  const mac = new EncounterStore(io, folder, macId, "macos");
+  const windows = new EncounterStore(io, folder, windowsId, "windows");
   await mac.apply([{ path: "10_atom/词.md", changedAt: 100, encounteredAt: 100, day: "2026-09-28" }]);
   await windows.apply([{ path: "10_atom/词.md", changedAt: 200, encounteredAt: 200, day: "2026-09-29" }]);
   assert.deepEqual({ ...await mac.load() }, { "10_atom/词.md": { encounteredAt: 200, lastEncounter: "2026-09-29" } });
   await mac.apply([{ path: "10_atom/词.md", changedAt: 300, deleted: true }]);
   assert.deepEqual({ ...await windows.load() }, {});
-  assert.equal(io.files.has(`${folder}/${macId}.json`), true);
-  assert.equal(io.files.has(`${folder}/${windowsId}.json`), true);
+  assert.equal(io.files.has(`${folder}/macos--aaaaaaaa.json`), true);
+  assert.equal(io.files.has(`${folder}/windows--bbbbbbbb.json`), true);
+});
+
+test("migrates the local plain device ID filename to a readable device filename", async () => {
+  const io = adapter();
+  const folder = "99_assets/plugin-data/lexis";
+  const device = "a".repeat(32);
+  await io.mkdir("99_assets");
+  await io.mkdir("99_assets/plugin-data");
+  await io.mkdir(folder);
+  await io.write(`${folder}/${device}.json`, JSON.stringify({ schema: 2, deviceId: device, entries: {
+    "10_atom/词.md": { path: "10_atom/词.md", changedAt: 100, encounteredAt: 100, day: "2026-09-30" },
+  } }));
+  const store = new EncounterStore(io, folder, device, "macos");
+  assert.deepEqual({ ...await store.load() }, { "10_atom/词.md": { encounteredAt: 100, lastEncounter: "2026-09-30" } });
+  assert.equal(io.files.has(`${folder}/${device}.json`), false);
+  assert.equal(io.files.has(`${folder}/macos--aaaaaaaa.json`), true);
 });
 
 test("a later active encounter can recreate a previously deleted path", async () => {
@@ -74,6 +90,8 @@ test("folder switch copies and merges only device snapshots", async () => {
   } }));
   await store.copyTo(target);
   assert.deepEqual({ ...await new EncounterStore(io, target, device).load() }, { "10_atom/词.md": { encounteredAt: 200, lastEncounter: "2026-09-29" } });
+  assert.equal(io.files.has(`${target}/${device}.json`), false);
+  assert.equal(io.files.has(`${target}/device--aaaaaaaa.json`), true);
   await store.clear();
   assert.equal(await io.exists(source), false);
 });

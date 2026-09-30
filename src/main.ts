@@ -81,6 +81,15 @@ type HomeOpenLocation = "center" | "sidebar";
 
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : typeof error === "string" ? error : "Unknown error";
 
+function encounterDeviceLabel(): string {
+  if (Platform.isIosApp) return "ios";
+  if (Platform.isAndroidApp) return "android";
+  if (Platform.isWin) return "windows";
+  if (Platform.isLinux) return "linux";
+  if (Platform.isMacOS) return "macos";
+  return Platform.isMobile ? "mobile" : "desktop";
+}
+
 class LexisPlugin extends Plugin {
   declare settings: LexisSettings;
   declare index: Map<string, LexisEntry>;
@@ -233,7 +242,7 @@ class LexisPlugin extends Plugin {
       deviceId = crypto.randomUUID().replaceAll("-", "");
       this.app.saveLocalStorage("lexis:encounter-device-id", deviceId);
     }
-    this._encounterStore = new EncounterStore(this.app.vault.adapter, encounterFolder(this.settings.encounterFolder, this.app.vault.configDir, this.manifest.id), deviceId);
+    this._encounterStore = new EncounterStore(this.app.vault.adapter, encounterFolder(this.settings.encounterFolder, this.app.vault.configDir, this.manifest.id), deviceId, encounterDeviceLabel());
     this._encounterDedup = {};
     this._pageHighlightState = new WeakMap();
     this._reviewSessions = new WeakMap();
@@ -795,7 +804,7 @@ class LexisPlugin extends Plugin {
     this._encRelocating = true;
     try {
       await this._encounterStore.copyTo(target);
-      const nextStore = new EncounterStore(this.app.vault.adapter, target, this._encounterStore.deviceId);
+      const nextStore = new EncounterStore(this.app.vault.adapter, target, this._encounterStore.deviceId, this._encounterStore.deviceLabel);
       const revision = this._encRevision;
       const loaded = await nextStore.load();
       this.settings.encounterFolder = setting;

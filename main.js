@@ -2384,6 +2384,9 @@ function createOccurrenceSearch(options) {
 // src/encounter-store.ts
 var DAY = /^\d{4}-\d{2}-\d{2}$/;
 var DEVICE = /^[a-f0-9]{32}$/;
+var DEVICE_LABEL = /^[a-z][a-z0-9-]{0,31}$/;
+var LEGACY_SNAPSHOT = /^([a-f0-9]{32})\.json$/;
+var NAMED_SNAPSHOT = /^([a-z][a-z0-9-]{0,31})--([a-f0-9]{8})\.json$/;
 function encounterFolder(input, configDir, pluginId) {
   const value = input.trim().replaceAll("\\", "/").replace(/\/+$/, "");
   if (!value) return `${configDir}/plugins/${pluginId}/encounters`;
@@ -2413,14 +2416,23 @@ async function ensureDirectory(adapter, folder) {
   }
 }
 var EncounterStore = class {
-  constructor(adapter, folder, deviceId) {
+  constructor(adapter, folder, deviceId, deviceLabel = "device") {
     this.adapter = adapter;
     this.folder = folder;
     this.deviceId = deviceId;
+    this.deviceLabel = deviceLabel;
     if (!DEVICE.test(deviceId)) throw new Error("Invalid encounter device ID");
+    if (!DEVICE_LABEL.test(deviceLabel)) throw new Error("Invalid encounter device label");
   }
-  snapshotPath(folder = this.folder, deviceId = this.deviceId) {
+  snapshotPath(folder = this.folder, deviceId = this.deviceId, deviceLabel = this.deviceLabel) {
+    return `${folder}/${deviceLabel}--${deviceId.slice(0, 8)}.json`;
+  }
+  legacySnapshotPath(folder = this.folder, deviceId = this.deviceId) {
     return `${folder}/${deviceId}.json`;
+  }
+  snapshotName(file) {
+    const name = file.slice(file.lastIndexOf("/") + 1);
+    return LEGACY_SNAPSHOT.test(name) || NAMED_SNAPSHOT.test(name) ? name : null;
   }
   async readSnapshot(file) {
     const raw = JSON.parse(await this.adapter.read(file));
@@ -2433,18 +2445,41 @@ var EncounterStore = class {
     for (const [path, value] of Object.entries(snapshot.entries)) {
       if (validMutation(value) && value.path === path) entries[path] = value;
     }
+    const name = this.snapshotName(file);
+    const legacyId = name?.match(LEGACY_SNAPSHOT)?.[1];
+    const shortId = name?.match(NAMED_SNAPSHOT)?.[2];
+    if (!name || legacyId && legacyId !== snapshot.deviceId || shortId && !snapshot.deviceId.startsWith(shortId)) {
+      throw new Error(`Invalid Lexis encounter snapshot name: ${file}`);
+    }
     return { schema: 2, deviceId: snapshot.deviceId, entries };
+  }
+  async migrateOwnSnapshotName(folder = this.folder) {
+    const legacy = this.legacySnapshotPath(folder);
+    if (!await this.adapter.exists(legacy)) return;
+    const named = this.snapshotPath(folder);
+    const snapshot = await this.readSnapshot(legacy);
+    if (await this.adapter.exists(named)) {
+      const current = await this.readSnapshot(named);
+      for (const [path, value] of Object.entries(snapshot.entries)) current.entries[path] = newer(current.entries[path], value);
+      await this.adapter.write(named, JSON.stringify(current));
+    } else {
+      await this.adapter.write(named, JSON.stringify(snapshot));
+    }
+    await this.adapter.remove(legacy);
   }
   async snapshots(folder = this.folder) {
     if (!await this.adapter.exists(folder)) return [];
     const root = await this.adapter.list(folder);
     const output = [];
-    for (const file of root.files.filter((name) => /\/[a-f0-9]{32}\.json$/.test(name))) output.push(await this.readSnapshot(file));
+    for (const file of root.files.filter((name) => this.snapshotName(name))) {
+      output.push({ name: file.slice(file.lastIndexOf("/") + 1), snapshot: await this.readSnapshot(file) });
+    }
     return output;
   }
   async load() {
+    await this.migrateOwnSnapshotName();
     const latest = {};
-    for (const snapshot of await this.snapshots()) {
+    for (const { snapshot } of await this.snapshots()) {
       for (const [path, value] of Object.entries(snapshot.entries)) latest[path] = newer(latest[path], value);
     }
     const totals = {};
@@ -2456,6 +2491,7 @@ var EncounterStore = class {
   async apply(mutations) {
     if (!mutations.length) return;
     await ensureDirectory(this.adapter, this.folder);
+    await this.migrateOwnSnapshotName();
     const file = this.snapshotPath();
     let entries = {};
     if (await this.adapter.exists(file)) entries = (await this.readSnapshot(file)).entries;
@@ -2468,12 +2504,14 @@ var EncounterStore = class {
   }
   async copyTo(folder) {
     if (folder === this.folder || !await this.adapter.exists(this.folder)) return;
+    await this.migrateOwnSnapshotName();
     await ensureDirectory(this.adapter, folder);
+    await this.migrateOwnSnapshotName(folder);
     const destination = await this.adapter.list(folder);
-    const unrelated = destination.files.find((file) => !/\/(?:[a-f0-9]{32}\.json|\.DS_Store)$/.test(file));
+    const unrelated = destination.files.find((file) => !this.snapshotName(file) && !file.endsWith("/.DS_Store"));
     if (unrelated || destination.folders.length) throw new Error("Choose an empty folder dedicated to Lexis encounter records.");
-    for (const snapshot of await this.snapshots()) {
-      const target = this.snapshotPath(folder, snapshot.deviceId);
+    for (const { name, snapshot } of await this.snapshots()) {
+      const target = `${folder}/${name}`;
       if (!await this.adapter.exists(target)) {
         await this.adapter.write(target, JSON.stringify(snapshot));
         continue;
@@ -2486,7 +2524,7 @@ var EncounterStore = class {
   async clear() {
     if (!await this.adapter.exists(this.folder)) return;
     const root = await this.adapter.list(this.folder);
-    const unrelated = root.files.find((file) => !/\/(?:[a-f0-9]{32}\.json|\.DS_Store)$/.test(file));
+    const unrelated = root.files.find((file) => !this.snapshotName(file) && !file.endsWith("/.DS_Store"));
     if (unrelated || root.folders.length) throw new Error("Encounter folder contains unrelated data and was not removed.");
     for (const file of root.files) await this.adapter.remove(file);
     await this.adapter.rmdir(this.folder, false);
@@ -7721,6 +7759,14 @@ var LexisReviewView = createReviewView({
 });
 var LexisBridge = createBridgeServer({ Notice: import_obsidian9.Notice, Platform: import_obsidian9.Platform });
 var errorMessage4 = (error) => error instanceof Error ? error.message : typeof error === "string" ? error : "Unknown error";
+function encounterDeviceLabel() {
+  if (import_obsidian9.Platform.isIosApp) return "ios";
+  if (import_obsidian9.Platform.isAndroidApp) return "android";
+  if (import_obsidian9.Platform.isWin) return "windows";
+  if (import_obsidian9.Platform.isLinux) return "linux";
+  if (import_obsidian9.Platform.isMacOS) return "macos";
+  return import_obsidian9.Platform.isMobile ? "mobile" : "desktop";
+}
 var LexisPlugin = class extends import_obsidian9.Plugin {
   async onload() {
     await this.loadSettings();
@@ -7769,7 +7815,7 @@ var LexisPlugin = class extends import_obsidian9.Plugin {
       deviceId = crypto.randomUUID().replaceAll("-", "");
       this.app.saveLocalStorage("lexis:encounter-device-id", deviceId);
     }
-    this._encounterStore = new EncounterStore(this.app.vault.adapter, encounterFolder(this.settings.encounterFolder, this.app.vault.configDir, this.manifest.id), deviceId);
+    this._encounterStore = new EncounterStore(this.app.vault.adapter, encounterFolder(this.settings.encounterFolder, this.app.vault.configDir, this.manifest.id), deviceId, encounterDeviceLabel());
     this._encounterDedup = {};
     this._pageHighlightState = /* @__PURE__ */ new WeakMap();
     this._reviewSessions = /* @__PURE__ */ new WeakMap();
@@ -8386,7 +8432,7 @@ var LexisPlugin = class extends import_obsidian9.Plugin {
     this._encRelocating = true;
     try {
       await this._encounterStore.copyTo(target);
-      const nextStore = new EncounterStore(this.app.vault.adapter, target, this._encounterStore.deviceId);
+      const nextStore = new EncounterStore(this.app.vault.adapter, target, this._encounterStore.deviceId, this._encounterStore.deviceLabel);
       const revision = this._encRevision;
       const loaded = await nextStore.load();
       this.settings.encounterFolder = setting;
