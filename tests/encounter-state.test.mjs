@@ -14,6 +14,7 @@ function adapter() {
     async exists(path) { return dirs.has(path) || files.has(path); },
     async mkdir(path) { dirs.add(path); },
     async write(path, data) { files.set(path, data); },
+    async process(path, fn) { const next = fn(files.get(path)); files.set(path, next); return next; },
     async remove(path) { files.delete(path); },
     async rmdir(path) { dirs.delete(path); },
     async read(path) { if (!files.has(path)) throw new Error("missing"); return files.get(path); },
@@ -45,8 +46,8 @@ test("merges device-owned snapshots by latest change and honors deletion", async
   assert.deepEqual({ ...await mac.load() }, { "10_atom/词.md": { encounteredAt: 200, lastEncounter: "2026-09-29" } });
   await mac.apply([{ path: "10_atom/词.md", changedAt: 300, deleted: true }]);
   assert.deepEqual({ ...await windows.load() }, {});
-  assert.equal(io.files.has(`${folder}/macos--aaaaaaaa.json`), true);
-  assert.equal(io.files.has(`${folder}/windows--bbbbbbbb.json`), true);
+  assert.equal(io.files.has(`${folder}/macos--${macId}.json`), true);
+  assert.equal(io.files.has(`${folder}/windows--${windowsId}.json`), true);
 });
 
 test("migrates the local plain device ID filename to a readable device filename", async () => {
@@ -62,7 +63,56 @@ test("migrates the local plain device ID filename to a readable device filename"
   const store = new EncounterStore(io, folder, device, "macos");
   assert.deepEqual({ ...await store.load() }, { "10_atom/词.md": { encounteredAt: 100, lastEncounter: "2026-09-30" } });
   assert.equal(io.files.has(`${folder}/${device}.json`), false);
-  assert.equal(io.files.has(`${folder}/macos--aaaaaaaa.json`), true);
+  assert.equal(io.files.has(`${folder}/macos--${device}.json`), true);
+});
+
+test("migrates the temporary short device filename to the full device ID", async () => {
+  const io = adapter();
+  const folder = "99_assets/plugin-data/lexis";
+  const device = "a".repeat(32);
+  await io.mkdir("99_assets");
+  await io.mkdir("99_assets/plugin-data");
+  await io.mkdir(folder);
+  await io.write(`${folder}/macos--aaaaaaaa.json`, JSON.stringify({ schema: 2, deviceId: device, entries: {} }));
+  await new EncounterStore(io, folder, device, "macos").load();
+  assert.equal(io.files.has(`${folder}/macos--aaaaaaaa.json`), false);
+  assert.equal(io.files.has(`${folder}/macos--${device}.json`), true);
+});
+
+test("imports only active events from this device legacy JSONL once", async () => {
+  const io = adapter();
+  const folder = "99_assets/plugin-data/lexis";
+  const device = "a".repeat(32);
+  await io.mkdir("99_assets");
+  await io.mkdir("99_assets/plugin-data");
+  await io.mkdir(folder);
+  await io.mkdir(`${folder}/${device}`);
+  await io.write(`${folder}/${device}/2026-09-30.jsonl`, [
+    JSON.stringify({ id: "1", path: "10_atom/忽略.md", kind: "passive", day: "2026-09-30", at: 100 }),
+    JSON.stringify({ id: "2", path: "10_atom/词.md", kind: "hover", day: "2026-09-29", at: 200 }),
+    JSON.stringify({ id: "3", path: "10_atom/词.md", kind: "open", day: "2026-09-30", at: 300 }),
+  ].join("\n") + "\n");
+  const store = new EncounterStore(io, folder, device, "macos");
+  assert.deepEqual({ ...await store.load() }, { "10_atom/词.md": { encounteredAt: 300, lastEncounter: "2026-09-30" } });
+  assert.equal(await io.exists(`${folder}/${device}`), false);
+  assert.equal(io.files.has(`${folder}/macos--${device}.json`), true);
+});
+
+test("one unreadable foreign snapshot does not hide healthy device state", async () => {
+  const io = adapter();
+  const folder = "99_assets/plugin-data/lexis";
+  const device = "a".repeat(32);
+  const foreign = "b".repeat(32);
+  const store = new EncounterStore(io, folder, device, "macos");
+  await store.apply([{ path: "10_atom/词.md", changedAt: 100, encounteredAt: 100, day: "2026-09-30" }]);
+  await io.write(`${folder}/windows--${foreign}.json`, "{");
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    assert.deepEqual({ ...await store.load() }, { "10_atom/词.md": { encounteredAt: 100, lastEncounter: "2026-09-30" } });
+  } finally {
+    console.warn = warn;
+  }
 });
 
 test("a later active encounter can recreate a previously deleted path", async () => {
@@ -91,8 +141,8 @@ test("folder switch copies and merges only device snapshots", async () => {
   await store.copyTo(target);
   assert.deepEqual({ ...await new EncounterStore(io, target, device).load() }, { "10_atom/词.md": { encounteredAt: 200, lastEncounter: "2026-09-29" } });
   assert.equal(io.files.has(`${target}/${device}.json`), false);
-  assert.equal(io.files.has(`${target}/device--aaaaaaaa.json`), true);
-  await store.clear();
+  assert.equal(io.files.has(`${target}/device--${device}.json`), true);
+  await store.removeOwn();
   assert.equal(await io.exists(source), false);
 });
 
@@ -105,4 +155,19 @@ test("folder switch rejects a destination shared with other files", async () => 
   await io.mkdir("99_assets/plugin-data");
   await io.write("99_assets/plugin-data/other-plugin.json", "keep me");
   await assert.rejects(store.copyTo("99_assets/plugin-data"), /dedicated/);
+});
+
+test("folder cleanup removes only the current device snapshot", async () => {
+  const io = adapter();
+  const folder = "99_assets/plugin-data/lexis";
+  const macId = "a".repeat(32);
+  const windowsId = "b".repeat(32);
+  const mac = new EncounterStore(io, folder, macId, "macos");
+  const windows = new EncounterStore(io, folder, windowsId, "windows");
+  await mac.apply([{ path: "10_atom/a.md", changedAt: 100, encounteredAt: 100, day: "2026-09-30" }]);
+  await windows.apply([{ path: "10_atom/b.md", changedAt: 100, encounteredAt: 100, day: "2026-09-30" }]);
+  await mac.removeOwn();
+  assert.equal(io.files.has(`${folder}/macos--${macId}.json`), false);
+  assert.equal(io.files.has(`${folder}/windows--${windowsId}.json`), true);
+  assert.equal(await io.exists(folder), true);
 });

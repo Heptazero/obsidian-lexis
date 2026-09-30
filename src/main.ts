@@ -819,7 +819,7 @@ class LexisPlugin extends Plugin {
       this._encRelocating = false;
       if (this._encPending.length) this._encSaveTimer = window.setTimeout(() => { void this.saveEncounters(); }, 500);
     }
-    await previousStore.clear();
+    await previousStore.removeOwn();
   }
   // 只记录主动相遇；同一词条与相遇类型在 60 秒内去重。
   recordEncounter(file: TFile, type: ActiveEncounterKind): void {
@@ -838,6 +838,7 @@ class LexisPlugin extends Plugin {
     this.scheduleEncounterSave();
   }
   deleteEncounterPath(path: string): void {
+    if (!this._encounters[path]) return;
     const now = Date.now();
     delete this._encounters[path];
     this._encRevision++;
@@ -846,8 +847,9 @@ class LexisPlugin extends Plugin {
   }
   renameEncounterPath(oldPath: string, newPath: string): void {
     if (oldPath === newPath) return;
-    const now = Date.now();
     const prior = this._encounters[oldPath];
+    if (!prior) return;
+    const now = Date.now();
     delete this._encounters[oldPath];
     this._encRevision++;
     this._encPending.push({ path: oldPath, changedAt: now, deleted: true });

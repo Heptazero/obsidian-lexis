@@ -26,13 +26,23 @@ interface EncounterSnapshotFile {
   snapshot: EncounterSnapshot;
 }
 
+interface LegacyEncounterEvent {
+  path?: unknown;
+  kind?: unknown;
+  day?: unknown;
+  at?: unknown;
+}
+
 export type EncounterTotals = Record<string, EncounterSummary>;
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const DEVICE = /^[a-f0-9]{32}$/;
 const DEVICE_LABEL = /^[a-z][a-z0-9-]{0,31}$/;
 const LEGACY_SNAPSHOT = /^([a-f0-9]{32})\.json$/;
-const NAMED_SNAPSHOT = /^([a-z][a-z0-9-]{0,31})--([a-f0-9]{8})\.json$/;
+const SHORT_NAMED_SNAPSHOT = /^([a-z][a-z0-9-]{0,31})--([a-f0-9]{8})\.json$/;
+const NAMED_SNAPSHOT = /^([a-z][a-z0-9-]{0,31})--([a-f0-9]{32})\.json$/;
+const LEGACY_EVENT_FILE = /^\d{4}-\d{2}-\d{2}\.jsonl$/;
+const ACTIVE_KINDS = new Set(["hover", "add", "open"]);
 
 export function encounterFolder(input: string, configDir: string, pluginId: string): string {
   const value = input.trim().replaceAll("\\", "/").replace(/\/+$/, "");
@@ -78,7 +88,7 @@ export class EncounterStore {
   }
 
   private snapshotPath(folder = this.folder, deviceId = this.deviceId, deviceLabel = this.deviceLabel): string {
-    return `${folder}/${deviceLabel}--${deviceId.slice(0, 8)}.json`;
+    return `${folder}/${deviceLabel}--${deviceId}.json`;
   }
 
   private legacySnapshotPath(folder = this.folder, deviceId = this.deviceId): string {
@@ -87,7 +97,7 @@ export class EncounterStore {
 
   private snapshotName(file: string): string | null {
     const name = file.slice(file.lastIndexOf("/") + 1);
-    return LEGACY_SNAPSHOT.test(name) || NAMED_SNAPSHOT.test(name) ? name : null;
+    return LEGACY_SNAPSHOT.test(name) || SHORT_NAMED_SNAPSHOT.test(name) || NAMED_SNAPSHOT.test(name) ? name : null;
   }
 
   private async readSnapshot(file: string): Promise<EncounterSnapshot> {
@@ -103,26 +113,75 @@ export class EncounterStore {
     }
     const name = this.snapshotName(file);
     const legacyId = name?.match(LEGACY_SNAPSHOT)?.[1];
-    const shortId = name?.match(NAMED_SNAPSHOT)?.[2];
-    if (!name || (legacyId && legacyId !== snapshot.deviceId) || (shortId && !snapshot.deviceId.startsWith(shortId))) {
+    const shortId = name?.match(SHORT_NAMED_SNAPSHOT)?.[2];
+    const namedId = name?.match(NAMED_SNAPSHOT)?.[2];
+    if (!name || (legacyId && legacyId !== snapshot.deviceId) || (shortId && !snapshot.deviceId.startsWith(shortId)) || (namedId && namedId !== snapshot.deviceId)) {
       throw new Error(`Invalid Lexis encounter snapshot name: ${file}`);
     }
     return { schema: 2, deviceId: snapshot.deviceId, entries };
   }
 
+  private async writeSnapshot(file: string, snapshot: EncounterSnapshot): Promise<void> {
+    const data = JSON.stringify(snapshot);
+    if (await this.adapter.exists(file)) await this.adapter.process(file, () => data);
+    else await this.adapter.write(file, data);
+  }
+
   private async migrateOwnSnapshotName(folder = this.folder): Promise<void> {
-    const legacy = this.legacySnapshotPath(folder);
-    if (!(await this.adapter.exists(legacy))) return;
     const named = this.snapshotPath(folder);
-    const snapshot = await this.readSnapshot(legacy);
-    if (await this.adapter.exists(named)) {
-      const current = await this.readSnapshot(named);
-      for (const [path, value] of Object.entries(snapshot.entries)) current.entries[path] = newer(current.entries[path], value);
-      await this.adapter.write(named, JSON.stringify(current));
-    } else {
-      await this.adapter.write(named, JSON.stringify(snapshot));
+    const candidates = [this.legacySnapshotPath(folder)];
+    if (await this.adapter.exists(folder)) {
+      const root = await this.adapter.list(folder);
+      for (const file of root.files) {
+        const name = file.slice(file.lastIndexOf("/") + 1);
+        if (SHORT_NAMED_SNAPSHOT.test(name) && file !== named) candidates.push(file);
+      }
     }
-    await this.adapter.remove(legacy);
+    const sources: { file: string; snapshot: EncounterSnapshot }[] = [];
+    for (const file of candidates) {
+      if (!(await this.adapter.exists(file))) continue;
+      const snapshot = await this.readSnapshot(file);
+      if (snapshot.deviceId === this.deviceId) sources.push({ file, snapshot });
+    }
+    if (!sources.length) return;
+    const current = await this.readOwnSnapshot(folder);
+    for (const { snapshot } of sources) {
+      for (const [path, value] of Object.entries(snapshot.entries)) current.entries[path] = newer(current.entries[path], value);
+    }
+    await this.writeSnapshot(named, current);
+    for (const { file } of sources) if (file !== named) await this.adapter.remove(file);
+  }
+
+  private async readOwnSnapshot(folder = this.folder): Promise<EncounterSnapshot> {
+    const file = this.snapshotPath(folder);
+    if (await this.adapter.exists(file)) return this.readSnapshot(file);
+    return { schema: 2, deviceId: this.deviceId, entries: {} };
+  }
+
+  private async migrateLegacyEvents(folder = this.folder): Promise<void> {
+    const legacyFolder = `${folder}/${this.deviceId}`;
+    if (!(await this.adapter.exists(legacyFolder))) return;
+    const root = await this.adapter.list(legacyFolder);
+    const files = root.files.filter((file) => LEGACY_EVENT_FILE.test(file.slice(file.lastIndexOf("/") + 1)));
+    if (!files.length) return;
+    const snapshot = await this.readOwnSnapshot(folder);
+    for (const file of files) {
+      for (const line of (await this.adapter.read(file)).split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const event = JSON.parse(line) as LegacyEncounterEvent;
+          if (typeof event.path !== "string" || !event.path || typeof event.kind !== "string" || !ACTIVE_KINDS.has(event.kind) || typeof event.day !== "string" || !DAY.test(event.day) || typeof event.at !== "number" || !Number.isSafeInteger(event.at) || event.at <= 0) continue;
+          const mutation: EncounterMutation = { path: event.path, changedAt: event.at, encounteredAt: event.at, day: event.day };
+          snapshot.entries[event.path] = newer(snapshot.entries[event.path], mutation);
+        } catch (error) {
+          console.warn(`[Lexis] Ignoring invalid legacy encounter event in ${file}`, error);
+        }
+      }
+    }
+    await this.writeSnapshot(this.snapshotPath(folder), snapshot);
+    for (const file of files) await this.adapter.remove(file);
+    const remaining = await this.adapter.list(legacyFolder);
+    if (!remaining.files.length && !remaining.folders.length) await this.adapter.rmdir(legacyFolder, false);
   }
 
   private async snapshots(folder = this.folder): Promise<EncounterSnapshotFile[]> {
@@ -130,13 +189,18 @@ export class EncounterStore {
     const root = await this.adapter.list(folder);
     const output: EncounterSnapshotFile[] = [];
     for (const file of root.files.filter((name) => this.snapshotName(name))) {
-      output.push({ name: file.slice(file.lastIndexOf("/") + 1), snapshot: await this.readSnapshot(file) });
+      try {
+        output.push({ name: file.slice(file.lastIndexOf("/") + 1), snapshot: await this.readSnapshot(file) });
+      } catch (error) {
+        console.warn(`[Lexis] Ignoring unreadable encounter snapshot ${file}`, error);
+      }
     }
     return output;
   }
 
   async load(): Promise<EncounterTotals> {
     await this.migrateOwnSnapshotName();
+    await this.migrateLegacyEvents();
     const latest: Record<string, EncounterMutation> = {};
     for (const { snapshot } of await this.snapshots()) {
       for (const [path, value] of Object.entries(snapshot.entries)) latest[path] = newer(latest[path], value);
@@ -152,43 +216,58 @@ export class EncounterStore {
     if (!mutations.length) return;
     await ensureDirectory(this.adapter, this.folder);
     await this.migrateOwnSnapshotName();
+    await this.migrateLegacyEvents();
     const file = this.snapshotPath();
-    let entries: Record<string, EncounterMutation> = {};
-    if (await this.adapter.exists(file)) entries = (await this.readSnapshot(file)).entries;
+    const snapshot = await this.readOwnSnapshot();
     for (const mutation of mutations) {
       if (!validMutation(mutation)) throw new Error("Invalid encounter mutation");
-      entries[mutation.path] = newer(entries[mutation.path], mutation);
+      snapshot.entries[mutation.path] = newer(snapshot.entries[mutation.path], mutation);
     }
-    const snapshot: EncounterSnapshot = { schema: 2, deviceId: this.deviceId, entries };
-    await this.adapter.write(file, JSON.stringify(snapshot));
+    await this.writeSnapshot(file, snapshot);
   }
 
   async copyTo(folder: string): Promise<void> {
     if (folder === this.folder || !(await this.adapter.exists(this.folder))) return;
     await this.migrateOwnSnapshotName();
+    await this.migrateLegacyEvents();
     await ensureDirectory(this.adapter, folder);
     await this.migrateOwnSnapshotName(folder);
+    await this.migrateLegacyEvents(folder);
     const destination = await this.adapter.list(folder);
     const unrelated = destination.files.find((file) => !this.snapshotName(file) && !file.endsWith("/.DS_Store"));
     if (unrelated || destination.folders.length) throw new Error("Choose an empty folder dedicated to Lexis encounter records.");
     for (const { name, snapshot } of await this.snapshots()) {
       const target = `${folder}/${name}`;
       if (!(await this.adapter.exists(target))) {
-        await this.adapter.write(target, JSON.stringify(snapshot));
+        await this.writeSnapshot(target, snapshot);
         continue;
       }
       const current = await this.readSnapshot(target);
       for (const [path, value] of Object.entries(snapshot.entries)) current.entries[path] = newer(current.entries[path], value);
-      await this.adapter.write(target, JSON.stringify(current));
+      await this.writeSnapshot(target, current);
     }
   }
 
-  async clear(): Promise<void> {
+  async removeOwn(): Promise<void> {
     if (!(await this.adapter.exists(this.folder))) return;
     const root = await this.adapter.list(this.folder);
-    const unrelated = root.files.find((file) => !this.snapshotName(file) && !file.endsWith("/.DS_Store"));
-    if (unrelated || root.folders.length) throw new Error("Encounter folder contains unrelated data and was not removed.");
-    for (const file of root.files) await this.adapter.remove(file);
-    await this.adapter.rmdir(this.folder, false);
+    for (const file of root.files) {
+      const name = file.slice(file.lastIndexOf("/") + 1);
+      if (name === `${this.deviceId}.json` || name.endsWith(`--${this.deviceId}.json`)) await this.adapter.remove(file);
+      else if (SHORT_NAMED_SNAPSHOT.test(name)) {
+        try { if ((await this.readSnapshot(file)).deviceId === this.deviceId) await this.adapter.remove(file); }
+        catch { /* An unreadable file is not safe to remove. */ }
+      }
+    }
+    const legacyFolder = `${this.folder}/${this.deviceId}`;
+    if (await this.adapter.exists(legacyFolder)) {
+      const legacy = await this.adapter.list(legacyFolder);
+      if (!legacy.files.length && !legacy.folders.length) await this.adapter.rmdir(legacyFolder, false);
+    }
+    const remaining = await this.adapter.list(this.folder);
+    if (remaining.files.every((file) => file.endsWith("/.DS_Store")) && !remaining.folders.length) {
+      for (const file of remaining.files) await this.adapter.remove(file);
+      await this.adapter.rmdir(this.folder, false);
+    }
   }
 }
