@@ -1,6 +1,6 @@
 "use strict";
 
-import type { App, TFile } from "obsidian";
+import type { App } from "obsidian";
 import type { HighlightStyle, LexisEntry, LexisSettings } from "./types";
 import { setPdfTargets } from "./pdf-highlight-targets";
 
@@ -60,7 +60,6 @@ function createDocumentHighlights(): PropertyDescriptorMap {
   declare onClick: (event: MouseEvent) => void;
   declare onMouseOut: (event: MouseEvent) => void;
   declare onMouseOver: (event: MouseEvent) => void;
-  declare passiveEncounter: (file: TFile) => void;
   declare wrapMatchesInElement: (element: HTMLElement, rejectSelector: string, styleOptions?: HighlightStyleOptions, excludeKeys?: Set<string> | null) => void;
   declare resolveMatchKey: (value: string) => string;
 
@@ -396,7 +395,6 @@ function createDocumentHighlights(): PropertyDescriptorMap {
     const scaleY = hlBB.height / (hl.offsetHeight || hlBB.height || 1);
     const items: { anchor: HTMLElement; source: Range }[] = [];
     for (const { key, entry, segments } of matches) {
-      if (!entry.inline) this.passiveEncounter(entry.file);
       try {
         const color = this.colorForEntry(entry);
         const styleKind = this.styleKindForEntry(entry);

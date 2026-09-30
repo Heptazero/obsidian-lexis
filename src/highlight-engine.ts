@@ -55,7 +55,6 @@ function createHighlightEngine({ Notice, boundedSource, compactMixedScriptSpacin
   declare t: (key: string, vars?: TranslationVars) => string;
   declare effectiveHighlightColor: () => string;
   declare colorForEntry: (entry: LexisEntry) => string;
-  declare passiveEncounter: (file: TFile) => void;
   declare maybeShowSelPill: (event: MouseEvent, external?: boolean) => void;
   declare onMouseOver: (event: MouseEvent) => void;
   declare onMouseOut: (event: MouseEvent) => void;
@@ -535,7 +534,6 @@ function createHighlightEngine({ Notice, boundedSource, compactMixedScriptSpacin
           continue;
         }
         const entry = this.index.get(key);
-        if (entry && !entry.inline) this.passiveEncounter(entry.file);
         const span = doc.body.createSpan();
         span.className = "lexis-hl";
         span.textContent = m[0];
@@ -581,7 +579,6 @@ function createHighlightEngine({ Notice, boundedSource, compactMixedScriptSpacin
             const start = from + match.index;
             const end = start + match[0].length;
             const entry = this.index.get(key);
-            if (entry && !entry.inline) this.passiveEncounter(entry.file);
             builder.add(start, end, Decoration.mark({ class: "lexis-hl", attributes: { "data-lexis-key": key, style: this.inlineStyleForEntry(entry) } }));
             if (match[0].length === 0) regex.lastIndex++;
           }

@@ -564,8 +564,7 @@ var LexisHomeView = class extends import_obsidian3.ItemView {
         cls: "lexis-retire-meta",
         text: this.plugin.t("home.candidateMeta", {
           created: candidate.created,
-          encounters: candidate.encounterCount,
-          hovers: candidate.hoverCount,
+          last: candidate.lastEncounter,
           occurrences: candidate.occCount,
           days: candidate.sinceLast
         })
@@ -799,7 +798,7 @@ var MESSAGES = {
   "home.retireThresholdDesc": { zh: "\u4E24\u9879\u5747\u8FBE\u5230\u6B64\u5929\u6570\u624D\u5165\u5217\u3002", en: "Both ages must reach this value." },
   "home.calculating": { zh: "\u8BA1\u7B97\u4E2D\u2026", en: "Calculating\u2026" },
   "home.noCandidates": { zh: "\u6682\u65E0\u5019\u9009", en: "No candidates" },
-  "home.candidateMeta": { zh: "\u5165\u5E93 {created} \xB7 \u76F8\u9047 {encounters} \u6B21\uFF08\u60AC\u505C {hovers}\uFF09\xB7 \u51FA\u5904 {occurrences} \u6761 \xB7 \u672A\u76F8\u9047 {days} \u5929", en: "Added {created} \xB7 {encounters} encounters ({hovers} hovers) \xB7 {occurrences} occurrences \xB7 unseen for {days} days" },
+  "home.candidateMeta": { zh: "\u5165\u5E93 {created} \xB7 \u6700\u8FD1\u4E3B\u52A8\u76F8\u9047 {last} \xB7 \u51FA\u5904 {occurrences} \u6761 \xB7 \u672A\u76F8\u9047 {days} \u5929", en: "Added {created} \xB7 Last active encounter {last} \xB7 {occurrences} occurrences \xB7 unseen for {days} days" },
   "home.evict": { zh: "\u6DD8\u6C70", en: "Retire" },
   "home.keep": { zh: "\u7559\u4E0B", en: "Keep" },
   "home.mastered": { zh: "\u5DF2\u638C\u63E1", en: "Mastered" },
@@ -979,7 +978,7 @@ var MESSAGES = {
   "settings.retireDaysDesc": { zh: "\u5165\u5E93\u4E0E\u672A\u76F8\u9047\u5747\u8FBE\u5230\u6B64\u5929\u6570\u3002", en: "Both added and unseen ages must reach this value." },
   "settings.dataStorage": { zh: "\u6570\u636E\u5B58\u50A8", en: "Data storage" },
   "settings.encounterFolder": { zh: "\u76F8\u9047\u8BB0\u5F55\u6587\u4EF6\u5939", en: "Encounter data folder" },
-  "settings.encounterFolderDesc": { zh: "\u4F7F\u7528\u4E13\u7528\u6587\u4EF6\u5939\uFF1B\u53EA\u6709\u70B9\u52FE\u624D\u5207\u6362\u3002\u53EA\u590D\u5236\u76F8\u9047\u8BB0\u5F55\uFF0C\u65E7\u526F\u672C\u4FDD\u7559\u3002", en: "Use a dedicated folder. Only the check button switches paths. Encounter records are copied; old copies remain." },
+  "settings.encounterFolderDesc": { zh: "\u4F7F\u7528\u4E13\u7528\u6587\u4EF6\u5939\uFF1B\u53EA\u6709\u70B9\u52FE\u624D\u79FB\u52A8\u76F8\u9047\u72B6\u6001\uFF0C\u539F\u4F4D\u7F6E\u4E0D\u4FDD\u7559\u526F\u672C\u3002", en: "Use a dedicated folder. Only the check button moves encounter state; no copy remains at the old path." },
   "settings.encounterFolderUndo": { zh: "\u8FD8\u539F\u672A\u786E\u8BA4\u7684\u8DEF\u5F84", en: "Discard the unconfirmed path" },
   "settings.encounterFolderConfirm": { zh: "\u786E\u8BA4\u5207\u6362\u76F8\u9047\u8BB0\u5F55\u6587\u4EF6\u5939", en: "Confirm encounter folder change" },
   "settings.pluginDataPath": { zh: "\u63D2\u4EF6\u8BBE\u7F6E\u4E0E\u590D\u4E60\u65E5\u5FD7", en: "Settings and review history" },
@@ -2384,7 +2383,7 @@ function createOccurrenceSearch(options) {
 
 // src/encounter-store.ts
 var DAY = /^\d{4}-\d{2}-\d{2}$/;
-var KINDS = /* @__PURE__ */ new Set(["hover", "add", "passive", "open"]);
+var DEVICE = /^[a-f0-9]{32}$/;
 function encounterFolder(input, configDir, pluginId) {
   const value = input.trim().replaceAll("\\", "/").replace(/\/+$/, "");
   if (!value) return `${configDir}/plugins/${pluginId}/encounters`;
@@ -2394,11 +2393,17 @@ function encounterFolder(input, configDir, pluginId) {
   }
   return value;
 }
-function applyEvent(totals, event) {
-  const entry = totals[event.path] || (totals[event.path] = { hoverCount: 0, encounterCount: 0, lastEncounter: "" });
-  entry.encounterCount++;
-  if (event.kind === "hover") entry.hoverCount++;
-  if (event.day > entry.lastEncounter) entry.lastEncounter = event.day;
+function validMutation(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const entry = value;
+  if (typeof entry.path !== "string" || !entry.path || !Number.isSafeInteger(entry.changedAt) || Number(entry.changedAt) <= 0) return false;
+  if (entry.deleted) return true;
+  return Number.isSafeInteger(entry.encounteredAt) && Number(entry.encounteredAt) > 0 && typeof entry.day === "string" && DAY.test(entry.day);
+}
+function newer(left, right) {
+  if (!left || right.changedAt > left.changedAt) return right;
+  if (right.changedAt < left.changedAt) return left;
+  return right.deleted && !left.deleted ? right : left;
 }
 async function ensureDirectory(adapter, folder) {
   let current = "";
@@ -2412,105 +2417,79 @@ var EncounterStore = class {
     this.adapter = adapter;
     this.folder = folder;
     this.deviceId = deviceId;
+    if (!DEVICE.test(deviceId)) throw new Error("Invalid encounter device ID");
+  }
+  snapshotPath(folder = this.folder, deviceId = this.deviceId) {
+    return `${folder}/${deviceId}.json`;
+  }
+  async readSnapshot(file) {
+    const raw = JSON.parse(await this.adapter.read(file));
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`Invalid Lexis encounter snapshot: ${file}`);
+    const snapshot = raw;
+    if (snapshot.schema !== 2 || typeof snapshot.deviceId !== "string" || !DEVICE.test(snapshot.deviceId) || !snapshot.entries || typeof snapshot.entries !== "object" || Array.isArray(snapshot.entries)) {
+      throw new Error(`Invalid Lexis encounter snapshot: ${file}`);
+    }
+    const entries = {};
+    for (const [path, value] of Object.entries(snapshot.entries)) {
+      if (validMutation(value) && value.path === path) entries[path] = value;
+    }
+    return { schema: 2, deviceId: snapshot.deviceId, entries };
+  }
+  async snapshots(folder = this.folder) {
+    if (!await this.adapter.exists(folder)) return [];
+    const root = await this.adapter.list(folder);
+    const output = [];
+    for (const file of root.files.filter((name) => /\/[a-f0-9]{32}\.json$/.test(name))) output.push(await this.readSnapshot(file));
+    return output;
   }
   async load() {
-    const totals = {};
-    if (!await this.adapter.exists(this.folder)) return totals;
-    const root = await this.adapter.list(this.folder);
-    const baselinePath = `${this.folder}/baseline.json`;
-    if (root.files.includes(baselinePath)) {
-      const raw = JSON.parse(await this.adapter.read(baselinePath));
-      if (!raw || typeof raw !== "object") throw new Error("Invalid Lexis encounter baseline");
-      const baseline = raw;
-      if (baseline.schema !== 1 || !baseline.entries || typeof baseline.entries !== "object" || Array.isArray(baseline.entries)) throw new Error("Invalid Lexis encounter baseline");
-      for (const [path, entry] of Object.entries(baseline.entries)) {
-        if (!path || !entry || !Number.isSafeInteger(entry.encounterCount) || entry.encounterCount < 0 || !Number.isSafeInteger(entry.hoverCount) || entry.hoverCount < 0 || entry.hoverCount > entry.encounterCount || entry.lastEncounter && !DAY.test(entry.lastEncounter)) continue;
-        totals[path] = { encounterCount: entry.encounterCount, hoverCount: entry.hoverCount, lastEncounter: entry.lastEncounter };
-      }
+    const latest = {};
+    for (const snapshot of await this.snapshots()) {
+      for (const [path, value] of Object.entries(snapshot.entries)) latest[path] = newer(latest[path], value);
     }
-    const seen = /* @__PURE__ */ new Set();
-    for (const deviceFolder of root.folders) {
-      if (!/\/[a-f0-9]{32}$/.test(deviceFolder)) continue;
-      const { files } = await this.adapter.list(deviceFolder);
-      for (const file of files) {
-        if (!/\/\d{4}-\d{2}-\d{2}\.jsonl$/.test(file)) continue;
-        const lines = (await this.adapter.read(file)).split("\n");
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          let event;
-          try {
-            event = JSON.parse(line);
-          } catch {
-            console.warn(`[Lexis] Invalid encounter event in ${file}`);
-            continue;
-          }
-          if (typeof event.id !== "string" || typeof event.path !== "string" || !event.path || !KINDS.has(event.kind) || !DAY.test(event.day) || seen.has(event.id)) continue;
-          seen.add(event.id);
-          applyEvent(totals, event);
-        }
-      }
+    const totals = {};
+    for (const [path, value] of Object.entries(latest)) {
+      if (!value.deleted) totals[path] = { lastEncounter: value.day, encounteredAt: value.encounteredAt };
     }
     return totals;
   }
-  async append(events) {
-    if (!events.length) return;
-    const folder = `${this.folder}/${this.deviceId}`;
-    await ensureDirectory(this.adapter, folder);
-    const byDay = /* @__PURE__ */ new Map();
-    for (const event of events) {
-      if (!DAY.test(event.day)) throw new Error("Invalid encounter date");
-      const lines = byDay.get(event.day) || [];
-      lines.push(JSON.stringify(event));
-      byDay.set(event.day, lines);
+  async apply(mutations) {
+    if (!mutations.length) return;
+    await ensureDirectory(this.adapter, this.folder);
+    const file = this.snapshotPath();
+    let entries = {};
+    if (await this.adapter.exists(file)) entries = (await this.readSnapshot(file)).entries;
+    for (const mutation of mutations) {
+      if (!validMutation(mutation)) throw new Error("Invalid encounter mutation");
+      entries[mutation.path] = newer(entries[mutation.path], mutation);
     }
-    for (const [day, lines] of byDay) {
-      const file = `${folder}/${day}.jsonl`;
-      const text = `${lines.join("\n")}
-`;
-      if (await this.adapter.exists(file)) await this.adapter.append(file, text);
-      else await this.adapter.write(file, text);
-    }
+    const snapshot = { schema: 2, deviceId: this.deviceId, entries };
+    await this.adapter.write(file, JSON.stringify(snapshot));
   }
   async copyTo(folder) {
     if (folder === this.folder || !await this.adapter.exists(this.folder)) return;
     await ensureDirectory(this.adapter, folder);
     const destination = await this.adapter.list(folder);
-    const otherFile = destination.files.find((file) => !/\/(baseline\.json|\.DS_Store)$/.test(file));
-    const otherFolder = destination.folders.find((item) => !/\/(?:[a-f0-9]{32}|legacy-backup)$/.test(item));
-    if (otherFile || otherFolder) throw new Error("Choose an empty folder dedicated to Lexis encounter records.");
-    const source = await this.adapter.list(this.folder);
-    const baseline = `${this.folder}/baseline.json`;
-    if (source.files.includes(baseline)) {
-      const target = `${folder}/baseline.json`;
-      if (await this.adapter.exists(target)) {
-        if (await this.adapter.read(target) !== await this.adapter.read(baseline)) throw new Error("The destination has a different encounter baseline.");
-      } else await this.adapter.copy(baseline, target);
-    }
-    for (const sourceFolder of source.folders.filter((item) => /\/[a-f0-9]{32}$/.test(item))) {
-      const targetFolder = folder + sourceFolder.slice(this.folder.length);
-      await ensureDirectory(this.adapter, targetFolder);
-      const { files } = await this.adapter.list(sourceFolder);
-      for (const file of files.filter((item) => /\/\d{4}-\d{2}-\d{2}\.jsonl$/.test(item))) {
-        const target = targetFolder + file.slice(sourceFolder.length);
-        if (!await this.adapter.exists(target)) {
-          await this.adapter.copy(file, target);
-          continue;
-        }
-        const existing = await this.adapter.read(target);
-        const incoming = await this.adapter.read(file);
-        if (existing === incoming) continue;
-        const ids = new Set(existing.split("\n").filter(Boolean).map((line) => JSON.parse(line).id));
-        const additional = incoming.split("\n").filter(Boolean).filter((line) => {
-          const id = JSON.parse(line).id;
-          if (typeof id !== "string" || !id) throw new Error("Invalid encounter event ID");
-          if (ids.has(id)) return false;
-          ids.add(id);
-          return true;
-        });
-        if (additional.length) await this.adapter.append(target, `${existing.endsWith("\n") ? "" : "\n"}${additional.join("\n")}
-`);
+    const unrelated = destination.files.find((file) => !/\/(?:[a-f0-9]{32}\.json|\.DS_Store)$/.test(file));
+    if (unrelated || destination.folders.length) throw new Error("Choose an empty folder dedicated to Lexis encounter records.");
+    for (const snapshot of await this.snapshots()) {
+      const target = this.snapshotPath(folder, snapshot.deviceId);
+      if (!await this.adapter.exists(target)) {
+        await this.adapter.write(target, JSON.stringify(snapshot));
+        continue;
       }
+      const current = await this.readSnapshot(target);
+      for (const [path, value] of Object.entries(snapshot.entries)) current.entries[path] = newer(current.entries[path], value);
+      await this.adapter.write(target, JSON.stringify(current));
     }
+  }
+  async clear() {
+    if (!await this.adapter.exists(this.folder)) return;
+    const root = await this.adapter.list(this.folder);
+    const unrelated = root.files.find((file) => !/\/(?:[a-f0-9]{32}\.json|\.DS_Store)$/.test(file));
+    if (unrelated || root.folders.length) throw new Error("Encounter folder contains unrelated data and was not removed.");
+    for (const file of root.files) await this.adapter.remove(file);
+    await this.adapter.rmdir(this.folder, false);
   }
 };
 
@@ -3018,19 +2997,9 @@ ${line}`);
         return { ok: false, error: errorMessage2(err) };
       }
     }
-    // 网页被动相遇:扩展按「词+当天」去重后批量报过来的 key 列表,这边再按同样的 (文件+当天) 去重记一次
-    // (两边都去重不是多余——扩展端只挡"同一页反复扫描",挡不住"今天换个 tab 又开了同一个页面")。
+    // 旧扩展仍会上报高亮扫描结果；保留端点兼容，但扫描不再算主动相遇。
     async bridgeEncounter(payload) {
-      const keys = Array.isArray(payload.keys) ? payload.keys : [];
-      let recorded = 0;
-      for (const k of keys) {
-        const e = this.index.get(this.resolveIndexKey(textValue(k)));
-        if (e && !e.inline && e.file instanceof TFile5) {
-          this.passiveEncounter(e.file);
-          recorded++;
-        }
-      }
-      return { ok: true, recorded };
+      return { ok: true, recorded: 0, ignored: Array.isArray(payload.keys) ? payload.keys.length : 0 };
     }
     bridgeWordList() {
       const words = [];
@@ -3893,7 +3862,6 @@ function createHighlightEngine({ Notice: Notice4, boundedSource: boundedSource2,
             continue;
           }
           const entry = this.index.get(key);
-          if (entry && !entry.inline) this.passiveEncounter(entry.file);
           const span = doc.body.createSpan();
           span.className = "lexis-hl";
           span.textContent = m[0];
@@ -3938,7 +3906,6 @@ function createHighlightEngine({ Notice: Notice4, boundedSource: boundedSource2,
               const start = from + match.index;
               const end = start + match[0].length;
               const entry = this.index.get(key);
-              if (entry && !entry.inline) this.passiveEncounter(entry.file);
               builder.add(start, end, import_view.Decoration.mark({ class: "lexis-hl", attributes: { "data-lexis-key": key, style: this.inlineStyleForEntry(entry) } }));
               if (match[0].length === 0) regex.lastIndex++;
             }
@@ -4348,7 +4315,6 @@ function createDocumentHighlights() {
       const scaleY = hlBB.height / (hl.offsetHeight || hlBB.height || 1);
       const items = [];
       for (const { key, entry, segments } of matches) {
-        if (!entry.inline) this.passiveEncounter(entry.file);
         try {
           const color = this.colorForEntry(entry);
           const styleKind = this.styleKindForEntry(entry);
@@ -7805,7 +7771,6 @@ var LexisPlugin = class extends import_obsidian9.Plugin {
     }
     this._encounterStore = new EncounterStore(this.app.vault.adapter, encounterFolder(this.settings.encounterFolder, this.app.vault.configDir, this.manifest.id), deviceId);
     this._encounterDedup = {};
-    this._passiveSeenToday = /* @__PURE__ */ new Set();
     this._pageHighlightState = /* @__PURE__ */ new WeakMap();
     this._reviewSessions = /* @__PURE__ */ new WeakMap();
     try {
@@ -7955,10 +7920,13 @@ var LexisPlugin = class extends import_obsidian9.Plugin {
       if (f instanceof import_obsidian9.TFile) this.maybeRebuild(f);
     }));
     this.registerEvent(this.app.vault.on("delete", (f) => {
-      if (f instanceof import_obsidian9.TFile) this.maybeRebuild(f);
+      if (!(f instanceof import_obsidian9.TFile)) return;
+      this.deleteEncounterPath(f.path);
+      this.maybeRebuild(f);
     }));
     this.registerEvent(this.app.vault.on("rename", (f, old) => {
       if (f instanceof import_obsidian9.TFile) {
+        this.renameEncounterPath(old, f.path);
         this.maybeRebuild(f, old);
         void this.migrateSyntaxCardPath(f, old);
       }
@@ -8394,7 +8362,7 @@ var LexisPlugin = class extends import_obsidian9.Plugin {
     });
     await this.rebuildIndex(false);
   }
-  // 相遇按设备、日期追加；插件只读取新格式。旧累计快照由独立脚本一次性转成 baseline.json。
+  // 每台设备只写自己的最新主动相遇状态；读取时按更新时间合并。
   async loadEncounters() {
     const revision = this._encRevision;
     const loaded = await this._encounterStore.load();
@@ -8435,8 +8403,9 @@ var LexisPlugin = class extends import_obsidian9.Plugin {
         void this.saveEncounters();
       }, 500);
     }
+    await previousStore.clear();
   }
-  // 同一词条与相遇类型在 60 秒内去重；文件路径避免不同词典的同名笔记混算。
+  // 只记录主动相遇；同一词条与相遇类型在 60 秒内去重。
   recordEncounter(file, type) {
     if (!(file instanceof import_obsidian9.TFile)) return;
     const k = file.path;
@@ -8446,28 +8415,38 @@ var LexisPlugin = class extends import_obsidian9.Plugin {
     const last = this._encounterDedup[dedupKey];
     if (last && now - last < 6e4) return;
     this._encounterDedup[dedupKey] = now;
-    const e = this._encounters[k] || (this._encounters[k] = { hoverCount: 0, encounterCount: 0, lastEncounter: "" });
-    e.encounterCount = (e.encounterCount || 0) + 1;
-    if (type === "hover") e.hoverCount = (e.hoverCount || 0) + 1;
-    e.lastEncounter = todayString();
+    const day = todayString();
+    this._encounters[k] = { lastEncounter: day, encounteredAt: now };
     this._encRevision++;
-    this._encPending.push({ id: crypto.randomUUID(), path: k, kind: type, day: e.lastEncounter, at: now });
-    if (!this._encRelocating) {
-      if (this._encSaveTimer) window.clearTimeout(this._encSaveTimer);
-      this._encSaveTimer = window.setTimeout(() => {
-        void this.saveEncounters();
-      }, 500);
-    }
+    this._encPending.push({ path: k, changedAt: now, encounteredAt: now, day });
+    this.scheduleEncounterSave();
   }
-  // 被动相遇(阶段 4):高亮装饰在打开的文件里实际渲染出来,就算词出现在你面前过一次——比悬停更弱的信号,
-  // 只证明"出现过",不证明"注意到了"。按「词+当天」去重,不是每次重渲染(滚动/切标签页/实时预览重算)都记一次。
-  // 这个检查要挂在高亮渲染的热路径上(每个匹配到的 span 都会过一遍),所以只用一次 Set.has,不做更重的事。
-  passiveEncounter(file) {
-    if (!(file instanceof import_obsidian9.TFile)) return;
-    const dayKey = file.path + "|" + todayString();
-    if (this._passiveSeenToday.has(dayKey)) return;
-    this._passiveSeenToday.add(dayKey);
-    this.recordEncounter(file, "passive");
+  deleteEncounterPath(path) {
+    const now = Date.now();
+    delete this._encounters[path];
+    this._encRevision++;
+    this._encPending.push({ path, changedAt: now, deleted: true });
+    this.scheduleEncounterSave();
+  }
+  renameEncounterPath(oldPath, newPath) {
+    if (oldPath === newPath) return;
+    const now = Date.now();
+    const prior = this._encounters[oldPath];
+    delete this._encounters[oldPath];
+    this._encRevision++;
+    this._encPending.push({ path: oldPath, changedAt: now, deleted: true });
+    if (prior) {
+      this._encounters[newPath] = prior;
+      this._encPending.push({ path: newPath, changedAt: now, encounteredAt: prior.encounteredAt, day: prior.lastEncounter });
+    }
+    this.scheduleEncounterSave();
+  }
+  scheduleEncounterSave() {
+    if (this._encRelocating) return;
+    if (this._encSaveTimer) window.clearTimeout(this._encSaveTimer);
+    this._encSaveTimer = window.setTimeout(() => {
+      void this.saveEncounters();
+    }, 500);
   }
   async saveEncounters() {
     this._encSaveTimer = 0;
@@ -8477,7 +8456,7 @@ var LexisPlugin = class extends import_obsidian9.Plugin {
       while (this._encPending.length) {
         const batch = this._encPending.splice(0);
         try {
-          await this._encounterStore.append(batch);
+          await this._encounterStore.apply(batch);
         } catch (error) {
           this._encPending.unshift(...batch);
           console.warn("[Lexis] Cannot save encounters; will retry", error);
@@ -8608,8 +8587,6 @@ var LexisPlugin = class extends import_obsidian9.Plugin {
         created,
         lastEncounter,
         sinceLast,
-        encounterCount: enc && enc.encounterCount || 0,
-        hoverCount: enc && enc.hoverCount || 0,
         occCount
       });
     }

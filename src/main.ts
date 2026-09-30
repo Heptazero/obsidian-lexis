@@ -19,7 +19,7 @@ import { createReviewView } from "./review-view";
 import { LexisLogView } from "./review-log-view";
 import { migrateReviewEvents } from "./review-log-data";
 import { createOccurrenceSearch } from "./occurrence-search";
-import { EncounterStore, encounterFolder, type EncounterEvent, type EncounterSummary } from "./encounter-store";
+import { EncounterStore, encounterFolder, type ActiveEncounterKind, type EncounterMutation, type EncounterSummary } from "./encounter-store";
 import { createBridgeServer } from "./bridge-server";
 import { createBridgeApi } from "./bridge-api";
 import { createHighlightEngine } from "./highlight-engine";
@@ -107,13 +107,12 @@ class LexisPlugin extends Plugin {
   declare _occCache: Map<string, Occurrence[]>;
   declare _encounters: Record<string, EncounterSummary>;
   declare _encounterStore: EncounterStore;
-  declare _encPending: EncounterEvent[];
+  declare _encPending: EncounterMutation[];
   declare _encWriting: Promise<void> | null;
   declare _encRevision: number;
   declare _encRelocating: boolean;
   declare _encSaveTimer: number;
   declare _encounterDedup: Record<string, number>;
-  declare _passiveSeenToday: Set<string>;
   declare _pageHighlightState: WeakMap<obsidian.WorkspaceLeaf, { key: string; hidden: boolean }>;
   declare _reviewSessions: WeakMap<object, unknown>;
   declare _workspaceDocuments: WorkspaceDocuments;
@@ -236,7 +235,6 @@ class LexisPlugin extends Plugin {
     }
     this._encounterStore = new EncounterStore(this.app.vault.adapter, encounterFolder(this.settings.encounterFolder, this.app.vault.configDir, this.manifest.id), deviceId);
     this._encounterDedup = {};
-    this._passiveSeenToday = new Set();
     this._pageHighlightState = new WeakMap();
     this._reviewSessions = new WeakMap();
     try { await this.loadEncounters(); }
@@ -383,9 +381,17 @@ class LexisPlugin extends Plugin {
       this.syncActivePageHighlightState();
     });
     this.registerEvent(this.app.vault.on("create", (f) => { if (f instanceof TFile) this.maybeRebuild(f); }));
-    this.registerEvent(this.app.vault.on("delete", (f) => { if (f instanceof TFile) this.maybeRebuild(f); }));
+    this.registerEvent(this.app.vault.on("delete", (f) => {
+      if (!(f instanceof TFile)) return;
+      this.deleteEncounterPath(f.path);
+      this.maybeRebuild(f);
+    }));
     this.registerEvent(this.app.vault.on("rename", (f, old) => {
-      if (f instanceof TFile) { this.maybeRebuild(f, old); void this.migrateSyntaxCardPath(f, old); }
+      if (f instanceof TFile) {
+        this.renameEncounterPath(old, f.path);
+        this.maybeRebuild(f, old);
+        void this.migrateSyntaxCardPath(f, old);
+      }
     }));
     this.registerEvent(this.app.vault.on("modify", (file) => {
       this._occCache.clear();
@@ -768,7 +774,7 @@ class LexisPlugin extends Plugin {
     await this.rebuildIndex(false);
   }
 
-  // 相遇按设备、日期追加；插件只读取新格式。旧累计快照由独立脚本一次性转成 baseline.json。
+  // 每台设备只写自己的最新主动相遇状态；读取时按更新时间合并。
   async loadEncounters() {
     const revision = this._encRevision;
     const loaded = await this._encounterStore.load();
@@ -804,9 +810,10 @@ class LexisPlugin extends Plugin {
       this._encRelocating = false;
       if (this._encPending.length) this._encSaveTimer = window.setTimeout(() => { void this.saveEncounters(); }, 500);
     }
+    await previousStore.clear();
   }
-  // 同一词条与相遇类型在 60 秒内去重；文件路径避免不同词典的同名笔记混算。
-  recordEncounter(file: TFile, type: "hover" | "add" | "passive" | "open"): void {
+  // 只记录主动相遇；同一词条与相遇类型在 60 秒内去重。
+  recordEncounter(file: TFile, type: ActiveEncounterKind): void {
     if (!(file instanceof TFile)) return;
     const k = file.path;
     const now = Date.now();
@@ -815,26 +822,36 @@ class LexisPlugin extends Plugin {
     const last = this._encounterDedup[dedupKey];
     if (last && now - last < 60000) return; // 60 秒内的重复相遇不重复计数
     this._encounterDedup[dedupKey] = now;
-    const e = this._encounters[k] || (this._encounters[k] = { hoverCount: 0, encounterCount: 0, lastEncounter: "" });
-    e.encounterCount = (e.encounterCount || 0) + 1;
-    if (type === "hover") e.hoverCount = (e.hoverCount || 0) + 1;
-    e.lastEncounter = todayStr();
+    const day = todayStr();
+    this._encounters[k] = { lastEncounter: day, encounteredAt: now };
     this._encRevision++;
-    this._encPending.push({ id: crypto.randomUUID(), path: k, kind: type, day: e.lastEncounter, at: now });
-    if (!this._encRelocating) {
-      if (this._encSaveTimer) window.clearTimeout(this._encSaveTimer);
-      this._encSaveTimer = window.setTimeout(() => { void this.saveEncounters(); }, 500);
-    }
+    this._encPending.push({ path: k, changedAt: now, encounteredAt: now, day });
+    this.scheduleEncounterSave();
   }
-  // 被动相遇(阶段 4):高亮装饰在打开的文件里实际渲染出来,就算词出现在你面前过一次——比悬停更弱的信号,
-  // 只证明"出现过",不证明"注意到了"。按「词+当天」去重,不是每次重渲染(滚动/切标签页/实时预览重算)都记一次。
-  // 这个检查要挂在高亮渲染的热路径上(每个匹配到的 span 都会过一遍),所以只用一次 Set.has,不做更重的事。
-  passiveEncounter(file: TFile): void {
-    if (!(file instanceof TFile)) return;
-    const dayKey = file.path + "|" + todayStr();
-    if (this._passiveSeenToday.has(dayKey)) return;
-    this._passiveSeenToday.add(dayKey);
-    this.recordEncounter(file, "passive");
+  deleteEncounterPath(path: string): void {
+    const now = Date.now();
+    delete this._encounters[path];
+    this._encRevision++;
+    this._encPending.push({ path, changedAt: now, deleted: true });
+    this.scheduleEncounterSave();
+  }
+  renameEncounterPath(oldPath: string, newPath: string): void {
+    if (oldPath === newPath) return;
+    const now = Date.now();
+    const prior = this._encounters[oldPath];
+    delete this._encounters[oldPath];
+    this._encRevision++;
+    this._encPending.push({ path: oldPath, changedAt: now, deleted: true });
+    if (prior) {
+      this._encounters[newPath] = prior;
+      this._encPending.push({ path: newPath, changedAt: now, encounteredAt: prior.encounteredAt, day: prior.lastEncounter });
+    }
+    this.scheduleEncounterSave();
+  }
+  scheduleEncounterSave(): void {
+    if (this._encRelocating) return;
+    if (this._encSaveTimer) window.clearTimeout(this._encSaveTimer);
+    this._encSaveTimer = window.setTimeout(() => { void this.saveEncounters(); }, 500);
   }
   async saveEncounters() {
     this._encSaveTimer = 0;
@@ -843,7 +860,7 @@ class LexisPlugin extends Plugin {
     this._encWriting = (async () => {
       while (this._encPending.length) {
         const batch = this._encPending.splice(0);
-        try { await this._encounterStore.append(batch); }
+        try { await this._encounterStore.apply(batch); }
         catch (error) {
           this._encPending.unshift(...batch);
           console.warn("[Lexis] Cannot save encounters; will retry", error);
@@ -947,8 +964,6 @@ class LexisPlugin extends Plugin {
       try { occCount = (await this.findOccurrences(f.basename)).length; } catch { /* An unavailable source index counts as zero occurrences. */ }
       out.push({
         file: f, display: f.basename, created, lastEncounter, sinceLast,
-        encounterCount: (enc && enc.encounterCount) || 0,
-        hoverCount: (enc && enc.hoverCount) || 0,
         occCount,
       });
     }

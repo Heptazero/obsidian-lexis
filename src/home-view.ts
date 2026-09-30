@@ -10,8 +10,6 @@ export interface RetireCandidate {
   display: string;
   created: string;
   lastEncounter: string;
-  encounterCount: number;
-  hoverCount: number;
   occCount: number;
   sinceLast: number;
 }
@@ -393,8 +391,7 @@ export class LexisHomeView extends ItemView {
         cls: "lexis-retire-meta",
         text: this.plugin.t("home.candidateMeta", {
           created: candidate.created,
-          encounters: candidate.encounterCount,
-          hovers: candidate.hoverCount,
+          last: candidate.lastEncounter,
           occurrences: candidate.occCount,
           days: candidate.sinceLast,
         }),

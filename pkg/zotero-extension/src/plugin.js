@@ -4,8 +4,6 @@
   function createPlugin({ id, version, rootURI, cardCSS, readerCSS }) {
     const controllers = new Map();
     const preferenceObservers = [];
-    const encounterQueue = new Set();
-    let encounterTimer = null;
     let syncTimer = null;
     let index = new ns.WordIndex();
 
@@ -52,15 +50,6 @@
       catch (_error) { return new Set(); }
     }
 
-    function queueEncounter(key) {
-      encounterQueue.add(key);
-      clearTimeout(encounterTimer);
-      encounterTimer = setTimeout(async () => {
-        const keys = [...encounterQueue]; encounterQueue.clear();
-        await bridge.encounter(keys);
-      }, 1600);
-    }
-
     function ensureReader(reader) {
       if (!enabled() || !reader || (reader.type !== "pdf" && reader._type !== "pdf")) return null;
       let controller = controllers.get(reader);
@@ -72,7 +61,7 @@
           cardCSS,
           readerCSS,
           disabledDicts,
-          onEncounter: queueEncounter,
+          onEncounter: null,
           onDispose(disposedReader) {
             const current = controllers.get(disposedReader);
             if (!current) return;
@@ -138,8 +127,6 @@
 
       async shutdown() {
         clearInterval(syncTimer);
-        clearTimeout(encounterTimer);
-        if (encounterQueue.size) await bridge.encounter([...encounterQueue]);
         stopReaders();
         for (const observer of preferenceObservers) Zotero.Prefs.unregisterObserver(observer);
         preferenceObservers.length = 0;

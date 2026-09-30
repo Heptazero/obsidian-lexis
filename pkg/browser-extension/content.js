@@ -300,25 +300,6 @@
     return false;
   }
 
-  // ---- 被动相遇:页面上扫到高亮词就算"出现过一次",按"词+当天"去重,批量报给桥接(不追踪停留时长/滚动) ----
-  const passiveSeen = new Set(); // 本页会话内已经报过的词(word|日期),同一页反复重扫/滚动不会重复发
-  let passiveQueue = new Set();
-  let passiveTimer = null;
-  function queuePassiveEncounter(key) {
-    const dayKey = key + "|" + new Date().toISOString().slice(0, 10);
-    if (passiveSeen.has(dayKey)) return;
-    passiveSeen.add(dayKey);
-    passiveQueue.add(key);
-    clearTimeout(passiveTimer);
-    passiveTimer = setTimeout(flushPassiveEncounters, 2000);
-  }
-  async function flushPassiveEncounters() {
-    if (!passiveQueue.size) return;
-    const keys = [...passiveQueue];
-    passiveQueue = new Set();
-    try { await chrome.runtime.sendMessage({ type: "encounter", payload: { keys } }); } catch (_e) {}
-  }
-
   function wrap(textNode) {
     const text = textNode.nodeValue;
     regex.lastIndex = 0;
@@ -328,7 +309,6 @@
       const key = resolveMatchKey(m[0]);
       if (!keySet.has(key)) continue;
       found = true;
-      queuePassiveEncounter(key);
       if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
       const span = document.createElement("span");
       span.className = HL;

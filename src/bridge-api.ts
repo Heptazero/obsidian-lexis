@@ -58,7 +58,6 @@ interface BridgeApiHost {
   templateForFolder(folder: string): Promise<string | null>;
   minimalSkeleton(): string;
   createEntryFile(path: string, folder: string, fallbackContent: string, transform: (content: string) => string): Promise<ObsidianTFile>;
-  passiveEncounter(file: ObsidianTFile): void;
   parseTags(value: string): string[];
   colorForEntry(entry: LexisEntry): string;
   highlightAlphaForEntry(entry: LexisEntry): number;
@@ -110,7 +109,6 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, recentR
   declare templateForFolder: BridgeApiHost["templateForFolder"];
   declare minimalSkeleton: BridgeApiHost["minimalSkeleton"];
   declare createEntryFile: BridgeApiHost["createEntryFile"];
-  declare passiveEncounter: BridgeApiHost["passiveEncounter"];
   declare parseTags: BridgeApiHost["parseTags"];
   declare colorForEntry: BridgeApiHost["colorForEntry"];
   declare highlightAlphaForEntry: BridgeApiHost["highlightAlphaForEntry"];
@@ -423,16 +421,9 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, recentR
       return { ok: true, key, file: target, folder, moved: true, reTemplated };
     } catch (err) { return { ok: false, error: errorMessage(err) }; }
   }
-  // 网页被动相遇:扩展按「词+当天」去重后批量报过来的 key 列表,这边再按同样的 (文件+当天) 去重记一次
-  // (两边都去重不是多余——扩展端只挡"同一页反复扫描",挡不住"今天换个 tab 又开了同一个页面")。
+  // 旧扩展仍会上报高亮扫描结果；保留端点兼容，但扫描不再算主动相遇。
   async bridgeEncounter(payload: BridgePayload) {
-    const keys: unknown[] = Array.isArray(payload.keys) ? payload.keys : [];
-    let recorded = 0;
-    for (const k of keys) {
-      const e = this.index.get(this.resolveIndexKey(textValue(k)));
-      if (e && !e.inline && e.file instanceof TFile) { this.passiveEncounter(e.file); recorded++; }
-    }
-    return { ok: true, recorded };
+    return { ok: true, recorded: 0, ignored: Array.isArray(payload.keys) ? payload.keys.length : 0 };
   }
   bridgeWordList() {
     const words = [];
