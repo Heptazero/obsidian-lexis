@@ -28,5 +28,11 @@ export default defineConfig(
       },
     },
   },
+  {
+    files: ["src/**/*.ts"],
+    rules: {
+      "max-lines": ["error", { max: 500, skipBlankLines: false, skipComments: false }],
+    },
+  },
   ...obsidianmd.configs.recommended,
 );

@@ -2,11 +2,15 @@
 
 import type { App, ColorComponent, MetadataCache, Plugin, Setting, SettingDefinitionItem, View } from "obsidian";
 import type { TranslationVars } from "./i18n";
-import type { HighlightStyle, InlineCategoryOccurrence, LexisSettings, LexisStats } from "./types";
+import type { InlineCategoryOccurrence, LexisSettings, LexisStats } from "./types";
+import { renderHighlightSettings } from "./settings-highlight-section";
+import { renderInlineSettings } from "./settings-inline-section";
+import { createPathSuggest } from "./settings-suggest";
+import { renderStorageSettings } from "./settings-storage-section";
 import { addSelectionPillPosition } from "./settings-selection-pill";
 import { orderedSectionKeys } from "./settings-section-order";
 
-interface SettingsRuntime extends Plugin {
+export interface SettingsRuntime extends Plugin {
   settings: LexisSettings;
   stats: LexisStats;
   inlineCategoryOccurrences: InlineCategoryOccurrence[];
@@ -51,20 +55,6 @@ interface SettingsTabDependencies {
   LEXIS_REVIEW_VIEW: string;
 }
 
-interface SuggestOptions {
-  multi?: boolean;
-  sep?: string;
-}
-
-interface InlineGroup {
-  id: string;
-  key: string;
-  name: string;
-  count: number;
-  children: InlineCategoryOccurrence[];
-}
-
-type AppWithSettingsModal = App & { setting?: { close(): void } };
 type RenderableView = View & { render?: () => void };
 type MetadataCacheWithSuggestions = MetadataCache & {
   getTags?: () => Record<string, number>;
@@ -72,61 +62,7 @@ type MetadataCacheWithSuggestions = MetadataCache & {
 };
 
 const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolder, DEFAULT_SETTINGS, cssColorToHex, addAppearanceButton, createReorderController, moveItem, LEXIS_HOME_VIEW, LEXIS_REVIEW_VIEW }: SettingsTabDependencies) => {
-  // 输入时模糊匹配建议。AbstractInputSuggest 在 Obsidian 1.0+ 运行时可用;
-  // 缺失时 `|| class {}` 避免 extends undefined 报错,且调用处会跳过实例化。
-  // opts.multi=true 时按最后一个分隔符后的"活动 token"匹配,选中后追加(用于逗号/空格分隔的标签/属性多值字段)。
-  class PathSuggest extends obsidian.AbstractInputSuggest<string> {
-    getItems: () => string[];
-    onPick: (value: string) => void;
-    multi: boolean;
-    sep: string;
-    inputEl: HTMLInputElement;
-
-    constructor(app: App, inputEl: HTMLInputElement, getItems: () => string[], onPick: (value: string) => void, opts: SuggestOptions = {}) {
-      super(app, inputEl);
-      this.inputEl = inputEl;
-      this.getItems = getItems;
-      this.onPick = onPick;
-      this.multi = !!(opts && opts.multi);
-      this.sep = (opts && opts.sep) || " ";
-    }
-    _split() {
-      const v = (this.inputEl && this.inputEl.value) || "";
-      const m = v.match(/[^\s,，;；]*$/);
-      const token = m ? m[0] : "";
-      return { before: v.slice(0, v.length - token.length), token };
-    }
-    getSuggestions(query: string): string[] {
-      let items = this.getItems();
-      let q: string;
-      if (this.multi) {
-        const { token } = this._split();
-        q = token.toLowerCase();
-        const chosen = new Set(((this.inputEl && this.inputEl.value) || "").toLowerCase().split(/[\s,，;；]+/).filter(Boolean));
-        items = items.filter((p) => p.toLowerCase() === token.toLowerCase() || !chosen.has(p.toLowerCase()));
-      } else {
-        q = (query || "").toLowerCase();
-      }
-      return items.filter((p) => p.toLowerCase().includes(q)).slice(0, 50);
-    }
-    renderSuggestion(value: string, el: HTMLElement) { el.setText(value); }
-    selectSuggestion(value: string) {
-      if (this.multi) {
-        // 多值:把选中项追加到当前列表后,重新触发建议(列表保持打开),可以接着选下一个
-        const { before } = this._split();
-        const out = before + value + this.sep;
-        if (this.inputEl) this.inputEl.value = out;
-        if (this.onPick) this.onPick(out);
-        if (typeof this.setValue === "function") this.setValue(out); // 触发 input 事件,刷新并保持下拉
-        if (this.inputEl) this.inputEl.focus();
-        return;
-      }
-      if (typeof this.setValue === "function") this.setValue(value);
-      if (this.inputEl) this.inputEl.value = value;
-      if (typeof this.close === "function") this.close();
-      if (this.onPick) this.onPick(value);
-    }
-  }
+  const PathSuggest = createPathSuggest(obsidian);
 
   return class LexisSettingTab extends PluginSettingTab {
     declare plugin: SettingsRuntime;
@@ -213,61 +149,9 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
         return [];
       })();
       const defaultEncounterFolder = `${this.app.vault.configDir}/plugins/${this.plugin.manifest.id}/encounters`;
-      const dataSection = topSection("data", t("settings.dataStorage"), { open: true });
-      dataSection.addClass("lexis-data-section");
-      const encounterFolderSetting = new Setting(dataSection).setName(t("settings.encounterFolder")).setDesc(t("settings.encounterFolderDesc"));
-      encounterFolderSetting.settingEl.addClass("lexis-data-path-setting");
-      const savedEncounterFolder = () => this.plugin.settings.encounterFolder || defaultEncounterFolder;
-      const folderInput = new obsidian.TextComponent(encounterFolderSetting.controlEl).setValue(savedEncounterFolder());
-      const undoFolder = new obsidian.ExtraButtonComponent(encounterFolderSetting.controlEl).setIcon("undo").setTooltip(t("settings.encounterFolderUndo"));
-      const confirmFolder = new obsidian.ExtraButtonComponent(encounterFolderSetting.controlEl).setIcon("check").setTooltip(t("settings.encounterFolderConfirm"));
-      let switchingFolder = false;
-      const refreshFolderActions = () => {
-        const changed = folderInput.getValue().trim() !== savedEncounterFolder();
-        undoFolder.setDisabled(!changed || switchingFolder);
-        confirmFolder.setDisabled(!changed || switchingFolder);
-      };
-      folderInput.onChange(refreshFolderActions);
-      folderInput.inputEl.addEventListener("keydown", (event) => { if (event.key === "Enter") event.preventDefault(); });
-      undoFolder.onClick(() => { folderInput.setValue(savedEncounterFolder()); refreshFolderActions(); });
-      confirmFolder.onClick(() => { void (async () => {
-        if (switchingFolder || folderInput.getValue().trim() === savedEncounterFolder()) return;
-        switchingFolder = true;
-        refreshFolderActions();
-        try {
-          const value = folderInput.getValue().trim();
-          await this.plugin.setEncounterFolder(value === defaultEncounterFolder ? "" : value);
-          folderInput.setValue(savedEncounterFolder());
-          new Notice(t("settings.encounterFolderSaved"));
-        } catch (error) {
-          new Notice(t("settings.encounterFolderError", { error: error instanceof Error ? error.message : typeof error === "string" ? error : "Unknown error" }));
-        } finally { switchingFolder = false; refreshFolderActions(); }
-      })(); });
-      if (hasSuggest) new PathSuggest(this.app, folderInput.inputEl, () => folders, (value) => { folderInput.setValue(value); refreshFolderActions(); });
-      refreshFolderActions();
-      new Setting(dataSection).setName(t("settings.pluginDataPath"))
-        .setDesc(t("settings.pluginDataPathDesc", { path: `${this.app.vault.configDir}/plugins/${this.plugin.manifest.id}/data.json` }));
-
-      const mobileSection = topSection("mobile", t("settings.mobileInteractions"), { desc: t("settings.mobileSectionDesc") });
-      new Setting(mobileSection).setName(t("settings.mobileTapAction")).setDesc(t("settings.mobileTapDesc"))
-        .addDropdown((dropdown) => dropdown
-          .addOption("popover", t("settings.mobileTapPopover"))
-          .addOption("open", t("settings.mobileTapOpen"))
-          .setValue(this.plugin.settings.mobileTapAction)
-          .onChange(async (value) => { this.plugin.settings.mobileTapAction = value as LexisSettings["mobileTapAction"]; await save(); }));
-      new Setting(mobileSection).setName(t("settings.ratingOffset")).setDesc(t("settings.ratingOffsetDesc"))
-        .addSlider((s) => s
-          .setLimits(0, 200, 5)
-          .setValue(this.plugin.settings.reviewBottomSpace)
-          .setInstant(true)
-          .setDisplayFormat((value) => `${value}px`)
-          .onChange(async (value) => {
-            this.plugin.settings.reviewBottomSpace = value;
-            this.app.workspace.containerEl.ownerDocument
-              .querySelectorAll<HTMLElement>('.workspace-leaf-content[data-type="lexis-review-view"]')
-              .forEach((view) => view.setCssProps({ "--lexis-review-bottom-space": `${value}px` }));
-            await save();
-          }));
+      renderStorageSettings.call(this, {
+        obsidian, Setting, Notice, PathSuggest, topSection, t, save, folders, hasSuggest, defaultEncounterFolder,
+      });
 
       const dictSection = topSection("dictionary", t("settings.dictionary"), { open: true });
       const dictHeading = new Setting(dictSection).setDesc(t("settings.dictionaryDesc")).setHeading();
@@ -375,276 +259,15 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
           if (hasSuggest) new PathSuggest(this.app, t.inputEl, () => allProps, (v) => { t.setValue(v); void apply(v); }, { multi: true, sep: "," });
         });
 
-      const inlineSection = topSection("inline", t("settings.inline"), { desc: t("settings.inlineDesc") });
-      new Setting(inlineSection).setName(t("settings.enableInline")).setDesc(t("settings.enableInlineDesc"))
-        .addToggle((t) => t.setValue(this.plugin.settings.inlineEntriesEnabled).onChange(async (v) => { this.plugin.settings.inlineEntriesEnabled = v; await save(); await this.plugin.rebuildIndex(false); this.renderStats(); }));
-      new Setting(inlineSection).setName(t("settings.inlineDelimiter")).setDesc(t("settings.inlineDelimiterDesc"))
-        .addText((t) => t.setPlaceholder("::").setValue(this.plugin.inlineDelimiter()).onChange(async (v) => { this.plugin.settings.inlineEntryDelimiter = (v || "").trim() || "::"; await save(); await this.plugin.rebuildIndex(false); this.renderStats(); }));
-      new Setting(inlineSection).setName(t("settings.inlineClassification")).setDesc(t("settings.inlineClassificationDesc"))
-        .addDropdown((dropdown) => dropdown
-          .addOption("heading", t("settings.classifyByHeading"))
-          .addOption("file", t("settings.classifyByFile"))
-          .setValue(this.plugin.settings.inlineClassificationMode)
-          .onChange(async (mode) => { this.plugin.settings.inlineClassificationMode = mode === "file" ? "file" : "heading"; await save(); renderCategoryColors(); refresh(); }))
-        .addExtraButton((button) => button.setIcon("refresh-cw").setTooltip(t("settings.refreshCategories")).onClick(async () => { await this.plugin.rebuildIndex(false); renderCategoryColors(); this.renderStats(); }));
-      const categoryColorsWrap = inlineSection.createDiv({ cls: "lexis-inline-tree" });
-      const openInlineHeading = async (node: InlineCategoryOccurrence) => {
-        (this.app as AppWithSettingsModal).setting?.close();
-        const leaf = this.app.workspace.getLeaf(false);
-        await leaf.openFile(node.file, { active: true });
-        await this.app.workspace.revealLeaf(leaf);
-        const reveal = () => {
-          const editor = leaf.view instanceof obsidian.MarkdownView ? leaf.view.editor : null;
-          if (!editor) return;
-          const position = { line: node.line, ch: 0 };
-          editor.setCursor(position);
-          editor.scrollIntoView({ from: position, to: position }, true);
-        };
-        reveal();
-        window.setTimeout(reveal, 60);
-      };
-      const renderCategoryColors = () => {
-        categoryColorsWrap.empty();
-        const occurrences = this.plugin.inlineCategoryOccurrences || [];
-        if (!occurrences.length) {
-          categoryColorsWrap.createEl("p", { cls: "setting-item-description", text: t("settings.noInlineCategories") });
-          return;
-        }
-        const mode = this.plugin.settings.inlineClassificationMode === "file" ? "file" : "heading";
-        const groupMap = new Map<string, InlineGroup>();
-        for (const node of occurrences) {
-          const key = mode === "file" ? node.file.path : node.name;
-          let group = groupMap.get(key);
-          if (!group) {
-            group = {
-              id: `${mode}:${key}`,
-              key,
-              name: mode === "file" ? node.file.basename : node.name,
-              count: 0,
-              children: [],
-            };
-            groupMap.set(key, group);
-          }
-          group.count += node.count;
-          group.children.push(node);
-        }
-        const parentOrder = mode === "file" ? this.plugin.settings.inlineFileOrder : this.plugin.settings.inlineCategoryOrder;
-        const parentRank = new Map(parentOrder.map((key, index) => [key, index]));
-        let groups = [...groupMap.values()].sort((a, b) => {
-          const ar = parentRank.has(a.key) ? parentRank.get(a.key) : Number.MAX_SAFE_INTEGER;
-          const br = parentRank.has(b.key) ? parentRank.get(b.key) : Number.MAX_SAFE_INTEGER;
-          return ar - br || a.name.localeCompare(b.name);
-        });
-        for (const group of groups) {
-          const childRank = new Map((this.plugin.settings.inlineCategoryOrderByParent[group.id] || []).map((id, index) => [id, index]));
-          group.children.sort((a, b) => {
-            const ar = childRank.has(a.id) ? childRank.get(a.id) : Number.MAX_SAFE_INTEGER;
-            const br = childRank.has(b.id) ? childRank.get(b.id) : Number.MAX_SAFE_INTEGER;
-            const aLabel = mode === "file" ? a.name : a.file.path;
-            const bLabel = mode === "file" ? b.name : b.file.path;
-            return ar - br || aLabel.localeCompare(bLabel) || a.line - b.line;
-          });
-        }
-        const colors = mode === "file" ? this.plugin.settings.inlineFileColors : this.plugin.settings.inlineCategoryColors;
-        const opacities = mode === "file" ? this.plugin.settings.inlineFileOpacity : this.plugin.settings.inlineCategoryOpacity;
-        const visibility = mode === "file" ? this.plugin.settings.inlineFileHighlight : this.plugin.settings.inlineCategoryHighlight;
-        const sourceVisibility = this.plugin.settings.inlineSourceHighlight;
-        const collapsed = this.plugin.settings.inlineCollapsedGroups;
-        const rootReorder = createReorderController({
-          container: categoryColorsWrap,
-          setIcon: obsidian.setIcon,
-          label: t("settings.reorder"),
-          onMove: async (from, to) => {
-            groups = moveItem(groups, from, to);
-            if (mode === "file") this.plugin.settings.inlineFileOrder = groups.map(({ key }) => key);
-            else this.plugin.settings.inlineCategoryOrder = groups.map(({ key }) => key);
-            await save();
-            renderCategoryColors();
-          },
-        });
-        groups.forEach((group, groupIndex) => {
-          const enabled = visibility[group.key] !== false;
-          const details = categoryColorsWrap.createEl("details", { cls: "lexis-inline-group" });
-          details.open = collapsed[group.id] !== true;
-          details.addEventListener("toggle", () => { void (async () => { collapsed[group.id] = !details.open; await save(); })(); });
-          const summary = details.createEl("summary", { cls: "lexis-setting-row lexis-inline-group-row" });
-          const chevron = summary.createSpan({ cls: "lexis-inline-chevron" });
-          obsidian.setIcon(chevron, "chevron-right");
-          summary.createSpan({ cls: "lexis-inline-group-name", text: group.name, attr: { title: group.key } });
-          const parentControls = summary.createDiv({ cls: "lexis-inline-category-controls" });
-          parentControls.addEventListener("click", (event) => event.stopPropagation());
-          const countLabel = t("settings.entryCount", { count: group.count });
-          parentControls.createSpan({ cls: "lexis-inline-count", text: countLabel, attr: { title: countLabel } });
-          new obsidian.ToggleComponent(parentControls).setTooltip(t("settings.showGroupHighlight")).setValue(enabled)
-            .onChange(async (value) => { visibility[group.key] = value; await save(); refresh(); renderCategoryColors(); });
-          addAppearanceButton({
-            app: this.app,
-            obsidian,
-            parent: parentControls,
-            title: t("settings.categoryAppearance", { name: group.name }),
-            labels: appearanceLabels,
-            state: () => ({
-              color: colors[group.key] || accentHex,
-              opacity: Number(Object.prototype.hasOwnProperty.call(opacities, group.key) ? opacities[group.key] : this.plugin.settings.highlightOpacity),
-            }),
-            onChange: async (patch) => { if (patch.color != null) colors[group.key] = patch.color; if (patch.opacity != null) opacities[group.key] = patch.opacity; await save(); refresh(); },
-            onReset: async () => { delete colors[group.key]; delete opacities[group.key]; await save(); refresh(); },
-          });
-          rootReorder.attach(details, groupIndex, { handleParent: summary });
-
-          const childrenEl = details.createDiv({ cls: "lexis-inline-siblings lexis-inline-group-children" });
-          const childReorder = createReorderController({
-            container: childrenEl,
-            setIcon: obsidian.setIcon,
-            label: t("settings.reorder"),
-            onMove: async (from, to) => {
-              group.children = moveItem(group.children, from, to);
-              this.plugin.settings.inlineCategoryOrderByParent[group.id] = group.children.map(({ id }) => id);
-              await save();
-              renderCategoryColors();
-            },
-          });
-          group.children.forEach((node, childIndex) => {
-            const row = childrenEl.createDiv({ cls: `lexis-setting-row lexis-inline-category-row${enabled ? "" : " is-disabled"}` });
-            const label = mode === "file" ? node.name : node.file.basename;
-            const link = row.createEl("button", {
-              cls: "lexis-inline-category-link",
-              text: label,
-              attr: { type: "button", title: `${node.file.path}:${node.line + 1}` },
-            });
-            link.addEventListener("click", () => { void openInlineHeading(node); });
-            const childControls = row.createDiv({ cls: "lexis-inline-category-controls" });
-            const childCount = t("settings.entryCount", { count: node.count });
-            childControls.createSpan({ cls: "lexis-inline-count", text: childCount, attr: { title: childCount } });
-            new obsidian.ToggleComponent(childControls).setTooltip(t("settings.showSubsetHighlight"))
-              .setValue(sourceVisibility[node.id] !== false).setDisabled(!enabled)
-              .onChange(async (value) => { sourceVisibility[node.id] = value; await save(); refresh(); });
-            childReorder.attach(row, childIndex);
-          });
-        });
-      };
-      renderCategoryColors();
-
-      const hlSection = topSection("highlight", t("settings.highlight"));
-      const highlightSwitch = new Setting(hlSection).setName(t("settings.enableHighlight")).setDesc(t("settings.enableHighlightDesc"));
-      const highlightOptions = hlSection.createEl("fieldset", { cls: "lexis-highlight-options" });
-      const syncHighlightOptions = () => {
-        highlightOptions.disabled = !this.plugin.settings.enableHighlight;
-        highlightOptions.toggleClass("is-disabled", !this.plugin.settings.enableHighlight);
-      };
-      syncHighlightOptions();
-      highlightSwitch.addToggle((toggle) => toggle.setValue(this.plugin.settings.enableHighlight).onChange(async (v) => {
-        this.plugin.settings.enableHighlight = v;
-        syncHighlightOptions();
-        if (v && this.plugin.settings.enablePdfHighlight) this.plugin.setupPdfHighlight();
-        else this.plugin.teardownPdfHighlight();
-        await save();
-        refresh();
-      }));
-      const scopeGroup = highlightOptions.createDiv({ cls: "lexis-settings-subgroup" });
-      scopeGroup.createDiv({ cls: "lexis-settings-subheading", text: t("settings.highlightScope") });
-      new Setting(scopeGroup).setName(t("settings.livePreview")).setDesc(this.plugin.liveAvailable ? "" : t("settings.unsupported"))
-        .addToggle((t) => t.setValue(this.plugin.settings.enableLivePreview).setDisabled(!this.plugin.liveAvailable).onChange(async (v) => { this.plugin.settings.enableLivePreview = v; await save(); refresh(); }));
-      new Setting(scopeGroup).setName(t("settings.pdfHighlight")).setDesc(t("settings.pdfHighlightDesc"))
-        .addToggle((t) => t.setValue(this.plugin.settings.enablePdfHighlight).onChange(async (v) => { this.plugin.settings.enablePdfHighlight = v; await save(); if (v) this.plugin.setupPdfHighlight(); else { this.plugin.teardownPdfHighlight(); this.plugin.rescanPdfLayers(); } }));
-      const styleGroup = highlightOptions.createDiv({ cls: "lexis-settings-subgroup" });
-      styleGroup.createDiv({ cls: "lexis-settings-subheading", text: t("settings.highlightAppearance") });
-      new Setting(styleGroup).setName(t("settings.highlightStyle"))
-        .addDropdown((dd) => dd.addOption("wavy", t("settings.wavy")).addOption("underline", t("settings.underline")).addOption("background", t("settings.background")).setValue(this.plugin.settings.highlightStyle).onChange(async (v) => { this.plugin.settings.highlightStyle = ["wavy", "underline", "background"].includes(v) ? v as HighlightStyle : "wavy"; await save(); refresh(); }));
-      new Setting(styleGroup).setName(t("settings.highlightColor"))
-        .addColorPicker((cp) => { this._colorComp = cp; cp.setValue(this.plugin.settings.highlightColor || accentHex).onChange(async (v) => { this.plugin.settings.highlightColor = v; await save(); refresh(); }); })
-        .addExtraButton((b) => b.setIcon("reset").setTooltip(t("settings.resetTheme")).onClick(async () => { this.plugin.settings.highlightColor = ""; this._colorComp?.setValue(accentHex); await save(); refresh(); }));
-      new Setting(styleGroup).setName(t("settings.opacity"))
-        .addSlider((s) => s.setLimits(0.1, 1, 0.05).setValue(this.plugin.settings.highlightOpacity).onChange(async (v) => { this.plugin.settings.highlightOpacity = v; await save(); refresh(); }));
-      new Setting(styleGroup).setName(t("settings.fade")).setDesc(t("settings.fadeDesc"))
-        .addToggle((t) => t.setValue(this.plugin.settings.fadeByMemory).onChange(async (v) => { this.plugin.settings.fadeByMemory = v; await save(); refresh(); }));
-      new Setting(styleGroup).setName(t("settings.fadeFloor"))
-        .addSlider((s) => s.setLimits(0, 0.9, 0.05).setValue(this.plugin.settings.fadeFloor).onChange(async (v) => { this.plugin.settings.fadeFloor = v; await save(); refresh(); }));
-      const rulesGroup = highlightOptions.createDiv({ cls: "lexis-settings-subgroup" });
-      rulesGroup.createDiv({ cls: "lexis-settings-subheading", text: t("settings.highlightRules") });
-      const excludeSetting = new Setting(rulesGroup).setName(t("settings.excludeTags")).setDesc(t("settings.excludeTagsDesc"));
-      excludeSetting.settingEl.addClass("lexis-tags-setting");
-      const excludeEditor = excludeSetting.controlEl.createDiv({ cls: "lexis-tag-editor" });
-      const excludeChips = excludeEditor.createDiv({ cls: "lexis-tag-editor-chips" });
-      const excludeAdd = excludeEditor.createDiv({ cls: "lexis-tag-editor-add" });
-      const excludeInput = new obsidian.TextComponent(excludeAdd).setPlaceholder(t("settings.addExcludedTag"));
-      const excludedTags = () => [...new Set(this.plugin.parseTags(this.plugin.settings.excludeTags))];
-      const saveExcludedTags = async (tags: string[]) => {
-        this.plugin.settings.excludeTags = tags.join(" ");
-        await save();
-        await this.plugin.rebuildIndex(false);
-      };
-      const renderExcludedTags = () => {
-        excludeChips.empty();
-        for (const tag of excludedTags()) {
-          const chip = excludeChips.createEl("button", { cls: "lexis-tag-editor-chip", attr: { type: "button", title: t("settings.removeExcludedTag", { tag }) } });
-          chip.createSpan({ text: `#${tag}` });
-          chip.createSpan({ cls: "lexis-tag-editor-remove", text: "×" });
-          chip.addEventListener("click", () => { void (async () => { await saveExcludedTags(excludedTags().filter((value) => value !== tag)); renderExcludedTags(); })(); });
-        }
-      };
-      const addExcludedTags = async (raw: string) => {
-        const incoming = this.plugin.parseTags(raw);
-        if (!incoming.length) return;
-        await saveExcludedTags([...new Set([...excludedTags(), ...incoming])]);
-        excludeInput.setValue("");
-        renderExcludedTags();
-        excludeInput.inputEl.focus();
-      };
-      excludeInput.inputEl.addEventListener("keydown", (event) => {
-        if (["Enter", ",", "，", ";", "；"].includes(event.key)) {
-          event.preventDefault();
-          void addExcludedTags(excludeInput.inputEl.value);
-        } else if (event.key === "Backspace" && !excludeInput.inputEl.value) {
-          const tags = excludedTags();
-          if (tags.length) { tags.pop(); void saveExcludedTags(tags).then(renderExcludedTags); }
-        }
+      renderInlineSettings.call(this, {
+        obsidian, Setting, topSection, t, save, refresh, accentHex, appearanceLabels,
+        createReorderController, moveItem, addAppearanceButton,
       });
-      new obsidian.ExtraButtonComponent(excludeAdd).setIcon("plus").setTooltip(t("settings.addExcludedTag")).onClick(() => { void addExcludedTags(excludeInput.inputEl.value); });
-      if (hasSuggest) new PathSuggest(this.app, excludeInput.inputEl, () => allTags.filter((tag) => !excludedTags().includes(tag)), (value) => { void addExcludedTags(value); });
-      renderExcludedTags();
 
-      const tagColorSection = this.section(rulesGroup, t("settings.tagColors"));
-      const rulesWrap = tagColorSection.createDiv();
-      const renderRules = () => {
-        rulesWrap.empty();
-        const grid = rulesWrap.createDiv({ cls: "lexis-rule-grid" });
-        const reorder = createReorderController({
-          container: grid,
-          setIcon: obsidian.setIcon,
-          label: t("settings.reorder"),
-          onMove: async (from, to) => {
-            this.plugin.settings.tagRules = moveItem(this.plugin.settings.tagRules, from, to);
-            await save();
-            refresh();
-            renderRules();
-          },
-        });
-        this.plugin.settings.tagRules.forEach((rule, i) => {
-          const cell = grid.createDiv({ cls: "lexis-setting-row lexis-rule" });
-          const tagIn = new obsidian.TextComponent(cell).setPlaceholder(t("settings.tagPlaceholder")).setValue(rule.tag);
-          const applyTag = async (v: string) => { rule.tag = (v || "").trim(); await save(); refresh(); };
-          tagIn.onChange(applyTag);
-          if (hasSuggest) new PathSuggest(this.app, tagIn.inputEl, () => allTags, (v) => { tagIn.setValue(v); void applyTag(v); });
-          addAppearanceButton({
-            app: this.app,
-            obsidian,
-            parent: cell,
-            title: t("settings.tagAppearance"),
-            labels: appearanceLabels,
-            allowStyle: true,
-            state: () => ({ color: rule.color || accentHex, opacity: Number(rule.opacity ?? this.plugin.settings.highlightOpacity), style: rule.style || "" }),
-            onChange: async (patch) => { Object.assign(rule, patch); await save(); refresh(); },
-            onReset: async () => { delete rule.color; delete rule.opacity; delete rule.style; await save(); refresh(); },
-          });
-          new obsidian.ExtraButtonComponent(cell).setIcon("trash").setTooltip(t("common.delete")).onClick(async () => { this.plugin.settings.tagRules.splice(i, 1); await save(); refresh(); renderRules(); });
-          reorder.attach(cell, i);
-        });
-        const addRule = rulesWrap.createEl("button", { text: t("settings.addTagRule") });
-        addRule.setCssStyles({ marginTop: "2px" });
-        addRule.addEventListener("click", () => { void (async () => { this.plugin.settings.tagRules.push({ tag: "", color: accentHex, style: "" }); await save(); renderRules(); })(); });
-      };
-      renderRules();
+      renderHighlightSettings.call(this, {
+        obsidian, Setting, PathSuggest, topSection, t, save, refresh, accentHex, allTags, hasSuggest,
+        appearanceLabels, createReorderController, moveItem, addAppearanceButton,
+      });
 
       const cardSection = topSection("popover", t("settings.popover"));
       const preview = cardSection.createDiv({ cls: "lexis-popover lexis-popover-preview" });

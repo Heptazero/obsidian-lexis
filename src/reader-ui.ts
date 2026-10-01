@@ -5,8 +5,10 @@ import type { App, Component as ObsidianComponent, Editor, MarkdownPostProcessor
 import type { Occurrence } from "./occurrence-search";
 import { overlayDocumentFor } from "./reader-interactions";
 import { pdfTargetSource } from "./pdf-highlight-targets";
-import { maskSyntaxAnswers } from "./flashcard-syntax";
 import type { InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats, ReviewHistoryEvent } from "./types";
+import { createReaderContent } from "./reader-content";
+import { createReaderHomeBlocks } from "./reader-home-blocks";
+import { renderReaderPopoverControls } from "./reader-popover-controls";
 
 type CurveCard = { s?: number | null; due?: string | null; last?: string | null; history?: ReviewHistoryEvent[] };
 type BridgeResult = { ok: boolean; error?: string; tags?: string[] };
@@ -33,23 +35,6 @@ interface ReaderUiDependencies {
 }
 
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : typeof error === "string" ? error : "Unknown error"; }
-
-function confirmAction(app: App, title: string, message: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    let settled = false;
-    class ConfirmModal extends obsidian.Modal {
-      onOpen() {
-        this.setTitle(title);
-        this.contentEl.createEl("p", { text: message });
-        const actions = this.contentEl.createDiv({ cls: "modal-button-container" });
-        actions.createEl("button", { text: "取消" }).addEventListener("click", () => this.close());
-        actions.createEl("button", { cls: "mod-warning", text: "删除" }).addEventListener("click", () => { settled = true; resolve(true); this.close(); });
-      }
-      onClose() { this.contentEl.empty(); if (!settled) resolve(false); }
-    }
-    new ConfirmModal(app).open();
-  });
-}
 
 function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, daysBetween, todayStr, fmtDate, TFile, Notice, boundedSource, escapeRe, Component, renderLexisMarkdown, openRestoreModal }: ReaderUiDependencies): PropertyDescriptorMap {
   class ReaderUi {
@@ -78,6 +63,9 @@ function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, da
   declare removePopover: () => void;
   declare rebuildIndex: (notify: boolean) => Promise<LexisStats>;
   declare getTags: (file: ObsidianTFile) => Set<string>;
+  declare renderSentence: (el: HTMLElement, sentence: string, word: string, comp?: ObsidianComponent | null) => Promise<void>;
+  declare renderInlineEntryInto: (el: HTMLElement, entry: LexisEntry, comp: ObsidianComponent) => Promise<void>;
+  declare renderNoteInto: (el: HTMLElement, file: ObsidianTFile, comp: ObsidianComponent, keepLexis?: boolean, maskAnswers?: boolean) => Promise<void>;
   declare computeStats: () => StatsSummary;
   declare openHome: () => void;
   declare openReviewLog: (date?: string) => Promise<void>;
@@ -221,137 +209,6 @@ function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, da
     } catch { /* Binary/PDF views have no editor cursor to position. */ }
     this.removePopover();
   }
-  renderHeatmap(el: HTMLElement): void {
-    const log = this.settings.reviewLog || {};
-    const weeks = 18;
-    const today = new Date();
-    const max = Math.max(1, ...Object.values(log).map(Number));
-    const grid = el.createDiv({ cls: "lexis-hm-grid" });
-    const cur = new Date(today);
-    cur.setDate(cur.getDate() - (weeks * 7 - 1));
-    cur.setDate(cur.getDate() - cur.getDay()); // 对齐到周日
-    let total = 0;
-    for (let w = 0; w <= weeks; w++) {
-      const col = grid.createDiv({ cls: "lexis-hm-col" });
-      for (let dch = 0; dch < 7; dch++) {
-        const ds = fmtDate(cur);
-        const cell = col.createDiv({ cls: "lexis-hm-cell" });
-        if (cur > today) cell.addClass("lexis-hm-future");
-        else {
-          const c = Number(log[ds]) || 0;
-          total += c;
-          if (c > 0) cell.addClass("lexis-hm-l" + Math.min(4, Math.ceil((c / max) * 4)));
-          cell.setAttribute("title", this.t("home.heatmapDay", { date: ds, count: c }));
-          cell.setAttribute("role", "button");
-          cell.tabIndex = 0;
-          cell.addEventListener("click", (event) => { event.stopPropagation(); void this.openReviewLog(ds); });
-          cell.addEventListener("keydown", (event) => {
-            if (event.key !== "Enter" && event.key !== " ") return;
-            event.preventDefault();
-            event.stopPropagation();
-            void this.openReviewLog(ds);
-          });
-        }
-        cur.setDate(cur.getDate() + 1);
-      }
-    }
-    el.createDiv({ cls: "lexis-hm-caption", text: this.t("home.heatmapCaption", { weeks, count: total }) });
-  }
-  // ```lexis-home``` 代码块:笔记里内嵌主页摘要；热力图打开记录，按钮打开主页或复习。
-  renderHomeBlock(el: HTMLElement): void {
-    el.addClass("lexis-home-block");
-    const st = this.computeStats();
-    const stats = el.createDiv({ cls: "lexis-home-stats" });
-    stats.createDiv({ cls: "lexis-stat", text: `⏰ ${this.t("home.due", { count: st.due })}` });
-    stats.createDiv({ cls: "lexis-stat", text: `✨ ${this.t("home.new", { count: st.fresh })}` });
-    stats.createDiv({ cls: "lexis-stat", text: `📚 ${this.t("home.total", { count: st.total })}` });
-    const hmWrap = el.createDiv({ cls: "lexis-hm-wrap lexis-home-block-hm" });
-    hmWrap.setAttribute("title", this.t("log.title"));
-    this.renderHeatmap(hmWrap);
-    hmWrap.addEventListener("click", () => { void this.openReviewLog(); });
-    const btnRow = el.createDiv({ cls: "lexis-home-block-btns" });
-    const reviewBtn = btnRow.createEl("button", { cls: "mod-cta", text: `▶ ${this.t("home.start")}` });
-    reviewBtn.addEventListener("click", (e) => { e.stopPropagation(); this.openReview(); });
-    const homeBtn = btnRow.createEl("button", { text: `📕 ${this.t("home.open")}` });
-    homeBtn.addEventListener("click", (e) => { e.stopPropagation(); this.openHome(); });
-  }
-  // 把 el 内命中 word 的文本包一层 <b>(渲染完的 DOM 上原地操作,供出处预览统一复用)
-  boldMatchesInPlace(el: HTMLElement, word: string): void {
-    const re = new RegExp(boundedSource(word), "ig");
-    const walker = el.ownerDocument.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-    const targets: Text[] = [];
-    let n: Node | null;
-    while ((n = walker.nextNode())) if (n.nodeType === Node.TEXT_NODE) targets.push(n as Text);
-    for (const node of targets) {
-      const text = node.nodeValue || "";
-      re.lastIndex = 0;
-      if (!re.test(text)) continue;
-      re.lastIndex = 0;
-      const frag = createFragment();
-      let last = 0;
-      let m = re.exec(text);
-      while (m) {
-        if (m.index > last) frag.appendChild(el.ownerDocument.createTextNode(text.slice(last, m.index)));
-        const b = el.createEl("b");
-        b.textContent = m[0];
-        frag.appendChild(b);
-        last = m.index + m[0].length;
-        if (m[0].length === 0) re.lastIndex++;
-        m = re.exec(text);
-      }
-      if (last < text.length) frag.appendChild(el.ownerDocument.createTextNode(text.slice(last)));
-      node.parentNode?.replaceChild(frag, node);
-    }
-  }
-  // 出处预览:走 Markdown 渲染管线(LaTeX/加粗斜体等才能正常显示),渲染完再把命中词包一层 <b>
-  async renderSentence(el: HTMLElement, sentence: string, word: string, comp?: ObsidianComponent | null): Promise<void> {
-    el.empty();
-    const useComp = comp || new Component();
-    if (!comp) useComp.load();
-    await renderLexisMarkdown(this.app, sentence, el, "", useComp);
-    this.boldMatchesInPlace(el, word);
-  }
-  compactSections(md: string): string { return md.replace(/^#{2,6}[ \t].*\n(?:[ \t]*\n)*(?=#{1,6}[ \t]|$)/gm, "").trim(); }
-  stripForPreview(content: string): string {
-    return content.replace(/^---\n[\s\S]*?\n---\n?/, "").replace(/```dataviewjs[\s\S]*?```/g, "").replace(/```dataview[\s\S]*?```/g, "").replace(/```(?:lexis|rel)\b[\s\S]*?```/g, "").trim();
-  }
-  async renderNoteInto(el: HTMLElement, file: ObsidianTFile, comp: ObsidianComponent, keepLexis = false, maskAnswers = false): Promise<void> {
-    const raw = await this.app.vault.cachedRead(file);
-    let stripped = raw.replace(/^---\n[\s\S]*?\n---\n?/, "").replace(/```dataviewjs[\s\S]*?```/g, "").replace(/```dataview[\s\S]*?```/g, "");
-    if (!keepLexis) stripped = stripped.replace(/```(?:lexis|rel)\b[\s\S]*?```/g, "");
-    if (maskAnswers) stripped = maskSyntaxAnswers(stripped, {
-      inline: this.settings.flashcardInlineTemplate,
-      bidirectional: this.settings.flashcardBidirectionalTemplate,
-      block: this.settings.flashcardBlockTemplate,
-      cloze: this.settings.flashcardClozeTemplate,
-    });
-    const md = this.compactSections(stripped.trim()) || "*(空)*";
-    el.empty();
-    await renderLexisMarkdown(this.app, md, el, file.path, comp);
-    // 渲染后清理:两标题之间无实际内容(文本/lexis 块)则删除前一个标题
-    (function compact(container: HTMLElement) {
-      const hs = container.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6");
-      const rm: HTMLElement[] = [];
-      for (let i = 0; i < hs.length; i++) {
-        const h = hs[i], next = hs[i + 1] || null;
-        let sib = h.nextElementSibling, ok = false;
-        while (sib && sib !== next) {
-          const ns = sib.nextElementSibling;
-          if ((sib.textContent || "").trim()) { ok = true; break; }
-          if (sib.querySelector(".lexis-section-title,.lexis-curve,.lexis-related,.lexis-occ,.lexis-occ-details,img,svg,video,iframe")) { ok = true; break; }
-          sib = ns;
-        }
-        if (!ok) rm.push(h);
-      }
-      for (const h of rm) h.remove();
-    })(el);
-  }
-  async renderInlineEntryInto(el: HTMLElement, entry: LexisEntry, comp: ObsidianComponent): Promise<void> {
-    el.empty();
-    const md = entry.annotation || "*(无批注)*";
-    const content = el.createDiv({ cls: "lexis-inline-annotation" });
-    await renderLexisMarkdown(this.app, md, content, entry.file.path, comp);
-  }
   highlightSource(span: HTMLElement): HighlightSource {
     const sourceDocument = span.ownerDocument;
     const frame = sourceDocument.defaultView?.frameElement;
@@ -388,115 +245,7 @@ function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, da
     }
   }
   renderPopoverControls(meta: HTMLElement, corner: HTMLElement, body: HTMLElement, entry: LexisEntry, sourceSpan: HTMLElement): void {
-    if (entry.inline) return;
-    const baseKey = entry.file?.basename || entry.display;
-    const path = entry.file?.path || "";
-    const slash = path.lastIndexOf("/");
-    const folder = slash > 0 ? path.slice(0, slash) : "";
-    const shortFolder = (f: string) => String(f || this.t("common.root")).split("/").pop() || "";
-    const folderChip = meta.createSpan({ cls: "lexis-popover-chip", text: shortFolder(folder) });
-    folderChip.setAttribute("title", folder || this.t("common.root"));
-    const dicts = this.dictFolders();
-    if (dicts.length > 1) {
-      folderChip.addClass("is-clickable");
-      folderChip.setAttribute("title", `${folder || this.t("common.root")} — ${this.t("popover.moveDictionary")}`);
-      folderChip.addEventListener("click", (ev) => {
-        ev.preventDefault(); ev.stopPropagation();
-        const menu = new obsidian.Menu();
-        for (const target of dicts) menu.addItem((it) => it.setTitle(shortFolder(target)).setIcon(target === folder ? "check" : "folder").onClick(async () => {
-          if (target === folder) return;
-          const result = await this.bridgeMoveWord({ key: baseKey, folder: target });
-          new Notice(result.ok ? this.t("notice.moved", { folder: shortFolder(target) }) : this.t("notice.moveFailed", { error: result.error || this.t("common.failed") }));
-          if (result.ok) this.removePopover();
-        }));
-        menu.showAtPosition({ x: ev.clientX, y: ev.clientY });
-      });
-    }
-    const occurrenceBtn = meta.createEl("button", { cls: "lexis-popover-action", text: this.t("popover.addCurrentOccurrence") });
-    occurrenceBtn.setAttribute("title", this.t("popover.addCurrentOccurrenceTitle"));
-    occurrenceBtn.addEventListener("click", (ev) => { void (async () => {
-      ev.preventDefault(); ev.stopPropagation();
-      const source = this.highlightSource(sourceSpan);
-      occurrenceBtn.disabled = true;
-      if (await this.addExampleToWord(entry.file, source.sentence, source.file, source.page)) {
-        occurrenceBtn.setText("✓");
-        occurrenceBtn.removeAttribute("title");
-      } else occurrenceBtn.disabled = false;
-    })(); });
-    const noteBtn = corner.createEl("button", { cls: "lexis-popover-action", text: "✎" });
-    noteBtn.setAttribute("title", this.t("popover.addNote"));
-    noteBtn.addEventListener("click", (ev) => {
-      ev.preventDefault(); ev.stopPropagation();
-      const existing = body.querySelector(".lexis-popover-note-row");
-      if (existing) { existing.querySelector("input")?.focus(); return; }
-      const row = body.createDiv({ cls: "lexis-popover-note-row" });
-      const input = row.createEl("input", { attr: { type: "text", placeholder: this.t("popover.notePlaceholder") } });
-      const imageInput = row.createEl("input", { cls: "lexis-popover-note-file", attr: { type: "file", accept: "image/*" } });
-      const imageBtn = row.createEl("button", { cls: "lexis-popover-note-image", attr: { type: "button", title: this.t("popover.addImage") } });
-      obsidian.setIcon(imageBtn, "image-plus");
-      input.addEventListener("click", (e) => e.stopPropagation());
-      imageBtn.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); imageInput.click(); });
-      imageInput.addEventListener("click", (e) => e.stopPropagation());
-      imageInput.addEventListener("change", () => { void (async () => {
-        const image = imageInput.files?.[0];
-        if (!image) return;
-        input.disabled = true;
-        imageBtn.disabled = true;
-        const result = await this.bridgeAnnotate({ key: baseKey, note: input.value.trim(), image });
-        new Notice(result.ok ? this.t("notice.noteAdded", { word: entry.display }) : this.t("notice.noteFailed", { error: result.error || this.t("common.failed") }));
-        if (result.ok) this.removePopover();
-        else { input.disabled = false; imageBtn.disabled = false; imageInput.value = ""; }
-      })(); });
-      input.addEventListener("keydown", (e) => { void (async () => {
-        if (e.key === "Escape") { row.remove(); return; }
-        if (e.key !== "Enter") return;
-        e.preventDefault();
-        const note = input.value.trim();
-        if (!note) { row.remove(); return; }
-        input.disabled = true;
-        const result = await this.bridgeAnnotate({ key: baseKey, note });
-        new Notice(result.ok ? this.t("notice.noteAdded", { word: entry.display }) : this.t("notice.noteFailed", { error: result.error || this.t("common.failed") }));
-        this.removePopover();
-      })(); });
-      body.prepend(row);
-      input.focus();
-    });
-    const delBtn = corner.createEl("button", { cls: "lexis-popover-action is-danger", text: "🗑" });
-    delBtn.setAttribute("title", this.t("popover.deleteEntry"));
-    delBtn.addEventListener("click", (ev) => { void (async () => {
-      ev.preventDefault(); ev.stopPropagation();
-      if (!await confirmAction(this.app, this.t("popover.deleteEntry"), this.t("popover.deleteConfirm", { word: entry.display }))) return;
-      const result = await this.bridgeDeleteWord(baseKey);
-      new Notice(result.ok ? this.t("notice.deleted", { word: entry.display }) : this.t("notice.deleteFailed", { error: result.error || this.t("common.failed") }));
-      this.removePopover();
-    })(); });
-
-    const tagWrap = body.createDiv({ cls: "lexis-popover-tags" });
-    const tags = new Set(entry.tags || []);
-    const renderTags = () => {
-      tagWrap.empty();
-      for (const tag of [...tags].sort()) {
-        const pill = tagWrap.createSpan({ cls: "lexis-popover-tag", text: `#${tag}` });
-        const remove = pill.createSpan({ cls: "lexis-popover-tag-remove", text: " ×" });
-        remove.setAttribute("title", this.t("popover.deleteTag"));
-        remove.addEventListener("click", (ev) => { void (async () => {
-          ev.preventDefault(); ev.stopPropagation();
-          const result = await this.bridgeTagWord({ key: baseKey, tag, action: "remove" });
-          if (result.ok) { tags.delete(tag); entry.tags = new Set(result.tags || []); renderTags(); }
-        })(); });
-      }
-      const add = tagWrap.createSpan({ cls: "lexis-popover-tag is-add", text: tags.size ? "+" : this.t("popover.addTag") });
-      add.addEventListener("click", (ev) => {
-        ev.preventDefault(); ev.stopPropagation();
-        const menu = new obsidian.Menu();
-        for (const tag of this.collectVocabTags().filter((t) => !tags.has(t))) menu.addItem((it) => it.setTitle(`#${tag}`).setIcon("tag").onClick(async () => {
-          const result = await this.bridgeTagWord({ key: baseKey, tag, action: "add" });
-          if (result.ok) { tags.add(tag); entry.tags = new Set(result.tags || []); renderTags(); }
-        }));
-        menu.showAtPosition({ x: ev.clientX, y: ev.clientY });
-      });
-    };
-    renderTags();
+    renderReaderPopoverControls.call(this, { obsidian, Notice }, meta, corner, body, entry, sourceSpan);
   }
   async showPopover(spanEl: HTMLElement): Promise<void> {
     const key = spanEl.dataset.lexisKey;
@@ -610,7 +359,11 @@ function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, da
   }
   }
   const { constructor: _constructor, ...descriptors } = Object.getOwnPropertyDescriptors(ReaderUi.prototype);
-  return descriptors;
+  return {
+    ...createReaderHomeBlocks(fmtDate),
+    ...createReaderContent({ boundedSource, Component, renderLexisMarkdown }),
+    ...descriptors,
+  };
 }
 
 export { createReaderUi };
