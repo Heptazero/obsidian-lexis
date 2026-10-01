@@ -34,6 +34,7 @@ import { relationBlockSource } from "./relation-sections";
 import { repairReviewHistory } from "./review-scheduler";
 import { migrateLegacySettings, pluginFolderName, type StoredSettings } from "./settings-migration";
 import { WorkspaceDocuments } from "./workspace-documents";
+import { ExcalidrawHighlights } from "./excalidraw-highlights";
 import { LexisRestoreModal } from "./restore-modal";
 import { LexisPluginBase } from "./plugin-base";
 import { pluginDictionaryDescriptors } from "./plugin-dictionary";
@@ -267,6 +268,8 @@ class LexisPlugin extends LexisPluginBase {
       },
     });
     this._workspaceDocuments.start();
+    this._excalidrawHighlights = new ExcalidrawHighlights(this);
+    this._excalidrawHighlights.start();
 
     this.app.workspace.onLayoutReady(() => {
       this._workspaceDocuments.activateLeaf(this.app.workspace.getMostRecentLeaf());
@@ -339,6 +342,7 @@ class LexisPlugin extends LexisPluginBase {
     this.removeSelPill();
     this.teardownPdfHighlight();
     this.teardownEpubIframeHighlight();
+    this._excalidrawHighlights?.destroy();
     this.bridge?.stop();
     this._workspaceDocuments?.forEach((document) => document.body?.classList.remove("lexis-show-review-metadata"));
   }

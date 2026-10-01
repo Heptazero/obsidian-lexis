@@ -30,6 +30,24 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     visibility: hidden;
 }
 
+/* Excalidraw text is canvas-rendered. This view-only layer mirrors matching text
+   element bounds without changing the drawing or intercepting editing gestures. */
+.lexis-excalidraw-host { position: relative; }
+.lexis-excalidraw-hl-layer {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 2;
+}
+.lexis-excalidraw-hl {
+    position: absolute;
+    display: block;
+    box-sizing: border-box;
+    transform-origin: center;
+    pointer-events: none;
+}
+
 /* 设置页:功能分组折叠区 */
 .lexis-settings-root {
     display: block;

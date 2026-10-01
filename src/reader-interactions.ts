@@ -7,6 +7,8 @@ import { collectAliasTargets } from "./alias-search";
 import type { LexisEntry, LexisSettings } from "./types";
 import { pdfHighlightAt } from "./pdf-highlight-targets";
 import { positionSelectionPill } from "./selection-pill-position";
+import { canvasHighlightAt } from "./canvas-highlight-target";
+import type { ExcalidrawHighlights } from "./excalidraw-highlights";
 
 type AddWordOptions = {
   openExisting?: boolean;
@@ -46,7 +48,8 @@ function createReaderInteractions(): PropertyDescriptorMap {
   declare _hideTimer: number;
   declare _showTimer: number | null;
   declare _showTarget: HTMLElement | null;
-  declare _pdfHoverTarget: HTMLElement | null;
+  declare _surfaceHoverTarget: HTMLElement | null;
+  declare _excalidrawHighlights: ExcalidrawHighlights;
   declare _popover: HTMLElement | null;
   declare _popoverComp: ObsidianComponent | null;
   declare _selPill: HTMLElement | null;
@@ -71,18 +74,25 @@ function createReaderInteractions(): PropertyDescriptorMap {
       const highlight = closestHighlight(target);
       if (highlight) return highlight;
     }
-    return closestHighlight(event.target) || pdfHighlightAt(event);
+    return closestHighlight(event.target)
+      || pdfHighlightAt(event)
+      || canvasHighlightAt(event)
+      || this._excalidrawHighlights?.highlightAt(event)
+      || null;
   }
   onMouseMove(event: MouseEvent): void {
     if (obsidian.Platform.isMobile) return;
-    const target = pdfHighlightAt(event);
-    if (target === this._pdfHoverTarget) return;
-    if (this._pdfHoverTarget) {
+    const target = pdfHighlightAt(event)
+      || canvasHighlightAt(event)
+      || this._excalidrawHighlights?.highlightAt(event)
+      || null;
+    if (target === this._surfaceHoverTarget) return;
+    if (this._surfaceHoverTarget) {
       window.clearTimeout(this._showTimer);
       this._showTarget = null;
       if (!eventElement(event.target)?.closest('.lexis-popover')) this.scheduleHide();
     }
-    this._pdfHoverTarget = target;
+    this._surfaceHoverTarget = target;
     if (target) this.onMouseOver(event);
   }
   onMouseOver(e: MouseEvent): void {

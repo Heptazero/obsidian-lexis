@@ -9,6 +9,7 @@ import type { ReviewSchedule } from "./review-scheduler";
 import type { WorkspaceDocuments } from "./workspace-documents";
 import type { createI18n } from "./i18n";
 import type { createTemplateProvider } from "./template-provider";
+import type { ExcalidrawHighlights } from "./excalidraw-highlights";
 
 export type TranslationVars = Record<string, string | number | boolean | null | undefined>;
 export type ReviewCard = ReviewCardState & { history?: ReviewHistoryEvent[] };
@@ -38,6 +39,7 @@ export class LexisPluginBase extends Plugin {
   declare liveAvailable: boolean;
   declare statusBarEl: HTMLElement | null;
   declare _pattern: string | null;
+  declare _indexBuildId: number;
   declare _indexKeysByCompact: Map<string, string>;
   declare _matchKeysByCompact: Map<string, string>;
   declare _rebuildTimer: number | null;
@@ -58,6 +60,7 @@ export class LexisPluginBase extends Plugin {
   declare _pageHighlightState: WeakMap<obsidian.WorkspaceLeaf, { key: string; hidden: boolean }>;
   declare _reviewSessions: WeakMap<object, unknown>;
   declare _workspaceDocuments: WorkspaceDocuments;
+  declare _excalidrawHighlights: ExcalidrawHighlights;
   declare _selPill: HTMLElement | null;
   declare _mobileTapStart: { pointerId: number; x: number; y: number; time: number; target: HTMLElement } | null;
   declare _mobileTapClick: { x: number; y: number; time: number } | null;
@@ -89,6 +92,8 @@ export class LexisPluginBase extends Plugin {
   declare isInlineSourceFile: (file: TFile | null | undefined) => boolean;
   declare rebuildIndex: (notify: boolean) => Promise<LexisStats>;
   declare resolveIndexKey: (value: string) => string;
+  declare resolveMatchKey: (value: string) => string;
+  declare inlineStyleForEntry: (entry: LexisEntry | undefined, options?: { external?: boolean; pdf?: boolean }) => string;
   declare renderNoteInto: (el: HTMLElement, file: TFile, component: Component) => Promise<void>;
   declare insertOccurrence: (data: string, vars: Record<string, unknown>) => string;
   declare normalizeFolder: (folder: string) => string;

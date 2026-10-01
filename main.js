@@ -4261,15 +4261,39 @@ function positionSelectionPill(anchor, pill, viewport, offset) {
   };
 }
 
-// src/reader-interactions.ts
+// src/canvas-highlight-target.ts
 function eventElement(target) {
+  if (!target || typeof target !== "object" || !("nodeType" in target)) return null;
+  const node = target;
+  return node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+}
+function pointInside(rect, x, y) {
+  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+}
+function canvasHighlightAt(event) {
+  const target = eventElement(event.target);
+  const canvas = target?.closest(".canvas-wrapper,.canvas");
+  if (!canvas) return null;
+  const document2 = canvas.ownerDocument;
+  for (const element of document2.elementsFromPoint(event.clientX, event.clientY)) {
+    const highlight = element.closest(".canvas-node .lexis-hl");
+    if (highlight && canvas.contains(highlight)) return highlight;
+  }
+  for (const highlight of canvas.querySelectorAll(".canvas-node .lexis-hl")) {
+    if (pointInside(highlight.getBoundingClientRect(), event.clientX, event.clientY)) return highlight;
+  }
+  return null;
+}
+
+// src/reader-interactions.ts
+function eventElement2(target) {
   if (!target || typeof target !== "object" || !("nodeType" in target)) return null;
   const node = target;
   const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
   return element && "dataset" in element ? element : null;
 }
 function closestHighlight(target) {
-  return eventElement(target)?.closest(".lexis-hl,.lexis-pdf-hl") || null;
+  return eventElement2(target)?.closest(".lexis-hl,.lexis-pdf-hl") || null;
 }
 function overlayDocumentFor(element) {
   const sourceDocument = element.ownerDocument;
@@ -4287,18 +4311,18 @@ function createReaderInteractions() {
         const highlight = closestHighlight(target);
         if (highlight) return highlight;
       }
-      return closestHighlight(event.target) || pdfHighlightAt(event);
+      return closestHighlight(event.target) || pdfHighlightAt(event) || canvasHighlightAt(event) || this._excalidrawHighlights?.highlightAt(event) || null;
     }
     onMouseMove(event) {
       if (obsidian2.Platform.isMobile) return;
-      const target = pdfHighlightAt(event);
-      if (target === this._pdfHoverTarget) return;
-      if (this._pdfHoverTarget) {
+      const target = pdfHighlightAt(event) || canvasHighlightAt(event) || this._excalidrawHighlights?.highlightAt(event) || null;
+      if (target === this._surfaceHoverTarget) return;
+      if (this._surfaceHoverTarget) {
         window.clearTimeout(this._showTimer);
         this._showTarget = null;
-        if (!eventElement(event.target)?.closest(".lexis-popover")) this.scheduleHide();
+        if (!eventElement2(event.target)?.closest(".lexis-popover")) this.scheduleHide();
       }
-      this._pdfHoverTarget = target;
+      this._surfaceHoverTarget = target;
       if (target) this.onMouseOver(event);
     }
     onMouseOver(e) {
@@ -4374,7 +4398,7 @@ function createReaderInteractions() {
     }
     onClick(e) {
       const recentTap = this._mobileTapClick;
-      if (recentTap && Date.now() - recentTap.time < 700 && Math.hypot(e.clientX - recentTap.x, e.clientY - recentTap.y) < 20 && !eventElement(e.target)?.closest(".lexis-popover")) {
+      if (recentTap && Date.now() - recentTap.time < 700 && Math.hypot(e.clientX - recentTap.x, e.clientY - recentTap.y) < 20 && !eventElement2(e.target)?.closest(".lexis-popover")) {
         this._mobileTapClick = null;
         e.preventDefault();
         e.stopPropagation();
@@ -4387,7 +4411,7 @@ function createReaderInteractions() {
           e.preventDefault();
           this.activateHighlight(t, e.ctrlKey || e.metaKey);
         }
-      } else if (this._popover && !this._popover.contains(eventElement(e.target))) this.removePopover();
+      } else if (this._popover && !this._popover.contains(eventElement2(e.target))) this.removePopover();
     }
     scheduleHide() {
       window.clearTimeout(this._hideTimer);
@@ -4471,7 +4495,7 @@ function createReaderInteractions() {
     }
     maybeShowSelPill(e, fromEpubIframe = false) {
       if (!this.settings.selectionPill) return;
-      const tgt = eventElement(e.target);
+      const tgt = eventElement2(e.target);
       if (tgt?.closest(".lexis-sel-pill, .lexis-popover, .menu")) return;
       const sourceDoc = tgt?.ownerDocument || document;
       const sourceWin = sourceDoc.defaultView || window;
@@ -7294,6 +7318,210 @@ var WorkspaceDocuments = class {
   }
 };
 
+// src/excalidraw-highlights.ts
+function firstExcalidrawMatch(text, pattern, resolveKey, index) {
+  if (!text || !pattern) return null;
+  const match = new RegExp(pattern, "i").exec(text);
+  if (!match) return null;
+  const key = resolveKey(match[0]);
+  const entry = index.get(key);
+  return entry ? { key, entry } : null;
+}
+function fallbackSceneToViewport(point, state) {
+  const zoom = Number(state.zoom?.value) || 1;
+  return {
+    x: (point.sceneX + state.scrollX) * zoom + state.offsetLeft,
+    y: (point.sceneY + state.scrollY) * zoom + state.offsetTop
+  };
+}
+function sceneElementBox(element, state, convert = fallbackSceneToViewport) {
+  const start = convert({ sceneX: element.x, sceneY: element.y }, state);
+  const end = convert({ sceneX: element.x + element.width, sceneY: element.y + element.height }, state);
+  return {
+    left: Math.min(start.x, end.x),
+    top: Math.min(start.y, end.y),
+    width: Math.abs(end.x - start.x),
+    height: Math.abs(end.y - start.y),
+    angle: Number(element.angle) || 0
+  };
+}
+function pointInHighlightBox(x, y, box) {
+  const centerX = box.left + box.width / 2;
+  const centerY = box.top + box.height / 2;
+  const cosine = Math.cos(-box.angle);
+  const sine = Math.sin(-box.angle);
+  const deltaX = x - centerX;
+  const deltaY = y - centerY;
+  const localX = deltaX * cosine - deltaY * sine;
+  const localY = deltaX * sine + deltaY * cosine;
+  return Math.abs(localX) <= box.width / 2 && Math.abs(localY) <= box.height / 2;
+}
+var ExcalidrawHighlights = class {
+  constructor(host) {
+    this.host = host;
+    this.views = /* @__PURE__ */ new Map();
+    this.timer = 0;
+  }
+  start() {
+    this.refresh();
+    this.timer = window.setInterval(() => this.refresh(), 160);
+    this.host.registerInterval(this.timer);
+  }
+  destroy() {
+    window.clearInterval(this.timer);
+    for (const state of this.views.values()) this.removeState(state);
+    this.views.clear();
+  }
+  highlightAt(event) {
+    for (const state of this.views.values()) {
+      if (state.root.ownerDocument !== event.view?.document || !state.root.isConnected) continue;
+      const rootRect = state.root.getBoundingClientRect();
+      if (event.clientX < rootRect.left || event.clientX > rootRect.right || event.clientY < rootRect.top || event.clientY > rootRect.bottom) continue;
+      for (let index = state.anchors.length - 1; index >= 0; index--) {
+        const anchor = state.anchors[index];
+        if (pointInHighlightBox(event.clientX, event.clientY, anchor.box)) return anchor.element;
+      }
+    }
+    return null;
+  }
+  refresh() {
+    const plugin = this.excalidrawPlugin();
+    const seen = /* @__PURE__ */ new Set();
+    if (plugin) this.host.app.workspace.iterateAllLeaves((leaf) => {
+      const view = leaf.view;
+      if (view?.getViewType?.() !== "excalidraw") return;
+      seen.add(view);
+      this.renderView(plugin, view);
+    });
+    for (const [view, state] of this.views) {
+      if (seen.has(view) && state.root.isConnected) continue;
+      this.removeState(state);
+      this.views.delete(view);
+    }
+  }
+  renderView(plugin, view) {
+    const root = view.containerEl?.querySelector(".excalidraw");
+    if (!root) return;
+    const viewState = this.ensureState(view, root);
+    const api = viewState.api || plugin.getAPI(view)?.getExcalidrawAPI?.();
+    if (!api) return;
+    viewState.api = api;
+    const appState = api.getAppState();
+    const inactiveSignature = `inactive:${Number(this.host.settings.enableHighlight)}:${Number(appState.viewModeEnabled)}:${this.host._indexBuildId || 0}`;
+    if (!this.host.settings.enableHighlight || !appState.viewModeEnabled || !this.host._pattern || !this.host.index.size) {
+      if (viewState.signature !== inactiveSignature) {
+        viewState.signature = inactiveSignature;
+        viewState.anchors = [];
+        viewState.layer.replaceChildren();
+      }
+      return;
+    }
+    const elements = api.getSceneElements();
+    const matches = this.matches(viewState, elements);
+    const rootRect = root.getBoundingClientRect();
+    const signature = this.signature(appState, matches, rootRect);
+    if (signature === viewState.signature) return;
+    viewState.signature = signature;
+    viewState.anchors = [];
+    viewState.layer.replaceChildren();
+    if (!matches.length) return;
+    const sceneToViewport = this.sceneConverter(root);
+    for (const match of matches) {
+      const box = sceneElementBox(match.element, appState, sceneToViewport);
+      if (box.width < 1 || box.height < 1) continue;
+      const anchor = viewState.layer.createSpan({ cls: "lexis-hl lexis-excalidraw-hl" });
+      anchor.dataset.lexisKey = match.key;
+      anchor.setAttribute("aria-hidden", "true");
+      anchor.setAttribute("style", this.host.inlineStyleForEntry(match.entry, { external: true }));
+      anchor.style.left = `${box.left - rootRect.left}px`;
+      anchor.style.top = `${box.top - rootRect.top}px`;
+      anchor.style.width = `${box.width}px`;
+      anchor.style.height = `${box.height}px`;
+      anchor.style.transform = `rotate(${box.angle}rad)`;
+      viewState.anchors.push({ element: anchor, box });
+    }
+  }
+  matches(viewState, elements) {
+    if (viewState.indexBuildId !== this.host._indexBuildId) {
+      viewState.indexBuildId = this.host._indexBuildId;
+      viewState.matchCache.clear();
+    }
+    const matches = [];
+    const liveIds = /* @__PURE__ */ new Set();
+    for (const element of elements) {
+      if (element.type !== "text" || element.isDeleted) continue;
+      liveIds.add(element.id);
+      const text = element.originalText || element.text || "";
+      const cached = viewState.matchCache.get(element.id);
+      const match = cached?.version === element.version && cached.text === text ? cached.match : firstExcalidrawMatch(text, this.host._pattern, (value) => this.host.resolveMatchKey(value), this.host.index);
+      if (match !== cached?.match) viewState.matchCache.set(element.id, { version: element.version, text, match });
+      if (match) matches.push({ element, ...match });
+    }
+    for (const id of viewState.matchCache.keys()) if (!liveIds.has(id)) viewState.matchCache.delete(id);
+    return matches;
+  }
+  signature(state, matches, root) {
+    return [
+      this.host._indexBuildId || 0,
+      Number(state.viewModeEnabled),
+      state.zoom?.value,
+      state.scrollX,
+      state.scrollY,
+      state.offsetLeft,
+      state.offsetTop,
+      root.width,
+      root.height,
+      root.left,
+      root.top,
+      ...matches.map(({ element, key, entry }) => [
+        element.id,
+        element.version,
+        element.x,
+        element.y,
+        element.width,
+        element.height,
+        element.angle,
+        key,
+        this.host.inlineStyleForEntry(entry, { external: true })
+      ].join(":"))
+    ].join("|");
+  }
+  ensureState(view, root) {
+    const existing = this.views.get(view);
+    if (existing?.root === root) return existing;
+    if (existing) this.removeState(existing);
+    const positionedRoot = root.ownerDocument.defaultView?.getComputedStyle(root).position === "static";
+    if (positionedRoot) root.classList.add("lexis-excalidraw-host");
+    const layer = root.createDiv({ cls: "lexis-excalidraw-hl-layer" });
+    const state = {
+      root,
+      layer,
+      anchors: [],
+      api: null,
+      matchCache: /* @__PURE__ */ new Map(),
+      indexBuildId: -1,
+      signature: "",
+      positionedRoot
+    };
+    this.views.set(view, state);
+    return state;
+  }
+  removeState(state) {
+    state.layer.remove();
+    if (state.positionedRoot) state.root.classList.remove("lexis-excalidraw-host");
+  }
+  sceneConverter(root) {
+    const ownerWindow = root.ownerDocument.defaultView;
+    const mainWindow = window;
+    return ownerWindow?.ExcalidrawLib?.sceneCoordsToViewportCoords || mainWindow.ExcalidrawLib?.sceneCoordsToViewportCoords || fallbackSceneToViewport;
+  }
+  excalidrawPlugin() {
+    const plugins = this.host.app.plugins;
+    const plugin = plugins?.getPlugin?.("obsidian-excalidraw-plugin") || plugins?.plugins?.["obsidian-excalidraw-plugin"];
+    return plugin && typeof plugin.getAPI === "function" ? plugin : null;
+  }
+};
+
 // src/restore-modal.ts
 var import_obsidian6 = require("obsidian");
 var LexisRestoreModal = class extends import_obsidian6.Modal {
@@ -8893,6 +9121,8 @@ var LexisPlugin = class extends LexisPluginBase {
       }
     });
     this._workspaceDocuments.start();
+    this._excalidrawHighlights = new ExcalidrawHighlights(this);
+    this._excalidrawHighlights.start();
     this.app.workspace.onLayoutReady(() => {
       this._workspaceDocuments.activateLeaf(this.app.workspace.getMostRecentLeaf());
       void this.rebuildIndex(false);
@@ -8959,6 +9189,7 @@ var LexisPlugin = class extends LexisPluginBase {
     this.removeSelPill();
     this.teardownPdfHighlight();
     this.teardownEpubIframeHighlight();
+    this._excalidrawHighlights?.destroy();
     this.bridge?.stop();
     this._workspaceDocuments?.forEach((document2) => document2.body?.classList.remove("lexis-show-review-metadata"));
   }
