@@ -75,7 +75,7 @@ const LexisBridge = createBridgeServer({ Notice, Platform });
 
 // TypeScript declaration merging describes the methods attached below with Object.defineProperties.
 // Runtime behavior remains composition: LexisPlugin only extends the Obsidian plugin base.
-/* eslint-disable @typescript-eslint/no-unsafe-declaration-merging */
+/* eslint-disable @typescript-eslint/no-unsafe-declaration-merging -- Standard typing pattern for runtime-composed method modules. */
 interface LexisPlugin extends LexisPluginDictionary, LexisPluginReview, LexisPluginEntry {}
 class LexisPlugin extends LexisPluginBase {
   async onload() {
@@ -413,7 +413,7 @@ class LexisPlugin extends LexisPluginBase {
 
 
 };
-/* eslint-enable @typescript-eslint/no-unsafe-declaration-merging */
+/* eslint-enable @typescript-eslint/no-unsafe-declaration-merging -- End runtime-composed plugin declaration. */
 
 Object.defineProperties(LexisPlugin.prototype, pluginDictionaryDescriptors());
 Object.defineProperties(LexisPlugin.prototype, pluginReviewDescriptors());

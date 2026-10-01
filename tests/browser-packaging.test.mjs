@@ -11,13 +11,15 @@ test("keeps Chrome and Firefox packages on one version", async () => {
   assert.deepEqual(firefoxManifest.optional_host_permissions, ["http://127.0.0.1/*", "http://localhost/*"]);
   assert.equal("host_permissions" in firefoxManifest, false);
   assert.deepEqual(firefoxManifest.background.scripts, ["config.js", "background.js"]);
-  assert.deepEqual(chromeManifest.content_scripts[0].js, ["config.js", "alias-search.js", "content.js"]);
+  assert.deepEqual(chromeManifest.content_scripts[0].js, ["config.js", "alias-search.js", "content-core.js", "content-popover.js", "content.js"]);
   assert.deepEqual(firefoxManifest.content_scripts[0].js, chromeManifest.content_scripts[0].js);
 });
 
 test("bounds browser detail requests and delays the loading label", async () => {
   const background = await readFile(`${extensionRoot}/background.js`, "utf8");
-  const content = await readFile(`${extensionRoot}/content.js`, "utf8");
+  const content = await Promise.all(["content-core.js", "content-popover.js", "content.js"]
+    .map((name) => readFile(`${extensionRoot}/${name}`, "utf8")))
+    .then((parts) => parts.join("\n"));
   assert.match(background, /AbortController/);
   assert.match(background, /request-timeout/);
   assert.match(background, /request-cancelled/);

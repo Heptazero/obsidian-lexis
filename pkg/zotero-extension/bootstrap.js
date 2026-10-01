@@ -25,6 +25,7 @@ async function startup({ id, version, rootURI }) {
     "src/word-index.js",
     "src/pdf-highlighter.js",
     "src/card-view.js",
+    "src/selection-actions.js",
     "src/reader-adapter.js",
     "src/plugin.js",
   ]) Services.scriptloader.loadSubScript(rootURI + file, globalThis);

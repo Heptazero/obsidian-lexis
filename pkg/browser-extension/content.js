@@ -1,1211 +1,338 @@
-// Lexis Web —— 内容脚本:在网页上高亮词库里的词,悬停显示释义
-(() => {
-  const { isDictionaryVisible, hasExpandedSelection, selectionIntersectsNode } = globalThis.LexisWebConfig;
-  const { collectAliasTargets, findExactAliasTarget, rankAliasTargets } = globalThis.LexisAliasSearch;
-  const HL = "lexis-web-hl";
-  const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "INPUT", "CODE", "PRE", "SELECT", "OPTION", "KBD", "SAMP"]);
-  const DEFAULT_CFG = { highlight: true, showMemoryCurve: true, color: "#7c5cff", style: "wavy", useObsidianStyle: true, opacity: 100 };
+"use strict";
 
-  let cfg = null;
-  let allWords = [];
-  let siteDictionaryVisibility = {};
-  const currentSite = location.origin && location.origin !== "null" ? location.origin : `${location.protocol}//${location.host}`;
-  let keySet = null;
-  let knownKeys = null;
-  let keyTags = null;
-  let keyFolder = null;
-  let keyColor = null;
-  let keyOpacity = null;
-  let keyVisible = null;
-  let keyStyle = null;
-  let excludedKeys = null;
-  let knownKeyByCompact = null;
-  let matchKeyByCompact = null;
-  let regex = null;
-  let observer = null;
-  let scanTimer = null;
-  let selTimer = null;
-  let lastSelectionFolder = "";
-  let popoverSize = null;
-  let pendingRoots = new Set();
-  const selectionDeferredRoots = new Set();
-  let pointerSelecting = false;
-  let styleCfg = null;
-  const detailCache = new Map();
-  let pop = null, popHost = null, hideTimer = null, currentSpan = null;
-  let popoverSheetPromise = null;
-  let mathCssInstalled = "", mathSheet = null;
-
-  function popoverSheet() {
-    if (!popoverSheetPromise) popoverSheetPromise = fetch(chrome.runtime.getURL("popover.css"))
-      .then((response) => response.text())
-      .then((css) => { const sheet = new CSSStyleSheet(); sheet.replaceSync(css); return sheet; });
-    return popoverSheetPromise;
-  }
-
-  function installMathCss(root, css) {
-    if (!css) return;
-    if (!mathSheet) {
-      mathSheet = new CSSStyleSheet();
-    }
-    if (css !== mathCssInstalled) {
-      mathSheet.replaceSync(css);
-      mathCssInstalled = css;
-    }
-    if (!root.adoptedStyleSheets.includes(mathSheet)) root.adoptedStyleSheets = [...root.adoptedStyleSheets, mathSheet];
-  }
-
-  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const ASCII_WORD = /[A-Za-z0-9_]/;
-  const EAST_ASIAN = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
-  const HSPACE = /[ \t\u00a0\u3000]/;
-  const isMixedBoundary = (left, right) => (ASCII_WORD.test(left) && EAST_ASIAN.test(right)) || (EAST_ASIAN.test(left) && ASCII_WORD.test(right));
-  function compactMixedSpacing(value) {
-    const chars = [...String(value || "")];
-    let result = "", previous = "";
-    for (let i = 0; i < chars.length;) {
-      if (!HSPACE.test(chars[i])) { result += chars[i]; previous = chars[i]; i++; continue; }
-      let end = i + 1;
-      while (end < chars.length && HSPACE.test(chars[end])) end++;
-      if (!isMixedBoundary(previous, chars[end] || "")) result += chars.slice(i, end).join("");
-      i = end;
-    }
-    return result;
-  }
-  function flexibleMixedSource(value) {
-    const chars = [...String(value || "")];
-    let source = "", previous = "", boundaryAdded = false;
-    for (let i = 0; i < chars.length;) {
-      if (HSPACE.test(chars[i])) {
-        let end = i + 1;
-        while (end < chars.length && HSPACE.test(chars[end])) end++;
-        boundaryAdded = isMixedBoundary(previous, chars[end] || "");
-        source += boundaryAdded ? "[ \\t\\u00a0\\u3000]*" : esc(chars.slice(i, end).join(""));
-        i = end;
-        continue;
-      }
-      if (!boundaryAdded && previous && isMixedBoundary(previous, chars[i])) source += "[ \\t\\u00a0\\u3000]*";
-      source += esc(chars[i]);
-      previous = chars[i]; boundaryAdded = false; i++;
-    }
-    return source;
-  }
-  // 词边界(支持中文):仅当词以英文字母/数字/下划线开头或结尾时加 ASCII 边界;中文不加,否则 \b 永不命中
-  const boundedSrc = (w) => (/^[A-Za-z0-9_]/.test(w) ? "(?<![A-Za-z0-9_])" : "") + flexibleMixedSource(w) + (/[A-Za-z0-9_]$/.test(w) ? "(?![A-Za-z0-9_])" : "");
-  const buildRe = (keys) => (keys.length ? new RegExp(keys.map(boundedSrc).join("|"), "gi") : null);
-  const resolveFrom = (map, value) => {
-    const key = String(value || "").toLowerCase();
-    return (map && (map.get(key) || map.get(compactMixedSpacing(key)))) || key;
-  };
-  const resolveKnownKey = (value) => resolveFrom(knownKeyByCompact, value);
-  const resolveMatchKey = (value) => resolveFrom(matchKeyByCompact, value);
-
-  // ---- 句子抽取(按标点切,跟 Obsidian 端「出现过的地方」一致) ----
-  const SENT_SEP = /[.!?。!?…\n]/;
-  function extractSentence(text, idx) {
-    if (!text) return "";
-    let start = 0, end = text.length;
-    for (let i = Math.min(idx, text.length - 1); i >= 0; i--) if (SENT_SEP.test(text[i])) { start = i + 1; break; }
-    for (let i = idx; i < text.length; i++) if (SENT_SEP.test(text[i])) { end = i + 1; break; }
-    return text.slice(start, end).trim().replace(/\s+/g, " ");
-  }
-  function blockOf(node) {
-    let el = node.nodeType === 3 ? node.parentElement : node;
-    while (el && el.parentElement && !/^(P|LI|TD|TH|BLOCKQUOTE|SECTION|ARTICLE|FIGCAPTION|DD|H[1-6]|DIV)$/.test(el.tagName)) el = el.parentElement;
-    return el;
-  }
-  function sentenceAroundSpan(span) {
-    const block = blockOf(span);
-    const text = (block ? block.textContent : span.textContent) || "";
-    const idx = text.indexOf(span.textContent);
-    return extractSentence(text, idx < 0 ? 0 : idx);
-  }
-  function sentenceFromSelection(sel) {
-    try {
-      const node = sel.anchorNode;
-      const block = blockOf(node);
-      const text = (block ? block.textContent : (node && node.textContent)) || "";
-      const probe = (sel.toString() || "").trim();
-      const idx = probe ? text.indexOf(probe) : (sel.anchorOffset || 0);
-      return extractSentence(text, idx < 0 ? (sel.anchorOffset || 0) : idx);
-    } catch (e) { return (sel.toString() || "").trim(); }
-  }
-
-  // ---- 提示条 ----
-  function toast(text, ok) {
-    const t = document.createElement("div");
-    t.className = "lexis-web-toast" + (ok === false ? " err" : "");
-    t.textContent = text;
-    document.body.appendChild(t);
-    setTimeout(() => { t.style.opacity = "0"; setTimeout(() => t.remove(), 300); }, 1600);
-  }
-
-  async function doAdd(word, sentence, alias, folder) {
-    const payload = { word, sentence, url: location.href, title: document.title };
-    if (alias) payload.alias = alias;
-    if (folder) payload.folder = folder;
-    let r;
-    try { r = await chrome.runtime.sendMessage({ type: "add", payload }); }
-    catch (e) { r = null; }
-    if (r && r.ok) {
-      if (r.queued) {
-        toast(`已加入离线队列(${r.pending}条待同步)`, true);
-      } else {
-        detailCache.delete((word || "").toLowerCase());
-        if (alias) detailCache.delete(alias.toLowerCase());
-        toast(r.dup ? "这条已经在出处里了" : r.created ? alias ? `已将「${alias}」归入「${r.word}」` : `已新建单词「${r.word}」` : `已给「${r.word}」加出处`, true);
-        if (r.created || alias) {
-          // 先在当前页重建一次，不等同步；旧短词高亮必须先解包并合并文本节点，新长词才能跨原高亮位置命中。
-          const immediateKey = String(alias || r.word || word).toLowerCase();
-          knownKeys.add(immediateKey);
-          const responseFile = String(r.file || "");
-          const slash = responseFile.lastIndexOf("/");
-          const responseFolder = slash > 0 ? responseFile.slice(0, slash) : folder;
-          if (isDictionaryVisible(currentSite, responseFolder, styleCfg?.dicts || [], siteDictionaryVisibility) && !keySet.has(immediateKey)) {
-            keySet.add(immediateKey);
-            knownKeyByCompact.set(immediateKey, immediateKey);
-            matchKeyByCompact.set(immediateKey, immediateKey);
-            const compact = compactMixedSpacing(immediateKey);
-            if (!knownKeyByCompact.has(compact)) knownKeyByCompact.set(compact, immediateKey);
-            if (!matchKeyByCompact.has(compact)) matchKeyByCompact.set(compact, immediateKey);
-            regex = buildRe([...keySet].sort((a, b) => b.length - a.length));
-          }
-          if (cfg && cfg.highlight) { unwrapAll(); scan(document.body); startObserver(); }
-        }
-        if (r.created || alias) { try { await chrome.runtime.sendMessage({ type: "sync" }); } catch (e) {} }
-      }
-    } else {
-      toast(r && r.error === "bad-token" ? "令牌不对" : "添加失败(Obsidian 开着且桥接启用?)", false);
-    }
-    return r;
-  }
-
-  function applyTheme() {
-    const root = document.documentElement;
-    const color = (styleCfg && styleCfg.highlightColor) || cfg.color || "#7c5cff";
-    root.style.setProperty("--lexis-web-color", color);
-    root.setAttribute("data-lexis-style", (styleCfg && styleCfg.highlightStyle) || cfg.style || "wavy");
-  }
-
-  // 根据颜色亮度返回黑/白文字色
-  function textColorFor(bg) {
-    let hex = bg;
-    if (hex.startsWith("color-mix")) { const m = /#([0-9a-fA-F]{6})/.exec(hex); hex = m ? "#" + m[1] : "#7c5cff"; }
-    if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return "#fff";
-    const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
-    return (r * 0.299 + g * 0.587 + b * 0.114) > 160 ? "#1f2328" : "#fff";
-  }
-
-  // 多标签排除集合(兼容旧的单字段 excludeTag)
-  function excludeSet() {
-    const arr = (styleCfg && styleCfg.excludeTags) || (styleCfg && styleCfg.excludeTag ? [styleCfg.excludeTag] : []);
-    return new Set(arr.map((t) => String(t).toLowerCase()));
-  }
-
-  function build(words) {
-    allWords = Array.isArray(words) ? words : [];
-    keySet = new Set();
-    knownKeys = new Set();
-    keyTags = new Map();
-    keyFolder = new Map();
-    keyColor = new Map();
-    keyOpacity = new Map();
-    keyVisible = new Map();
-    keyStyle = new Map();
-    excludedKeys = new Set();
-    knownKeyByCompact = new Map();
-    matchKeyByCompact = new Map();
-    const exSet = excludeSet();
-    const keys = [];
-    for (const x of allWords) {
-      const k = (x.k || "").toLowerCase();
-      if (k.length < 2 && !/[^\x00-\x7f]/.test(k)) continue; // 英文单字母跳过,单个汉字保留
-      knownKeys.add(k);
-      knownKeyByCompact.set(k, k);
-      const compact = compactMixedSpacing(k);
-      if (!knownKeyByCompact.has(compact)) knownKeyByCompact.set(compact, k);
-      const tags = (x.t || []).map((t) => String(t).toLowerCase());
-      keyTags.set(k, tags);
-      if (x.f) keyFolder.set(k, x.f);
-      if (x.c) keyColor.set(k, x.c);
-      if (Number.isFinite(Number(x.o))) keyOpacity.set(k, Number(x.o));
-      keyVisible.set(k, x.v !== false);
-      if (x.s) keyStyle.set(k, x.s);
-      if (exSet.size && tags.some((t) => exSet.has(t))) { excludedKeys.add(k); continue; }
-      if (!isDictionaryVisible(currentSite, x.f, styleCfg?.dicts || [], siteDictionaryVisibility)) continue;
-      keySet.add(k);
-      matchKeyByCompact.set(k, k);
-      if (!matchKeyByCompact.has(compact)) matchKeyByCompact.set(compact, k);
-      keys.push(k);
-    }
-    keys.sort((a, b) => b.length - a.length);
-    regex = buildRe(keys);
-  }
-
-  // 某个词所属词典(文件夹)的专属高亮色;支持子文件夹归入父词典,取最长匹配
-  function dictColorFor(key) {
-    if (!styleCfg || !styleCfg.dictColors || !keyFolder) return null;
-    const wf = keyFolder.get(key);
-    if (!wf) return null;
-    const map = styleCfg.dictColors;
-    if (map[wf]) return map[wf];
-    let best = null, bestLen = -1;
-    for (const df in map) {
-      if (df && (wf === df || wf.startsWith(df + "/")) && df.length > bestLen) { best = map[df]; bestLen = df.length; }
-    }
-    return best;
-  }
-
-  // 对标 Obsidian 的 inlineStyleForEntry:词典色/标签规则 → 颜色/线型,带透明度
-  function inlineStyleFor(key) {
-    if (keyVisible && keyVisible.get(key) === false) return "text-decoration-line:none;background:none";
-    // 用户关了「使用 Obsidian 标签着色」→ 只用全局色
-    if (cfg.useObsidianStyle === false || !styleCfg) {
-      let c = cfg.color || "#7c5cff";
-      const s = cfg.style || "wavy";
-      const a = (cfg.opacity != null ? cfg.opacity : 100) / 100;
-      if (a < 1) c = `color-mix(in srgb, ${c} ${Math.round(a * 100)}%, transparent)`;
-      if (s === "background") return `background-color:${c};border-radius:3px;text-decoration-line:none`;
-      const line = s === "underline" ? "solid" : "wavy";
-      return `text-decoration-line:underline;text-decoration-style:${line};text-decoration-color:${c};text-underline-offset:2px`;
-    }
-    // 颜色/线型优先用服务端按「标签规则 > 词典色 > 全局」算好的值(与 ob 完全一致);没有则客户端兜底解析
-    let color = keyColor.get(key);
-    let styleKind = keyStyle.get(key);
-    if (!color) {
-      const tags = keyTags.get(key) || [];
-      color = dictColorFor(key) || styleCfg.highlightColor || cfg.color || "#7c5cff";
-      const rules = styleCfg.tagRules || [];
-      if (tags.length && rules.length) {
-        const rule = rules.find((r) => r.tag && tags.includes(r.tag.toLowerCase()));
-        if (rule) { if (rule.color) color = rule.color; if (rule.style && !styleKind) styleKind = rule.style; }
-      }
-    }
-    if (!styleKind) styleKind = styleCfg.highlightStyle || cfg.style || "wavy";
-    const alpha = keyOpacity.has(key) ? keyOpacity.get(key) : (styleCfg.highlightOpacity != null ? styleCfg.highlightOpacity : 1);
-    if (alpha < 1) color = `color-mix(in srgb, ${color} ${Math.round(alpha * 100)}%, transparent)`;
-    if (styleKind === "background") return `background-color:${color};border-radius:3px;text-decoration-line:none`;
-    const line = styleKind === "underline" ? "solid" : "wavy";
-    return `text-decoration-line:underline;text-decoration-style:${line};text-decoration-color:${color};text-underline-offset:2px`;
-  }
-
-  function skip(node) {
-    let p = node.parentElement;
-    while (p) {
-      if (SKIP_TAGS.has(p.tagName)) return true;
-      if (p.isContentEditable) return true;
-      if (p.classList && (p.classList.contains(HL) || p.classList.contains("lexis-web-pop"))) return true;
-      p = p.parentElement;
-    }
-    return false;
-  }
-
-  function wrap(textNode) {
-    const text = textNode.nodeValue;
-    regex.lastIndex = 0;
-    let m, last = 0, found = false;
-    const frag = document.createDocumentFragment();
-    while ((m = regex.exec(text))) {
-      const key = resolveMatchKey(m[0]);
-      if (!keySet.has(key)) continue;
-      found = true;
-      if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
-      const span = document.createElement("span");
-      span.className = HL;
-      span.dataset.k = key;
-      span.textContent = m[0];
-      span.setAttribute("style", inlineStyleFor(key));
-      frag.appendChild(span);
-      last = m.index + m[0].length;
-    }
-    if (!found) return;
-    if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
-    textNode.parentNode.replaceChild(frag, textNode);
-  }
-
-  function scan(root) {
-    if (!regex || !(cfg && cfg.highlight)) return;
-    const selection = window.getSelection();
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-      acceptNode(n) {
-        if (!n.nodeValue || (n.nodeValue.length < 2 && !/[^\x00-\x7f]/.test(n.nodeValue))) return NodeFilter.FILTER_REJECT;
-        if (skip(n)) return NodeFilter.FILTER_REJECT;
-        if (selectionIntersectsNode(selection, n)) {
-          if (n.parentElement) selectionDeferredRoots.add(n.parentElement);
-          return NodeFilter.FILTER_REJECT;
-        }
-        regex.lastIndex = 0;
-        if (!regex.test(n.nodeValue)) return NodeFilter.FILTER_REJECT;
-        return NodeFilter.FILTER_ACCEPT;
-      },
-    });
-    const targets = [];
-    let n;
-    while ((n = walker.nextNode())) targets.push(n);
-    for (const t of targets) wrap(t);
-  }
-
-  function unwrapAll() {
-    const parents = new Set();
-    for (const span of document.querySelectorAll("." + HL)) {
-      if (span.parentNode) parents.add(span.parentNode);
-      const tn = document.createTextNode(span.textContent);
-      span.parentNode.replaceChild(tn, span);
-    }
-    for (const parent of parents) if (parent.isConnected) parent.normalize();
-  }
-
-  function scheduleScan() {
-    clearTimeout(scanTimer);
-    scanTimer = setTimeout(flushScan, 120);
-  }
-  function flushScan() {
-    if (!regex || !(cfg && cfg.highlight)) { pendingRoots.clear(); return; }
-    const roots = [...pendingRoots];
-    pendingRoots.clear();
-    if (!roots.length) return;
-    // 只扫变动的子树(而非整页),YouTube 字幕这种频繁重渲染的也能近乎即时重新高亮、且不卡
-    for (const r of roots) { if (r && r.isConnected) scan(r); }
-  }
-
-  function startObserver() {
-    if (observer) return;
-    observer = new MutationObserver((muts) => {
-      let any = false;
-      for (const mu of muts) {
-        if (mu.type === "characterData") {
-          const p = mu.target && mu.target.parentElement;
-          if (p && !(p.classList && p.classList.contains(HL))) { pendingRoots.add(p); any = true; }
-          continue;
-        }
-        for (const node of mu.addedNodes) {
-          if (node.nodeType === 1) {
-            if (node.classList && node.classList.contains(HL)) continue; // 自己插的高亮,别再触发
-            pendingRoots.add(node); any = true;
-          } else if (node.nodeType === 3 && node.parentElement && !(node.parentElement.classList && node.parentElement.classList.contains(HL))) {
-            pendingRoots.add(node.parentElement); any = true;
-          }
-        }
-      }
-      if (any) scheduleScan();
-    });
-    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
-  }
-
-  // ---- 悬停卡 ----
-  let hoverTimer = null, hoverTarget = null;
-  function removePop() {
-    clearTimeout(hoverTimer); hoverTimer = null; hoverTarget = null;
-    if (popHost) popHost.remove();
-    popHost = null; pop = null;
-  }
-  function scheduleHide() {
-    clearTimeout(hideTimer);
-    hideTimer = setTimeout(() => {
-      if (pop?.dataset.lexisResizing !== "1") removePop();
-    }, 220);
-  }
-
-  function attachPopoverResize(box, anchor) {
-    if (window.matchMedia?.("(pointer: coarse)").matches) return;
-    const handle = document.createElement("div");
-    handle.className = "lexis-web-resize";
-    handle.setAttribute("role", "separator");
-    handle.setAttribute("aria-label", "拖动调整卡片大小");
-    handle.title = "拖动调整卡片大小";
-    handle.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0) return;
-      event.preventDefault();
-      event.stopPropagation();
-      clearTimeout(hideTimer);
-      const start = box.getBoundingClientRect();
-      const startHeight = box.style.height;
-      const startMaxHeight = box.style.maxHeight;
-      const startX = event.clientX;
-      const startY = event.clientY;
-      box.dataset.lexisResizing = "1";
-      try { handle.setPointerCapture(event.pointerId); } catch (_error) {}
-      const resize = (move) => {
-        const maxWidth = Math.max(260, window.innerWidth - start.left - 10);
-        const maxHeight = Math.max(160, window.innerHeight - start.top - 10);
-        const width = Math.max(260, Math.min(maxWidth, start.width + move.clientX - startX));
-        const height = Math.max(160, Math.min(maxHeight, start.height + move.clientY - startY));
-        box.style.width = width + "px";
-        box.style.height = height + "px";
-        box.style.maxHeight = height + "px";
-      };
-      const finish = (cancelled) => {
-        handle.removeEventListener("pointermove", resize);
-        handle.removeEventListener("pointerup", onPointerUp);
-        handle.removeEventListener("pointercancel", onPointerCancel);
-        delete box.dataset.lexisResizing;
-        if (cancelled) {
-          box.style.width = start.width + "px";
-          box.style.height = startHeight;
-          box.style.maxHeight = startMaxHeight;
-        } else {
-          const result = box.getBoundingClientRect();
-          popoverSize = { width: Math.round(result.width), height: Math.round(result.height) };
-          box.style.height = "";
-          box.style.maxHeight = popoverSize.height + "px";
-          void chrome.storage.local.set({ popoverSize });
-        }
-        position(popHost, anchor);
-      };
-      const onPointerUp = () => finish(false);
-      const onPointerCancel = () => finish(true);
-      handle.addEventListener("pointermove", resize);
-      handle.addEventListener("pointerup", onPointerUp);
-      handle.addEventListener("pointercancel", onPointerCancel);
-    });
-    box.appendChild(handle);
-  }
-
-  async function showPop(span) {
-    const key = span.dataset.k;
-    currentSpan = span;
-    if (pop && pop.dataset.k === key) { clearTimeout(hideTimer); return; }
-    const cardSheet = await popoverSheet();
-    if (hoverTarget !== span || !span.isConnected) return;
-    removePop();
-    popHost = document.createElement("lexis-web-popover");
-    popHost.style.cssText = "position:absolute;z-index:2147483647;display:block;";
-    const shadow = popHost.attachShadow({ mode: "open" });
-    shadow.adoptedStyleSheets = [cardSheet];
-    pop = document.createElement("div");
-    pop.className = "lexis-web-pop";
-    pop.dataset.k = key;
-    pop.innerHTML = `<div class="lexis-web-pop-scroll"><div class="lexis-web-pop-title">${span.textContent}</div><div class="lexis-web-pop-corner"></div><div class="lexis-web-pop-meta"></div><div class="lexis-web-pop-body"></div></div>`;
-    pop.addEventListener("mouseenter", () => clearTimeout(hideTimer));
-    pop.addEventListener("mouseleave", scheduleHide);
-    shadow.appendChild(pop);
-    document.body.appendChild(popHost);
-    const width = Math.max(260, Number(popoverSize && popoverSize.width) || Number(styleCfg && styleCfg.popoverWidth) || 460);
-    const height = Math.max(160, Number(popoverSize && popoverSize.height) || Number(styleCfg && styleCfg.popoverMaxHeight) || 420);
-    const fontSize = Math.max(11, Number(styleCfg && styleCfg.popoverFontSize) || 14);
-    pop.style.setProperty("--lexis-popover-width", width + "px");
-    pop.style.setProperty("--lexis-popover-height", height + "px");
-    pop.style.setProperty("--lexis-popover-font-size", fontSize + "px");
-    pop.style.width = width + "px";
-    pop.style.maxHeight = height + "px";
-    attachPopoverResize(pop, span);
-    position(popHost, span);
-
-    let data = detailCache.get(key);
-    const loadingTimer = data ? null : setTimeout(() => {
-      if (pop?.dataset.k === key) pop.querySelector(".lexis-web-pop-body").textContent = "加载中…";
-    }, 180);
-    if (!data) {
-      try { data = await chrome.runtime.sendMessage({ type: "detail", key }); }
-      catch (e) { data = { ok: false, error: "扩展未连接", offline: true }; }
-      if (data && data.ok) detailCache.set(key, data);
-    }
-    if (loadingTimer !== null) clearTimeout(loadingTimer);
-    if (!pop || pop.dataset.k !== key) return;
-    renderDetail(pop, data);
-    position(popHost, span);
-  }
-
-  function obsidianUri(data) {
-    if (!data.vault || !data.file) return null;
-    return `obsidian://open?vault=${encodeURIComponent(data.vault)}&file=${encodeURIComponent(data.file)}`;
-  }
-
-  function renderDetail(box, data) {
-    const titleEl = box.querySelector(".lexis-web-pop-title");
-    const cornerEl = box.querySelector(".lexis-web-pop-corner");
-    const metaEl = box.querySelector(".lexis-web-pop-meta");
-    const body = box.querySelector(".lexis-web-pop-body");
-    cornerEl.textContent = "";
-    metaEl.textContent = "";
-    body.innerHTML = "";
-    box.classList.toggle("has-corner-actions", !!(data && data.ok && !data.inline));
-    if (!data || !data.ok) {
-      if (data?.error === "request-timeout") body.textContent = "卡片加载超时，请检查 Obsidian 连接";
-      else body.textContent = data?.offline ? "Obsidian 未连接(开着且桥接已启用?)" : "未找到这个词";
-      return;
-    }
-    installMathCss(box.getRootNode(), data.mathCss);
-    // 标题:点击在 Obsidian 中打开该笔记
-    const uri = obsidianUri(data);
-    titleEl.textContent = "";
-    const primary = data.title || data.base || data.word;
-    const secondary = data.subtitle || (data.alias && data.word !== primary ? data.word : data.inline && data.category ? data.category : "");
-    if (uri) {
-      const a = document.createElement("a");
-      a.className = "lexis-web-open";
-      a.href = uri;
-      a.title = "在 Obsidian 中打开";
-      const main = document.createElement("span");
-      main.className = "lexis-web-title-main";
-      main.textContent = primary;
-      a.appendChild(main);
-      if (secondary) {
-        const sub = document.createElement("span");
-        sub.className = "lexis-web-title-sub";
-        sub.textContent = secondary;
-        a.appendChild(sub);
-      }
-      const pen = document.createElement("span"); pen.className = "lexis-web-pen"; pen.textContent = " ✎";
-      a.appendChild(pen);
-      titleEl.appendChild(a);
-    } else {
-      titleEl.textContent = primary;
-    }
-    // 所属文件夹/词典小标;点击可把这个词移到别的词典(只移动文件,正文/批注不变)
-    {
-      const fp = data.file || "";
-      const slash = fp.lastIndexOf("/");
-      const dir = slash > 0 ? fp.slice(0, slash) : "";
-      const allDicts = (styleCfg && Array.isArray(styleCfg.dicts) ? styleCfg.dicts : []).filter(Boolean);
-      const dname = (f) => (String(f).split("/").pop() || f);
-      const b = document.createElement("span");
-      b.className = "lexis-web-dict";
-      b.textContent = dir ? dname(dir) : "(根目录)";
-      b.title = dir || "根目录";
-      const moveKey = data.base || data.word;
-      if (!data.inline && allDicts.length > 1) {
-        b.classList.add("lexis-web-dict-click");
-        b.title = (dir || "根目录") + " —— 点击移到别的词典";
-        let listEl = null;
-        const closeList = () => { if (listEl) { listEl.remove(); listEl = null; document.removeEventListener("mousedown", onDocDown); } };
-        const onDocDown = (e) => { if (listEl && !listEl.contains(e.target) && e.target !== b) closeList(); };
-        b.addEventListener("mousedown", (ev) => { ev.preventDefault(); ev.stopPropagation(); });
-        b.addEventListener("click", (ev) => {
-          ev.preventDefault(); ev.stopPropagation();
-          if (listEl) { closeList(); return; }
-          listEl = document.createElement("div");
-          listEl.className = "lexis-web-tag-list lexis-web-dict-list";
-          allDicts.forEach((f) => {
-            const it = document.createElement("span");
-            it.className = "lexis-web-tag" + (f === dir ? " lexis-web-tag-off" : "");
-            it.textContent = dname(f); it.title = f;
-            it.addEventListener("mousedown", (e2) => { e2.preventDefault(); e2.stopPropagation(); });
-            it.addEventListener("click", async (e2) => {
-              e2.stopPropagation();
-              if (f === dir) { closeList(); return; }
-              closeList();
-              const r = await chrome.runtime.sendMessage({ type: "move", payload: { key: moveKey, folder: f } });
-              if (r && r.ok) {
-                toast(r.reTemplated ? `已移到 ${dname(f)} 并套用该词典模板(批注保留)` : `已把「${data.word}」移到 ${dname(f)}`, true);
-                const k = (pop && pop.dataset.k) || (data.word || "").toLowerCase();
-                detailCache.delete(k);
-                // 重新取最新内容(可能重套了模板),就地重渲染卡片;不调 position(),避免卡片跳走
-                let fresh; try { fresh = await chrome.runtime.sendMessage({ type: "detail", key: k }); } catch (_e) {}
-                const nd = (fresh && fresh.ok) ? fresh : Object.assign({}, data, { file: r.file });
-                detailCache.set(k, nd);
-                if (pop && pop.dataset.k === k) renderDetail(pop, nd);
-              } else toast(r && r.error === "exists" ? "那个词典里已有同名词" : "移动失败", false);
-            });
-            listEl.appendChild(it);
-          });
-          // 挂到悬浮卡根节点(而不是小标 span)并手动定位,避免被卡片正文盖住/裁掉
-          const host = pop || b;
-          const br = b.getBoundingClientRect();
-          const hr = host.getBoundingClientRect();
-          listEl.style.left = Math.round(br.left - hr.left) + "px";
-          listEl.style.top = Math.round(br.bottom - hr.top + 4) + "px";
-          host.appendChild(listEl);
-          document.addEventListener("mousedown", onDocDown);
-        });
-      }
-      metaEl.appendChild(b);
-    }
-    // ➕ 给这个词加出处(抓页面上它所在的那句)
-    const addBtn = document.createElement("button");
-    addBtn.className = "lexis-web-addbtn";
-    addBtn.textContent = "+ 出处";
-    addBtn.title = "把这个词在本页所在的句子加进它的出处";
-    const targetWord = data.base || data.word;
-    addBtn.addEventListener("click", async (ev) => {
-      ev.preventDefault();
-      const sentence = currentSpan ? sentenceAroundSpan(currentSpan) : "";
-      addBtn.disabled = true; addBtn.textContent = "…";
-      await doAdd(targetWord, sentence);
-      removePop();
-    });
-    if (!data.inline) metaEl.appendChild(addBtn);
-    // ✎ 批注:纯文字写进笔记的 #### 批注 小节
-    const noteBtn = document.createElement("button");
-    noteBtn.className = "lexis-web-addbtn";
-    noteBtn.textContent = "✎";
-    noteBtn.title = "给这个词写一条批注(纯文字,写入笔记的 #### 批注)";
-    noteBtn.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      if (body.querySelector(".lexis-web-noterow")) { body.querySelector(".lexis-web-noteinput").focus(); return; }
-      const row = document.createElement("div");
-      row.className = "lexis-web-noterow";
-      const input = document.createElement("input");
-      input.className = "lexis-web-noteinput";
-      input.placeholder = "写批注,回车保存,Esc 取消";
-      const save = async () => {
-        const text = input.value.trim();
-        if (!text) { row.remove(); return; }
-        input.disabled = true;
-        try {
-          const r = await chrome.runtime.sendMessage({ type: "note", payload: { key: targetWord, note: text } });
-          if (r && r.ok) { toast(`已给「${data.word}」加批注`, true); detailCache.delete((data.word || data.base || "").toLowerCase()); }
-          else toast(r && r.error === "not-found" ? "这个词不在库里" : "批注失败(Obsidian 开着且桥接启用?)", false);
-        } catch (e) { toast("批注失败(连不上?)", false); }
-        removePop();
-      };
-      input.addEventListener("mousedown", (e) => e.stopPropagation());
-      input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); save(); } else if (e.key === "Escape") { e.preventDefault(); row.remove(); } });
-      row.appendChild(input);
-      body.insertBefore(row, body.firstChild);
-      input.focus();
-    });
-    if (!data.inline) cornerEl.appendChild(noteBtn);
-    // ✕ 删除按钮
-    const delBtn = document.createElement("button");
-    delBtn.className = "lexis-web-addbtn lexis-web-addbtn-del";
-    delBtn.textContent = "🗑";
-    delBtn.title = "从词库中删除这个词";
-    delBtn.addEventListener("click", async (ev) => {
-      ev.preventDefault();
-      if (!confirm(`删除「${data.word}」?`)) return;
-      delBtn.disabled = true; delBtn.textContent = "…";
-      try {
-        const r = await chrome.runtime.sendMessage({ type: "delete", key: data.word || data.base });
-        if (r && r.ok) {
-          detailCache.delete((data.word || data.base || "").toLowerCase());
-          await chrome.runtime.sendMessage({ type: "sync" });
-          toast(`已删除「${r.deleted}」`, true);
-        } else toast("删除失败", false);
-      } catch (e) { toast("删除失败(连不上?)", false); }
-      removePop();
-    });
-    if (!data.inline) cornerEl.appendChild(delBtn);
-    // ---- 标签管理 ----
-    if (!data.inline) {
-    const tagWrap = document.createElement("div");
-    tagWrap.className = "lexis-web-pop-tags";
-    body.appendChild(tagWrap);
-    const exSet = excludeSet();
-    let bucketEl = null;
-
-    const syncTags = async () => { await chrome.runtime.sendMessage({ type: "sync" }).catch(() => {}); };
-
-    const updateBucket = () => {
-      if (!bucketEl) return;
-      bucketEl.querySelectorAll(".lexis-web-tag").forEach((p) => {
-        const t = p.textContent.replace(/^#/, "");
-        p.classList.toggle("lexis-web-tag-off", (data.tags || []).includes(t));
-      });
-    };
-
-    const addTagPill = (tag) => {
-      const s = document.createElement("span");
-      s.className = "lexis-web-tag" + (exSet.has(tag.toLowerCase()) ? " lexis-web-tag-excl" : "");
-      s.textContent = "#" + tag;
-      s.dataset.tag = tag;
-      const x = document.createElement("span");
-      x.className = "lexis-web-tag-del"; x.textContent = " ×";
-      x.addEventListener("mousedown", (ev) => { ev.preventDefault(); ev.stopPropagation(); });
-      x.addEventListener("click", async (ev) => {
-        ev.stopPropagation();
-        const r = await chrome.runtime.sendMessage({ type: "tag", payload: { key: data.word || data.base, tag: tag, action: "remove" } });
-        if (r && r.ok) {
-          data.tags = r.tags; detailCache.delete((data.word || data.base || "").toLowerCase());
-          syncTags();
-          s.remove();
-          updateBucket();
-        }
-      });
-      s.appendChild(x);
-      tagWrap.insertBefore(s, tagWrap.querySelector(".lexis-web-tag-pick"));
-    };
-
-    // 现有标签
-    if (data.tags) for (const t of data.tags) addTagPill(t);
-
-    // + 选择器(始终在末尾)
-    const pick = document.createElement("div");
-    pick.className = "lexis-web-tag-pick";
-    const header = document.createElement("span");
-    header.className = "lexis-web-tag lexis-web-tag-add";
-    header.textContent = (data.tags && data.tags.length > 0) ? "+" : "+ 标签";
-    header.addEventListener("mousedown", (ev) => { ev.preventDefault(); ev.stopPropagation(); });
-    header.addEventListener("click", async (ev) => {
-      ev.stopPropagation();
-      if (bucketEl) { bucketEl.remove(); bucketEl = null; return; }
-      const { words: cached } = await chrome.storage.local.get("words");
-      const known = new Set(); if (cached) for (const w of cached) for (const t of (w.t || [])) known.add(t);
-      bucketEl = document.createElement("div");
-      bucketEl.className = "lexis-web-tag-list";
-      for (const t of [...known].sort()) {
-        const p = document.createElement("span");
-        p.className = "lexis-web-tag" + ((data.tags || []).includes(t) ? " lexis-web-tag-off" : "");
-        p.textContent = "#" + t;
-        p.addEventListener("mousedown", (ev) => { ev.preventDefault(); ev.stopPropagation(); });
-        p.addEventListener("click", async (ev) => {
-          ev.stopPropagation();
-          if ((data.tags || []).includes(t)) {
-            const r = await chrome.runtime.sendMessage({ type: "tag", payload: { key: data.word || data.base, tag: t, action: "remove" } });
-            if (r && r.ok) {
-              data.tags = r.tags; detailCache.delete((data.word || data.base || "").toLowerCase());
-              syncTags();
-              const pill = tagWrap.querySelector('[data-tag="'+t+'"]');
-              if (pill) pill.remove();
-              updateBucket();
-            }
-          } else {
-            const r = await chrome.runtime.sendMessage({ type: "tag", payload: { key: data.word || data.base, tag: t, action: "add" } });
-            if (r && r.ok) {
-              data.tags = r.tags; detailCache.delete((data.word || data.base || "").toLowerCase());
-              syncTags();
-              addTagPill(t);
-              updateBucket();
-            }
-          }
-        });
-        bucketEl.appendChild(p);
-      }
-      const closer = (e) => { if (!bucketEl.contains(e.target) && e.target !== header) { bucketEl.remove(); bucketEl = null; document.removeEventListener("mousedown", closer); } };
-      document.addEventListener("mousedown", closer);
-      pick.appendChild(bucketEl);
-    });
-    pick.appendChild(header);
-    tagWrap.appendChild(pick);
-    }
-    const content = document.createElement("div");
-    content.className = "lexis-web-pop-content";
-    if (data.html && data.html.trim()) content.innerHTML = data.html;
-    else content.textContent = (data.meaning || data.markdown || "").trim() || "(这个词笔记里还没写内容)";
-    if (cfg.showMemoryCurve === false) {
-      content.querySelectorAll(".lexis-web-curve").forEach((curve) => {
-        const title = curve.previousElementSibling;
-        if (title?.classList.contains("lexis-web-sec") && title.textContent.includes("记忆曲线")) title.remove();
-        curve.remove();
-      });
-    }
-    body.appendChild(content);
-
-    if (data.extraHtml && data.extraHtml.trim()) {
-      const extra = document.createElement("div");
-      extra.className = "lexis-web-pop-extra";
-      extra.innerHTML = data.extraHtml;
-      body.appendChild(extra);
-    }
-    loadOccurrences(box, box.dataset.k);
-  }
-
-  async function loadOccurrences(box, key) {
-    const placeholders = [...box.querySelectorAll(".lexis-web-occ-pending")];
-    if (!placeholders.length) return;
-    const retry = async () => {
-      for (const el of placeholders) { el.textContent = "出处加载中…"; el.removeAttribute("role"); el.removeAttribute("tabindex"); el.onclick = null; el.onkeydown = null; }
-      let result;
-      try { result = await chrome.runtime.sendMessage({ type: "occurrences", key }); }
-      catch (_error) { result = { ok: false, error: "offline" }; }
-      if (!box.isConnected || box.dataset.k !== key) return;
-      if (result?.ok) {
-        installMathCss(box.getRootNode(), result.mathCss);
-        for (const el of placeholders) {
-          if (!el.isConnected) continue;
-          const fragment = document.createElement("div");
-          fragment.innerHTML = result.html || "";
-          el.replaceWith(...fragment.childNodes);
-        }
-        if (popHost && currentSpan) position(popHost, currentSpan);
-      } else {
-        for (const el of placeholders) {
-          if (!el.isConnected) continue;
-          el.textContent = "出处暂未加载 · 点击重试";
-          el.setAttribute("role", "button");
-          el.setAttribute("tabindex", "0");
-          el.onclick = retry;
-          el.onkeydown = (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); void retry(); } };
-        }
-      }
-    };
-    await retry();
-  }
-
-  async function preloadVisibleDetails() {
-    void popoverSheet().catch(() => null);
-    const keys = new Set();
-    for (const span of document.querySelectorAll(`.${HL}`)) {
-      const rect = span.getBoundingClientRect();
-      if (rect.bottom < 0 || rect.top > innerHeight || rect.right < 0 || rect.left > innerWidth) continue;
-      const key = span.dataset.k;
-      if (!key || detailCache.has(key) || keys.has(key)) continue;
-      keys.add(key);
-      if (keys.size >= 4) break;
-    }
-    for (const key of keys) {
-      const result = await chrome.runtime.sendMessage({ type: "detail", key }).catch(() => null);
-      if (result?.ok) detailCache.set(key, result);
-    }
-  }
-
-  function position(box, span) {
-    if (!span || !span.isConnected) return; // span 被重新高亮拆掉后别把卡片定位到角落
-    const r = span.getBoundingClientRect();
-    const bw = box.offsetWidth || 320, bh = box.offsetHeight || 80;
-    let left = r.left + window.scrollX;
-    let top = r.bottom + window.scrollY + 6;
-    if (left + bw > window.scrollX + document.documentElement.clientWidth - 8) left = window.scrollX + document.documentElement.clientWidth - bw - 8;
-    if (r.bottom + bh + 12 > document.documentElement.clientHeight) top = r.top + window.scrollY - bh - 6;
-    box.style.left = Math.max(8, left) + "px";
-    box.style.top = Math.max(8, top) + "px";
-  }
-
-  document.addEventListener("mouseover", (e) => {
-    const t = e.target;
-    if (!(t && t.classList && t.classList.contains(HL))) return;
-    if (pointerSelecting || (e.buttons & 1) || hasExpandedSelection(window.getSelection())) return;
-    clearTimeout(hideTimer);
-    if (pop && pop.dataset.k === t.dataset.k) return;
-    if (hoverTarget === t) return;
-    clearTimeout(hoverTimer);
-    hoverTarget = t;
-    // 快速掠过高亮时不启动详情渲染；用户真正停住后再请求。
-    const delay = Math.max(120, Number(styleCfg && styleCfg.hoverDelayMs) || 0);
-    const open = () => { hoverTimer = null; if (hoverTarget === t && t.isConnected) showPop(t); };
-    if (delay) hoverTimer = setTimeout(open, delay); else open();
-  });
-  document.addEventListener("mouseout", (e) => {
-    const t = e.target;
-    if (!(t && t.classList && t.classList.contains(HL))) return;
-    if (hoverTarget === t) { clearTimeout(hoverTimer); hoverTimer = null; hoverTarget = null; }
-    if (pop && pop.dataset.k === t.dataset.k) scheduleHide();
-  });
-
-  // ---- 划词添加:选中文本 → 浮动 pill([＋] [词典] [🔗]) ----
-  let selBtn = null;
-  function hideSelBtn() {
-    if (selBtn) { selBtn.remove(); selBtn = null; }
-    document.querySelectorAll(".lexis-web-folderlist,.lexis-web-alias-results").forEach((element) => element.remove());
-  }
-  function hasWordContent(text) { return /[\p{L}\p{N}]/u.test(text); }
-  function isSelectionCandidate(text) {
-    if (!text || text.length > 60 || !hasWordContent(text)) return false;
-    const hasCjk = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(text);
-    return hasCjk || text.split(/\s+/u).length <= 6;
-  }
-  function onSelect() {
-    // 正在用我们自己的别名输入框时别打扰(selectionchange 会因 input 聚焦误触发)
-    if (selBtn && document.activeElement && selBtn.contains(document.activeElement)) return;
-    const sel = window.getSelection();
-    const text = sel ? sel.toString().trim() : "";
-    // 选区没变、且 pill 已经在了 → 别重建(否则在 pill 上点文件夹下拉会被 mouseup 触发的本函数拆掉,闪一下就没)
-    if (selBtn && selBtn.dataset && selBtn.dataset.word === text && text) return;
-    if (!isSelectionCandidate(text)) { hideSelBtn(); return; }
-    // 选中词已在库中(含别名) → 不弹按钮
-    const selectedKey = resolveKnownKey(text);
-    if (keySet && keySet.has(selectedKey)) { hideSelBtn(); return; }
-    // 获取选区矩形(排除词分支和正常 pill 分支共用的定位信息)
-    let rect;
-    try { rect = sel.getRangeAt(0).getBoundingClientRect(); } catch (e) { return; }
-    if (!rect || (!rect.width && !rect.height)) return;
-    // 选中词被排除高亮 → 弹 [取消排除]
-    if (excludedKeys && excludedKeys.has(selectedKey)) {
-      hideSelBtn();
-      selBtn = document.createElement("button");
-      selBtn.className = "lexis-web-selbtn";
-      selBtn.textContent = "取消排除";
-      selBtn.title = "去掉排除标签,恢复高亮";
-      selBtn.addEventListener("mousedown", (e) => e.preventDefault());
-      selBtn.addEventListener("click", async () => {
-        selBtn.disabled = true; selBtn.textContent = "…";
-        // 逐个去掉该词身上命中的全部排除标签
-        const exSet = excludeSet();
-        const wordTags = (keyTags && keyTags.get(selectedKey)) || [];
-        const toRemove = [...new Set(wordTags.filter((t) => exSet.has(t)))];
-        let ok = false;
-        for (const tag of toRemove) {
-          const r = await chrome.runtime.sendMessage({ type: "tag", payload: { key: selectedKey, tag, action: "remove" } });
-          if (r && r.ok) ok = true;
-        }
-        if (ok) await chrome.runtime.sendMessage({ type: "sync" });
-        hideSelBtn();
-      });
-      const bw = 72, bh = 26, gap = 6;
-      let left = rect.left + (rect.width - bw) / 2 + window.scrollX;
-      let top = rect.bottom + window.scrollY + gap;
-      if (top + bh > window.scrollY + document.documentElement.clientHeight - 8) top = rect.top + window.scrollY - bh - gap;
-      selBtn.style.left = Math.max(8, Math.min(left, window.scrollX + document.documentElement.clientWidth - bw - 8)) + "px";
-      selBtn.style.top = Math.max(8, top) + "px";
-      document.body.appendChild(selBtn);
-      return;
-    }
-    if (knownKeys && knownKeys.has(selectedKey)) { hideSelBtn(); return; }
+// ---- 划词添加:选中文本 → 浮动 pill([＋] [词典] [🔗]) ----
+let selBtn = null;
+function hideSelBtn() {
+  if (selBtn) { selBtn.remove(); selBtn = null; }
+  document.querySelectorAll(".lexis-web-folderlist,.lexis-web-alias-results").forEach((element) => element.remove());
+}
+function hasWordContent(text) { return /[\p{L}\p{N}]/u.test(text); }
+function isSelectionCandidate(text) {
+  if (!text || text.length > 60 || !hasWordContent(text)) return false;
+  const hasCjk = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(text);
+  return hasCjk || text.split(/\s+/u).length <= 6;
+}
+function onSelect() {
+  // 正在用我们自己的别名输入框时别打扰(selectionchange 会因 input 聚焦误触发)
+  if (selBtn && document.activeElement && selBtn.contains(document.activeElement)) return;
+  const sel = window.getSelection();
+  const text = sel ? sel.toString().trim() : "";
+  // 选区没变、且 pill 已经在了 → 别重建(否则在 pill 上点文件夹下拉会被 mouseup 触发的本函数拆掉,闪一下就没)
+  if (selBtn && selBtn.dataset && selBtn.dataset.word === text && text) return;
+  if (!isSelectionCandidate(text)) { hideSelBtn(); return; }
+  // 选中词已在库中(含别名) → 不弹按钮
+  const selectedKey = resolveKnownKey(text);
+  if (keySet && keySet.has(selectedKey)) { hideSelBtn(); return; }
+  // 获取选区矩形(排除词分支和正常 pill 分支共用的定位信息)
+  let rect;
+  try { rect = sel.getRangeAt(0).getBoundingClientRect(); } catch (e) { return; }
+  if (!rect || (!rect.width && !rect.height)) return;
+  // 选中词被排除高亮 → 弹 [取消排除]
+  if (excludedKeys && excludedKeys.has(selectedKey)) {
     hideSelBtn();
-    const sentence = sentenceFromSelection(sel);
-    // 目标词典(文件夹)列表;优先沿用上次选择，目标已不存在时才回退到第一个。
-    const dicts = (styleCfg && Array.isArray(styleCfg.dicts) ? styleCfg.dicts : []).filter(Boolean);
-    let selFolder = dicts.includes(lastSelectionFolder) ? lastSelectionFolder : (dicts[0] || "");
-    const fname = (f) => (String(f).split("/").pop() || f);
-
-    const pill = document.createElement("div");
-    pill.className = "lexis-web-selpill";
-
-    const addBtn = document.createElement("button");
-    addBtn.className = "lexis-web-selbtn-pill";
-    addBtn.textContent = "＋";
-    addBtn.title = "直接以选中词为标题建新词";
-    addBtn.addEventListener("mousedown", (e) => e.preventDefault());
-    addBtn.addEventListener("click", async () => {
-      addBtn.disabled = true; addBtn.textContent = "…";
-      await doAdd(text, sentence, undefined, selFolder);
+    selBtn = document.createElement("button");
+    selBtn.className = "lexis-web-selbtn";
+    selBtn.textContent = "取消排除";
+    selBtn.title = "去掉排除标签,恢复高亮";
+    selBtn.addEventListener("mousedown", (e) => e.preventDefault());
+    selBtn.addEventListener("click", async () => {
+      selBtn.disabled = true; selBtn.textContent = "…";
+      // 逐个去掉该词身上命中的全部排除标签
+      const exSet = excludeSet();
+      const wordTags = (keyTags && keyTags.get(selectedKey)) || [];
+      const toRemove = [...new Set(wordTags.filter((t) => exSet.has(t)))];
+      let ok = false;
+      for (const tag of toRemove) {
+        const r = await chrome.runtime.sendMessage({ type: "tag", payload: { key: selectedKey, tag, action: "remove" } });
+        if (r && r.ok) ok = true;
+      }
+      if (ok) await chrome.runtime.sendMessage({ type: "sync" });
       hideSelBtn();
     });
-    pill.appendChild(addBtn);
+    const bw = 72, bh = 26, gap = 6;
+    let left = rect.left + (rect.width - bw) / 2 + window.scrollX;
+    let top = rect.bottom + window.scrollY + gap;
+    if (top + bh > window.scrollY + document.documentElement.clientHeight - 8) top = rect.top + window.scrollY - bh - gap;
+    selBtn.style.left = Math.max(8, Math.min(left, window.scrollX + document.documentElement.clientWidth - bw - 8)) + "px";
+    selBtn.style.top = Math.max(8, top) + "px";
+    document.body.appendChild(selBtn);
+    return;
+  }
+  if (knownKeys && knownKeys.has(selectedKey)) { hideSelBtn(); return; }
+  hideSelBtn();
+  const sentence = sentenceFromSelection(sel);
+  // 目标词典(文件夹)列表;优先沿用上次选择，目标已不存在时才回退到第一个。
+  const dicts = (styleCfg && Array.isArray(styleCfg.dicts) ? styleCfg.dicts : []).filter(Boolean);
+  let selFolder = dicts.includes(lastSelectionFolder) ? lastSelectionFolder : (dicts[0] || "");
+  const fname = (f) => (String(f).split("/").pop() || f);
 
-    // 文件夹/词典选择段(需在设置里开启,且有多个词典)
-    if (dicts.length > 1) {
-      const folderBtn = document.createElement("button");
-      folderBtn.className = "lexis-web-selbtn-pill lexis-web-selfolder";
-      folderBtn.textContent = "📁 " + fname(selFolder);
-      folderBtn.title = "选择加到哪个词典(文件夹)";
-      folderBtn.addEventListener("mousedown", (e) => e.preventDefault());
-      let flist = null;
-      const closeFList = () => { if (flist) { flist.remove(); flist = null; document.removeEventListener("mousedown", onFDown); } };
-      const onFDown = (e) => { if (flist && !flist.contains(e.target) && e.target !== folderBtn) closeFList(); };
-      folderBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        if (flist) { closeFList(); return; }
-        // 挂到 document.body(而不是 pill 内部),否则会被 .lexis-web-selpill 的 overflow:hidden 裁掉,看不见也点不动
-        flist = document.createElement("div");
-        flist.className = "lexis-web-folderlist";
-        dicts.forEach((f) => {
-          const it = document.createElement("div");
-          it.className = "lexis-web-folderitem" + (f === selFolder ? " sel" : "");
-          it.textContent = fname(f); it.title = f;
-          it.addEventListener("mousedown", (ev) => {
-            ev.preventDefault(); ev.stopPropagation();
-            selFolder = f;
-            lastSelectionFolder = f;
-            void chrome.storage.local.set({ lastSelectionFolder: f });
-            folderBtn.textContent = "📁 " + fname(f); closeFList();
-          });
-          flist.appendChild(it);
+  const pill = document.createElement("div");
+  pill.className = "lexis-web-selpill";
+
+  const addBtn = document.createElement("button");
+  addBtn.className = "lexis-web-selbtn-pill";
+  addBtn.textContent = "＋";
+  addBtn.title = "直接以选中词为标题建新词";
+  addBtn.addEventListener("mousedown", (e) => e.preventDefault());
+  addBtn.addEventListener("click", async () => {
+    addBtn.disabled = true; addBtn.textContent = "…";
+    await doAdd(text, sentence, undefined, selFolder);
+    hideSelBtn();
+  });
+  pill.appendChild(addBtn);
+
+  // 文件夹/词典选择段(需在设置里开启,且有多个词典)
+  if (dicts.length > 1) {
+    const folderBtn = document.createElement("button");
+    folderBtn.className = "lexis-web-selbtn-pill lexis-web-selfolder";
+    folderBtn.textContent = "📁 " + fname(selFolder);
+    folderBtn.title = "选择加到哪个词典(文件夹)";
+    folderBtn.addEventListener("mousedown", (e) => e.preventDefault());
+    let flist = null;
+    const closeFList = () => { if (flist) { flist.remove(); flist = null; document.removeEventListener("mousedown", onFDown); } };
+    const onFDown = (e) => { if (flist && !flist.contains(e.target) && e.target !== folderBtn) closeFList(); };
+    folderBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (flist) { closeFList(); return; }
+      // 挂到 document.body(而不是 pill 内部),否则会被 .lexis-web-selpill 的 overflow:hidden 裁掉,看不见也点不动
+      flist = document.createElement("div");
+      flist.className = "lexis-web-folderlist";
+      dicts.forEach((f) => {
+        const it = document.createElement("div");
+        it.className = "lexis-web-folderitem" + (f === selFolder ? " sel" : "");
+        it.textContent = fname(f); it.title = f;
+        it.addEventListener("mousedown", (ev) => {
+          ev.preventDefault(); ev.stopPropagation();
+          selFolder = f;
+          lastSelectionFolder = f;
+          void chrome.storage.local.set({ lastSelectionFolder: f });
+          folderBtn.textContent = "📁 " + fname(f); closeFList();
         });
-        const r = folderBtn.getBoundingClientRect();
-        flist.style.left = Math.round(r.left + window.scrollX) + "px";
-        flist.style.top = Math.round(r.bottom + window.scrollY + 4) + "px";
-        document.body.appendChild(flist);
-        document.addEventListener("mousedown", onFDown);
+        flist.appendChild(it);
       });
-      pill.appendChild(folderBtn);
-    }
+      const r = folderBtn.getBoundingClientRect();
+      flist.style.left = Math.round(r.left + window.scrollX) + "px";
+      flist.style.top = Math.round(r.bottom + window.scrollY + 4) + "px";
+      document.body.appendChild(flist);
+      document.addEventListener("mousedown", onFDown);
+    });
+    pill.appendChild(folderBtn);
+  }
 
-    const aliasBtn = document.createElement("button");
-    aliasBtn.className = "lexis-web-selbtn-pill";
-    aliasBtn.textContent = "🔗";
-    aliasBtn.title = "把选中词作为别名,归入另一个词";
-    aliasBtn.addEventListener("mousedown", (e) => e.preventDefault());
-    aliasBtn.addEventListener("click", () => {
-      const input = document.createElement("input");
-      input.type = "text";
-      input.className = "lexis-web-selinput";
-      input.value = text;
-      input.placeholder = "输入原形或搜索已有词条";
-      input.addEventListener("mousedown", (e) => e.stopPropagation());
-      const results = document.createElement("div");
-      results.className = "lexis-web-alias-results";
-      results.setAttribute("role", "listbox");
-      document.body.appendChild(results);
-      const targets = collectAliasTargets(allWords);
-      let primaryValue = input.value.trim();
-      let exactTarget = findExactAliasTarget(targets, primaryValue);
-      let matches = [];
-      let activeIndex = 0;
+  const aliasBtn = document.createElement("button");
+  aliasBtn.className = "lexis-web-selbtn-pill";
+  aliasBtn.textContent = "🔗";
+  aliasBtn.title = "把选中词作为别名,归入另一个词";
+  aliasBtn.addEventListener("mousedown", (e) => e.preventDefault());
+  aliasBtn.addEventListener("click", () => {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "lexis-web-selinput";
+    input.value = text;
+    input.placeholder = "输入原形或搜索已有词条";
+    input.addEventListener("mousedown", (e) => e.stopPropagation());
+    const results = document.createElement("div");
+    results.className = "lexis-web-alias-results";
+    results.setAttribute("role", "listbox");
+    document.body.appendChild(results);
+    const targets = collectAliasTargets(allWords);
+    let primaryValue = input.value.trim();
+    let exactTarget = findExactAliasTarget(targets, primaryValue);
+    let matches = [];
+    let activeIndex = 0;
 
-      const placeResults = () => {
-        const rect = input.getBoundingClientRect();
-        const width = Math.min(280, Math.max(220, document.documentElement.clientWidth - 16));
-        results.style.width = width + "px";
-        results.style.left = Math.max(8, Math.min(rect.left + window.scrollX, window.scrollX + document.documentElement.clientWidth - width - 8)) + "px";
-        const below = rect.bottom + window.scrollY + 5;
-        const height = results.offsetHeight || 220;
-        results.style.top = (below + height <= window.scrollY + document.documentElement.clientHeight - 8 ? below : Math.max(8, rect.top + window.scrollY - height - 5)) + "px";
-      };
-      const choose = async (target) => {
+    const placeResults = () => {
+      const rect = input.getBoundingClientRect();
+      const width = Math.min(280, Math.max(220, document.documentElement.clientWidth - 16));
+      results.style.width = width + "px";
+      results.style.left = Math.max(8, Math.min(rect.left + window.scrollX, window.scrollX + document.documentElement.clientWidth - width - 8)) + "px";
+      const below = rect.bottom + window.scrollY + 5;
+      const height = results.offsetHeight || 220;
+      results.style.top = (below + height <= window.scrollY + document.documentElement.clientHeight - 8 ? below : Math.max(8, rect.top + window.scrollY - height - 5)) + "px";
+    };
+    const choose = async (target) => {
+      input.disabled = true;
+      results.remove();
+      await doAdd(target.title, sentence, text, selFolder);
+      hideSelBtn();
+    };
+    const chooseAt = async (index) => {
+      const hasPrimary = hasWordContent(primaryValue);
+      if (hasPrimary && index === 0) {
+        if (exactTarget) return choose(exactTarget);
         input.disabled = true;
         results.remove();
-        await doAdd(target.title, sentence, text, selFolder);
+        const sameAsSelection = primaryValue.normalize("NFKC").toLowerCase() === text.normalize("NFKC").toLowerCase();
+        await doAdd(primaryValue, sentence, sameAsSelection ? undefined : text, selFolder);
         hideSelBtn();
-      };
-      const chooseAt = async (index) => {
-        const hasPrimary = hasWordContent(primaryValue);
-        if (hasPrimary && index === 0) {
-          if (exactTarget) return choose(exactTarget);
-          input.disabled = true;
-          results.remove();
-          const sameAsSelection = primaryValue.normalize("NFKC").toLowerCase() === text.normalize("NFKC").toLowerCase();
-          await doAdd(primaryValue, sentence, sameAsSelection ? undefined : text, selFolder);
-          hideSelBtn();
-          return;
-        }
-        const target = matches[index - (hasPrimary ? 1 : 0)];
-        if (target) await choose(target);
-      };
-      const render = () => {
-        primaryValue = input.value.trim();
-        exactTarget = findExactAliasTarget(targets, primaryValue);
-        const hasPrimary = hasWordContent(primaryValue);
-        matches = rankAliasTargets(targets, primaryValue, 9).filter((target) => target.id !== exactTarget?.id).slice(0, 7);
-        const optionCount = matches.length + (hasPrimary ? 1 : 0);
-        activeIndex = Math.min(activeIndex, Math.max(0, optionCount - 1));
-        results.replaceChildren();
-        if (hasPrimary) {
+        return;
+      }
+      const target = matches[index - (hasPrimary ? 1 : 0)];
+      if (target) await choose(target);
+    };
+    const render = () => {
+      primaryValue = input.value.trim();
+      exactTarget = findExactAliasTarget(targets, primaryValue);
+      const hasPrimary = hasWordContent(primaryValue);
+      matches = rankAliasTargets(targets, primaryValue, 9).filter((target) => target.id !== exactTarget?.id).slice(0, 7);
+      const optionCount = matches.length + (hasPrimary ? 1 : 0);
+      activeIndex = Math.min(activeIndex, Math.max(0, optionCount - 1));
+      results.replaceChildren();
+      if (hasPrimary) {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "lexis-web-alias-result is-primary" + (activeIndex === 0 ? " is-active" : "");
+        row.setAttribute("role", "option");
+        row.setAttribute("aria-selected", activeIndex === 0 ? "true" : "false");
+        const title = document.createElement("span");
+        title.textContent = primaryValue;
+        row.appendChild(title);
+        const action = document.createElement("small");
+        action.textContent = exactTarget ? `归入「${exactTarget.title}」` : "新建词条";
+        row.appendChild(action);
+        row.addEventListener("mousedown", (event) => event.preventDefault());
+        row.addEventListener("click", () => { void chooseAt(0); });
+        results.appendChild(row);
+      }
+      if (!hasPrimary && !matches.length) {
+        const empty = document.createElement("div");
+        empty.className = "lexis-web-alias-empty";
+        empty.textContent = "没有匹配词条";
+        results.appendChild(empty);
+      } else {
+        const offset = hasPrimary ? 1 : 0;
+        matches.forEach((match, index) => {
+          const optionIndex = index + offset;
           const row = document.createElement("button");
           row.type = "button";
-          row.className = "lexis-web-alias-result is-primary" + (activeIndex === 0 ? " is-active" : "");
+          row.className = "lexis-web-alias-result" + (optionIndex === activeIndex ? " is-active" : "");
           row.setAttribute("role", "option");
-          row.setAttribute("aria-selected", activeIndex === 0 ? "true" : "false");
+          row.setAttribute("aria-selected", optionIndex === activeIndex ? "true" : "false");
           const title = document.createElement("span");
-          title.textContent = primaryValue;
+          title.textContent = match.title;
           row.appendChild(title);
-          const action = document.createElement("small");
-          action.textContent = exactTarget ? `归入「${exactTarget.title}」` : "新建词条";
-          row.appendChild(action);
+          if (String(match.matched).normalize("NFKC").toLowerCase() !== String(match.title).normalize("NFKC").toLowerCase()) {
+            const alias = document.createElement("small");
+            alias.textContent = match.matched;
+            row.appendChild(alias);
+          }
           row.addEventListener("mousedown", (event) => event.preventDefault());
-          row.addEventListener("click", () => { void chooseAt(0); });
+          row.addEventListener("click", () => { void choose(match); });
           results.appendChild(row);
-        }
-        if (!hasPrimary && !matches.length) {
-          const empty = document.createElement("div");
-          empty.className = "lexis-web-alias-empty";
-          empty.textContent = "没有匹配词条";
-          results.appendChild(empty);
-        } else {
-          const offset = hasPrimary ? 1 : 0;
-          matches.forEach((match, index) => {
-            const optionIndex = index + offset;
-            const row = document.createElement("button");
-            row.type = "button";
-            row.className = "lexis-web-alias-result" + (optionIndex === activeIndex ? " is-active" : "");
-            row.setAttribute("role", "option");
-            row.setAttribute("aria-selected", optionIndex === activeIndex ? "true" : "false");
-            const title = document.createElement("span");
-            title.textContent = match.title;
-            row.appendChild(title);
-            if (String(match.matched).normalize("NFKC").toLowerCase() !== String(match.title).normalize("NFKC").toLowerCase()) {
-              const alias = document.createElement("small");
-              alias.textContent = match.matched;
-              row.appendChild(alias);
-            }
-            row.addEventListener("mousedown", (event) => event.preventDefault());
-            row.addEventListener("click", () => { void choose(match); });
-            results.appendChild(row);
-          });
-        }
-        placeResults();
-      };
-      input.addEventListener("input", () => { activeIndex = 0; render(); });
-      input.addEventListener("keydown", (e) => {
-        const optionCount = matches.length + (hasWordContent(primaryValue) ? 1 : 0);
-        if (e.key === "ArrowDown" && optionCount) { e.preventDefault(); activeIndex = (activeIndex + 1) % optionCount; render(); }
-        else if (e.key === "ArrowUp" && optionCount) { e.preventDefault(); activeIndex = (activeIndex - 1 + optionCount) % optionCount; render(); }
-        else if (e.key === "Enter" && optionCount) { e.preventDefault(); void chooseAt(activeIndex); }
-        else if (e.key === "Escape") { e.preventDefault(); hideSelBtn(); }
-      });
-      input.addEventListener("blur", () => setTimeout(() => { if (document.body.contains(input)) hideSelBtn(); }, 150));
-      aliasBtn.replaceWith(input);
-      input.focus();
-      render();
-      input.select();
+        });
+      }
+      placeResults();
+    };
+    input.addEventListener("input", () => { activeIndex = 0; render(); });
+    input.addEventListener("keydown", (e) => {
+      const optionCount = matches.length + (hasWordContent(primaryValue) ? 1 : 0);
+      if (e.key === "ArrowDown" && optionCount) { e.preventDefault(); activeIndex = (activeIndex + 1) % optionCount; render(); }
+      else if (e.key === "ArrowUp" && optionCount) { e.preventDefault(); activeIndex = (activeIndex - 1 + optionCount) % optionCount; render(); }
+      else if (e.key === "Enter" && optionCount) { e.preventDefault(); void chooseAt(activeIndex); }
+      else if (e.key === "Escape") { e.preventDefault(); hideSelBtn(); }
     });
-    pill.appendChild(aliasBtn);
+    input.addEventListener("blur", () => setTimeout(() => { if (document.body.contains(input)) hideSelBtn(); }, 150));
+    aliasBtn.replaceWith(input);
+    input.focus();
+    render();
+    input.select();
+  });
+  pill.appendChild(aliasBtn);
 
-    document.body.appendChild(pill);
-    // 智能定位:先按实际内容测量宽度，再放在选区附近。
-    const pillW = pill.offsetWidth || 90, pillH = pill.offsetHeight || 26, gap = 6;
-    let left = rect.left + (rect.width - pillW) / 2 + window.scrollX;
-    let top = rect.bottom + window.scrollY + gap;
-    if (top + pillH > window.scrollY + document.documentElement.clientHeight - 8)
-      top = rect.top + window.scrollY - pillH - gap;
-    if (left < 8) left = 8;
-    if (left + pillW > window.scrollX + document.documentElement.clientWidth - 8)
-      left = window.scrollX + document.documentElement.clientWidth - pillW - 8;
-    pill.style.left = Math.max(8, left) + "px";
-    pill.style.top = Math.max(8, top) + "px";
+  document.body.appendChild(pill);
+  // 智能定位:先按实际内容测量宽度，再放在选区附近。
+  const pillW = pill.offsetWidth || 90, pillH = pill.offsetHeight || 26, gap = 6;
+  let left = rect.left + (rect.width - pillW) / 2 + window.scrollX;
+  let top = rect.bottom + window.scrollY + gap;
+  if (top + pillH > window.scrollY + document.documentElement.clientHeight - 8)
+    top = rect.top + window.scrollY - pillH - gap;
+  if (left < 8) left = 8;
+  if (left + pillW > window.scrollX + document.documentElement.clientWidth - 8)
+    left = window.scrollX + document.documentElement.clientWidth - pillW - 8;
+  pill.style.left = Math.max(8, left) + "px";
+  pill.style.top = Math.max(8, top) + "px";
 
-    const tc = textColorFor(getComputedStyle(pill).backgroundColor);
-    pill.style.color = tc;
-    pill.dataset.word = text;
-    selBtn = pill;
+  const tc = textColorFor(getComputedStyle(pill).backgroundColor);
+  pill.style.color = tc;
+  pill.dataset.word = text;
+  selBtn = pill;
+}
+// mouseup + selectionchange 双触发:YouTube 等会吞掉 player 内的 mouseup,selectionchange 兜底
+function scheduleSel() { clearTimeout(selTimer); selTimer = setTimeout(onSelect, 200); }
+document.addEventListener("mouseup", () => { pointerSelecting = false; scheduleSel(); });
+document.addEventListener("selectionchange", () => {
+  const selection = window.getSelection();
+  const selectionInsidePopover = !!(pop && selection?.anchorNode && pop.contains(selection.anchorNode));
+  if (hasExpandedSelection(selection) && !selectionInsidePopover) removePop();
+  else if (selectionDeferredRoots.size) {
+    for (const root of selectionDeferredRoots) if (root.isConnected) pendingRoots.add(root);
+    selectionDeferredRoots.clear();
+    scheduleScan();
   }
-  // mouseup + selectionchange 双触发:YouTube 等会吞掉 player 内的 mouseup,selectionchange 兜底
-  function scheduleSel() { clearTimeout(selTimer); selTimer = setTimeout(onSelect, 200); }
-  document.addEventListener("mouseup", () => { pointerSelecting = false; scheduleSel(); });
-  document.addEventListener("selectionchange", () => {
-    const selection = window.getSelection();
-    const selectionInsidePopover = !!(pop && selection?.anchorNode && pop.contains(selection.anchorNode));
-    if (hasExpandedSelection(selection) && !selectionInsidePopover) removePop();
-    else if (selectionDeferredRoots.size) {
-      for (const root of selectionDeferredRoots) if (root.isConnected) pendingRoots.add(root);
-      selectionDeferredRoots.clear();
-      scheduleScan();
-    }
-    scheduleSel();
-  });
-  document.addEventListener("mousedown", (e) => {
-    const insidePopover = !!(popHost && e.composedPath().includes(popHost));
-    if (e.button === 0 && !(selBtn && selBtn.contains(e.target))) {
-      pointerSelecting = true;
-      if (!insidePopover) removePop();
-    }
-    if (selBtn && !selBtn.contains(e.target)) hideSelBtn();
-  });
-  window.addEventListener("blur", () => { pointerSelecting = false; });
-  document.addEventListener("scroll", hideSelBtn, { passive: true });
-
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message?.type === "lexis-page-context") sendResponse({ site: currentSite });
-    if (message?.type === "lexis-preload-visible") {
-      void preloadVisibleDetails();
-      sendResponse({ ok: true });
-    }
-  });
-
-  // ---- 启动 / 配置变化 ----
-  async function init() {
-    const { cfg: c, words, styleConfig, lastSelectionFolder: savedFolder, popoverSize: savedPopoverSize, siteDictionaryVisibility: savedVisibility } = await chrome.storage.local.get(["cfg", "words", "styleConfig", "lastSelectionFolder", "popoverSize", "siteDictionaryVisibility"]);
-    cfg = Object.assign({}, DEFAULT_CFG, c || {});
-    styleCfg = styleConfig || null;
-    siteDictionaryVisibility = savedVisibility || {};
-    lastSelectionFolder = typeof savedFolder === "string" ? savedFolder : "";
-    popoverSize = savedPopoverSize && typeof savedPopoverSize === "object" ? savedPopoverSize : null;
-    applyTheme();
-    build(words || []);
-    if ((words || []).length && !(words || []).some((word) => Object.prototype.hasOwnProperty.call(word, "p"))) {
-      void chrome.runtime.sendMessage({ type: "sync" }).catch(() => null);
-    }
-    if (cfg.highlight) { scan(document.body); startObserver(); }
+  scheduleSel();
+});
+document.addEventListener("mousedown", (e) => {
+  const insidePopover = !!(popHost && e.composedPath().includes(popHost));
+  if (e.button === 0 && !(selBtn && selBtn.contains(e.target))) {
+    pointerSelecting = true;
+    if (!insidePopover) removePop();
   }
+  if (selBtn && !selBtn.contains(e.target)) hideSelBtn();
+});
+window.addEventListener("blur", () => { pointerSelecting = false; });
+document.addEventListener("scroll", hideSelBtn, { passive: true });
 
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== "local") return;
-    (async () => {
-      const oldCfg = cfg ? Object.assign({}, cfg) : null;
-      if (changes.cfg) {
-        cfg = Object.assign({}, DEFAULT_CFG, changes.cfg.newValue || {});
-        applyTheme();
-        if (!cfg.highlight) { unwrapAll(); removePop(); }
-      }
-      if (changes.styleConfig) styleCfg = changes.styleConfig.newValue || null;
-      if (changes.siteDictionaryVisibility) siteDictionaryVisibility = changes.siteDictionaryVisibility.newValue || {};
-      if (changes.lastSelectionFolder) lastSelectionFolder = typeof changes.lastSelectionFolder.newValue === "string" ? changes.lastSelectionFolder.newValue : "";
-      if (changes.popoverSize) popoverSize = changes.popoverSize.newValue || null;
-      if (changes.words) build(changes.words.newValue || []);
-      else if (changes.styleConfig || changes.siteDictionaryVisibility) build(allWords);
-      const styleChanged = oldCfg && cfg && (oldCfg.useObsidianStyle !== cfg.useObsidianStyle
-        || oldCfg.color !== cfg.color || oldCfg.style !== cfg.style || oldCfg.opacity !== cfg.opacity);
-      if (oldCfg && oldCfg.showMemoryCurve !== cfg.showMemoryCurve) removePop();
-      if (cfg && cfg.highlight) {
-        if (changes.words || changes.styleConfig || changes.siteDictionaryVisibility || styleChanged || (changes.cfg && changes.cfg.newValue && changes.cfg.newValue.highlight && !(changes.cfg.oldValue || {}).highlight)) {
-          unwrapAll();
-          scan(document.body);
-          startObserver();
-        }
-      }
-    })();
-  });
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "lexis-page-context") sendResponse({ site: currentSite });
+  if (message?.type === "lexis-preload-visible") {
+    void preloadVisibleDetails();
+    sendResponse({ ok: true });
+  }
+});
 
-  if (document.body) init();
-  else document.addEventListener("DOMContentLoaded", init);
-})();
+// ---- 启动 / 配置变化 ----
+async function init() {
+  const { cfg: c, words, styleConfig, lastSelectionFolder: savedFolder, popoverSize: savedPopoverSize, siteDictionaryVisibility: savedVisibility } = await chrome.storage.local.get(["cfg", "words", "styleConfig", "lastSelectionFolder", "popoverSize", "siteDictionaryVisibility"]);
+  cfg = Object.assign({}, DEFAULT_CFG, c || {});
+  styleCfg = styleConfig || null;
+  siteDictionaryVisibility = savedVisibility || {};
+  lastSelectionFolder = typeof savedFolder === "string" ? savedFolder : "";
+  popoverSize = savedPopoverSize && typeof savedPopoverSize === "object" ? savedPopoverSize : null;
+  applyTheme();
+  build(words || []);
+  if ((words || []).length && !(words || []).some((word) => Object.prototype.hasOwnProperty.call(word, "p"))) {
+    void chrome.runtime.sendMessage({ type: "sync" }).catch(() => null);
+  }
+  if (cfg.highlight) { scan(document.body); startObserver(); }
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  (async () => {
+    const oldCfg = cfg ? Object.assign({}, cfg) : null;
+    if (changes.cfg) {
+      cfg = Object.assign({}, DEFAULT_CFG, changes.cfg.newValue || {});
+      applyTheme();
+      if (!cfg.highlight) { unwrapAll(); removePop(); }
+    }
+    if (changes.styleConfig) styleCfg = changes.styleConfig.newValue || null;
+    if (changes.siteDictionaryVisibility) siteDictionaryVisibility = changes.siteDictionaryVisibility.newValue || {};
+    if (changes.lastSelectionFolder) lastSelectionFolder = typeof changes.lastSelectionFolder.newValue === "string" ? changes.lastSelectionFolder.newValue : "";
+    if (changes.popoverSize) popoverSize = changes.popoverSize.newValue || null;
+    if (changes.words) build(changes.words.newValue || []);
+    else if (changes.styleConfig || changes.siteDictionaryVisibility) build(allWords);
+    const styleChanged = oldCfg && cfg && (oldCfg.useObsidianStyle !== cfg.useObsidianStyle
+      || oldCfg.color !== cfg.color || oldCfg.style !== cfg.style || oldCfg.opacity !== cfg.opacity);
+    if (oldCfg && oldCfg.showMemoryCurve !== cfg.showMemoryCurve) removePop();
+    if (cfg && cfg.highlight) {
+      if (changes.words || changes.styleConfig || changes.siteDictionaryVisibility || styleChanged || (changes.cfg && changes.cfg.newValue && changes.cfg.newValue.highlight && !(changes.cfg.oldValue || {}).highlight)) {
+        unwrapAll();
+        scan(document.body);
+        startObserver();
+      }
+    }
+  })();
+});
+
+if (document.body) init();
+else document.addEventListener("DOMContentLoaded", init);
