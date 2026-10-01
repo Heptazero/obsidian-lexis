@@ -72,7 +72,6 @@ export function renderStorageSettings(this: StorageSettingsHost, context: Storag
       .setLimits(0, 200, 5)
       .setValue(this.plugin.settings.reviewBottomSpace)
       .setInstant(true)
-      .setDisplayFormat((value) => `${value}px`)
       .onChange(async (value) => {
         this.plugin.settings.reviewBottomSpace = value;
         this.app.workspace.containerEl.ownerDocument
@@ -82,4 +81,3 @@ export function renderStorageSettings(this: StorageSettingsHost, context: Storag
       }));
 
 }
-

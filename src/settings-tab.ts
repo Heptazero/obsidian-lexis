@@ -68,7 +68,16 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
     declare plugin: SettingsRuntime;
     statsEl: HTMLElement | null = null;
     _colorComp: ColorComponent | null = null;
+    private renderTargetEl: HTMLElement | null = null;
     constructor(app: App, plugin: SettingsRuntime) { super(app, plugin); this.plugin = plugin; }
+
+    display(): void {
+      this.renderSettings(this.containerEl);
+    }
+
+    private rerender(): void {
+      this.renderSettings(this.renderTargetEl?.isConnected ? this.renderTargetEl : this.containerEl);
+    }
 
     section(containerEl: HTMLElement, title: string, { open = false, desc = "" }: { open?: boolean; desc?: string } = {}): HTMLElement {
       const details = containerEl.createEl("details", { cls: "lexis-settings-section" });
@@ -92,6 +101,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
     }
 
     renderSettings(containerEl: HTMLElement): void {
+      this.renderTargetEl = containerEl;
       containerEl.empty();
       const t = (key: string, vars?: TranslationVars) => this.plugin.t(key, vars);
       const document = containerEl.ownerDocument;
@@ -121,7 +131,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
             if (type === LEXIS_HOME_VIEW || type === LEXIS_REVIEW_VIEW) (leaf.view as RenderableView).render?.();
           });
           new Notice(t("language.reload"));
-          this.update();
+          this.rerender();
         }));
 
       const sectionsContainer = containerEl.createDiv({ cls: "lexis-settings-sections" });
@@ -328,7 +338,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
           .onChange(async (value) => {
             this.plugin.settings.annotationImageLocation = value === "custom" ? "custom" : "obsidian";
             await save();
-            this.update();
+            this.rerender();
           }));
       if (this.plugin.settings.annotationImageLocation === "custom") {
         new Setting(addSection).setName(t("settings.annotationImageFolder")).setDesc(t("settings.annotationImageFolderDesc"))
@@ -358,7 +368,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
           const value = DEFAULT_SETTINGS[field];
           this.plugin.settings[field] = value;
           await save();
-          this.update();
+          this.rerender();
         }));
       }
       new Setting(fsrsSection).setName(t("settings.retention")).setDesc(t("settings.retentionDesc"))
@@ -376,7 +386,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
             this.plugin.settings.suspendedReviewItems = {};
             await save();
             new Notice(t("settings.suspendedRestored"));
-            this.update();
+            this.rerender();
           }));
       new Setting(fsrsSection).setName(t("settings.cardFront")).setDesc(t("settings.cardFrontDesc"))
         .addDropdown((dd) => dd.addOption("note", t("settings.noteCard")).addOption("cloze", t("settings.clozeCard")).setValue(this.plugin.settings.cardFront).onChange(async (v) => { this.plugin.settings.cardFront = v === "cloze" ? "cloze" : "note"; await save(); }));
@@ -400,7 +410,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
           if (v && !this.plugin.settings.bridgeToken) this.plugin.settings.bridgeToken = this.plugin.bridge.generateToken();
           await save();
           this.plugin.bridge.restart();
-          this.update();
+          this.rerender();
         }));
       new Setting(bridgeSection).setName(t("settings.port")).setDesc(t("settings.portDesc"))
         .addText((t) => t.setValue(String(this.plugin.settings.bridgePort)).onChange(async (v) => { const n = parseInt(v, 10); if (n >= 1024 && n <= 65535) { this.plugin.settings.bridgePort = n; await save(); } }))
@@ -408,7 +418,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       new Setting(bridgeSection).setName(t("settings.token")).setDesc(t("settings.tokenDesc"))
         .addText((input) => { input.setValue(this.plugin.settings.bridgeToken || t("settings.tokenPending")).setDisabled(true); input.inputEl.addClass("lexis-bridge-token-input"); })
         .addExtraButton((b) => b.setIcon("copy").setTooltip(t("settings.copyToken")).onClick(async () => { if (this.plugin.settings.bridgeToken) { await navigator.clipboard.writeText(this.plugin.settings.bridgeToken); new Notice(t("notice.tokenCopied")); } }))
-        .addExtraButton((b) => b.setIcon("refresh-cw").setTooltip(t("settings.regenerateToken")).onClick(async () => { this.plugin.settings.bridgeToken = this.plugin.bridge.generateToken(); await save(); this.plugin.bridge.restart(); this.update(); }));
+        .addExtraButton((b) => b.setIcon("refresh-cw").setTooltip(t("settings.regenerateToken")).onClick(async () => { this.plugin.settings.bridgeToken = this.plugin.bridge.generateToken(); await save(); this.plugin.bridge.restart(); this.rerender(); }));
 
       const sectionOrder = orderedSectionKeys([...sections.keys()], this.plugin.settings.settingsSectionOrder);
       for (const key of sectionOrder) sectionsContainer.appendChild(sections.get(key));

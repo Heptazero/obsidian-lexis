@@ -6067,7 +6067,7 @@ function renderStorageSettings(context) {
     this.plugin.settings.mobileTapAction = value;
     await save();
   }));
-  new Setting3(mobileSection).setName(t("settings.ratingOffset")).setDesc(t("settings.ratingOffsetDesc")).addSlider((s) => s.setLimits(0, 200, 5).setValue(this.plugin.settings.reviewBottomSpace).setInstant(true).setDisplayFormat((value) => `${value}px`).onChange(async (value) => {
+  new Setting3(mobileSection).setName(t("settings.ratingOffset")).setDesc(t("settings.ratingOffsetDesc")).addSlider((s) => s.setLimits(0, 200, 5).setValue(this.plugin.settings.reviewBottomSpace).setInstant(true).onChange(async (value) => {
     this.plugin.settings.reviewBottomSpace = value;
     this.app.workspace.containerEl.ownerDocument.querySelectorAll('.workspace-leaf-content[data-type="lexis-review-view"]').forEach((view) => view.setCssProps({ "--lexis-review-bottom-space": `${value}px` }));
     await save();
@@ -6183,7 +6183,14 @@ var createSettingsTab = ({ obsidian: obsidian6, PluginSettingTab: PluginSettingT
       super(app, plugin);
       this.statsEl = null;
       this._colorComp = null;
+      this.renderTargetEl = null;
       this.plugin = plugin;
+    }
+    display() {
+      this.renderSettings(this.containerEl);
+    }
+    rerender() {
+      this.renderSettings(this.renderTargetEl?.isConnected ? this.renderTargetEl : this.containerEl);
     }
     section(containerEl, title, { open = false, desc = "" } = {}) {
       const details = containerEl.createEl("details", { cls: "lexis-settings-section" });
@@ -6205,6 +6212,7 @@ var createSettingsTab = ({ obsidian: obsidian6, PluginSettingTab: PluginSettingT
       }];
     }
     renderSettings(containerEl) {
+      this.renderTargetEl = containerEl;
       containerEl.empty();
       const t = (key, vars) => this.plugin.t(key, vars);
       const document2 = containerEl.ownerDocument;
@@ -6232,7 +6240,7 @@ var createSettingsTab = ({ obsidian: obsidian6, PluginSettingTab: PluginSettingT
           if (type === LEXIS_HOME_VIEW2 || type === LEXIS_REVIEW_VIEW2) leaf.view.render?.();
         });
         new Notice6(t("language.reload"));
-        this.update();
+        this.rerender();
       }));
       const sectionsContainer = containerEl.createDiv({ cls: "lexis-settings-sections" });
       const sections = /* @__PURE__ */ new Map();
@@ -6528,7 +6536,7 @@ var createSettingsTab = ({ obsidian: obsidian6, PluginSettingTab: PluginSettingT
       new Setting3(addSection).setName(t("settings.annotationImageLocation")).setDesc(t("settings.annotationImageLocationDesc")).addDropdown((dropdown) => dropdown.addOption("obsidian", t("settings.annotationImageObsidian")).addOption("custom", t("settings.annotationImageCustom")).setValue(this.plugin.settings.annotationImageLocation || "obsidian").onChange(async (value) => {
         this.plugin.settings.annotationImageLocation = value === "custom" ? "custom" : "obsidian";
         await save();
-        this.update();
+        this.rerender();
       }));
       if (this.plugin.settings.annotationImageLocation === "custom") {
         new Setting3(addSection).setName(t("settings.annotationImageFolder")).setDesc(t("settings.annotationImageFolderDesc")).addText((input) => {
@@ -6565,7 +6573,7 @@ var createSettingsTab = ({ obsidian: obsidian6, PluginSettingTab: PluginSettingT
           const value = DEFAULT_SETTINGS2[field];
           this.plugin.settings[field] = value;
           await save();
-          this.update();
+          this.rerender();
         }));
       }
       new Setting3(fsrsSection).setName(t("settings.retention")).setDesc(t("settings.retentionDesc")).addSlider((s) => s.setLimits(0.8, 0.97, 0.01).setValue(this.plugin.settings.requestRetention).onChange(async (v) => {
@@ -6585,7 +6593,7 @@ var createSettingsTab = ({ obsidian: obsidian6, PluginSettingTab: PluginSettingT
         this.plugin.settings.suspendedReviewItems = {};
         await save();
         new Notice6(t("settings.suspendedRestored"));
-        this.update();
+        this.rerender();
       }));
       new Setting3(fsrsSection).setName(t("settings.cardFront")).setDesc(t("settings.cardFrontDesc")).addDropdown((dd) => dd.addOption("note", t("settings.noteCard")).addOption("cloze", t("settings.clozeCard")).setValue(this.plugin.settings.cardFront).onChange(async (v) => {
         this.plugin.settings.cardFront = v === "cloze" ? "cloze" : "note";
@@ -6615,7 +6623,7 @@ var createSettingsTab = ({ obsidian: obsidian6, PluginSettingTab: PluginSettingT
         if (v && !this.plugin.settings.bridgeToken) this.plugin.settings.bridgeToken = this.plugin.bridge.generateToken();
         await save();
         this.plugin.bridge.restart();
-        this.update();
+        this.rerender();
       }));
       new Setting3(bridgeSection).setName(t("settings.port")).setDesc(t("settings.portDesc")).addText((t2) => t2.setValue(String(this.plugin.settings.bridgePort)).onChange(async (v) => {
         const n = parseInt(v, 10);
@@ -6639,7 +6647,7 @@ var createSettingsTab = ({ obsidian: obsidian6, PluginSettingTab: PluginSettingT
         this.plugin.settings.bridgeToken = this.plugin.bridge.generateToken();
         await save();
         this.plugin.bridge.restart();
-        this.update();
+        this.rerender();
       }));
       const sectionOrder = orderedSectionKeys([...sections.keys()], this.plugin.settings.settingsSectionOrder);
       for (const key of sectionOrder) sectionsContainer.appendChild(sections.get(key));
