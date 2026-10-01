@@ -7413,8 +7413,8 @@ var ExcalidrawHighlights = class {
     if (!api) return;
     viewState.api = api;
     const appState = api.getAppState();
-    const inactiveSignature = `inactive:${Number(this.host.settings.enableHighlight)}:${Number(appState.viewModeEnabled)}:${this.host._indexBuildId || 0}`;
-    if (!this.host.settings.enableHighlight || !appState.viewModeEnabled || !this.host._pattern || !this.host.index.size) {
+    const inactiveSignature = `inactive:${Number(this.host.settings.enableHighlight)}:${this.host._indexBuildId || 0}`;
+    if (!this.host.settings.enableHighlight || !this.host._pattern || !this.host.index.size) {
       if (viewState.signature !== inactiveSignature) {
         viewState.signature = inactiveSignature;
         viewState.anchors = [];
@@ -7425,6 +7425,7 @@ var ExcalidrawHighlights = class {
     const elements = api.getSceneElements();
     const matches = this.matches(viewState, elements);
     const rootRect = root.getBoundingClientRect();
+    this.positionLayer(viewState.layer, rootRect);
     const signature = this.signature(appState, matches, rootRect);
     if (signature === viewState.signature) return;
     viewState.signature = signature;
@@ -7494,27 +7495,35 @@ var ExcalidrawHighlights = class {
   }
   ensureState(view, root) {
     const existing = this.views.get(view);
-    if (existing?.root === root) return existing;
+    const mount = this.layerMount(root);
+    if (existing?.root === root && existing.mount === mount && existing.layer.isConnected) return existing;
     if (existing) this.removeState(existing);
-    const positionedRoot = root.ownerDocument.defaultView?.getComputedStyle(root).position === "static";
-    if (positionedRoot) root.classList.add("lexis-excalidraw-host");
-    const layer = root.createDiv({ cls: "lexis-excalidraw-hl-layer" });
+    const layer = mount.createDiv({ cls: "lexis-excalidraw-hl-layer" });
     const state = {
       root,
+      mount,
       layer,
       anchors: [],
       api: null,
       matchCache: /* @__PURE__ */ new Map(),
       indexBuildId: -1,
-      signature: "",
-      positionedRoot
+      signature: ""
     };
     this.views.set(view, state);
     return state;
   }
   removeState(state) {
     state.layer.remove();
-    if (state.positionedRoot) state.root.classList.remove("lexis-excalidraw-host");
+  }
+  layerMount(root) {
+    const fullscreen = root.ownerDocument.fullscreenElement;
+    return fullscreen?.instanceOf(HTMLElement) && fullscreen.contains(root) ? fullscreen : root.ownerDocument.body;
+  }
+  positionLayer(layer, root) {
+    layer.style.left = `${root.left}px`;
+    layer.style.top = `${root.top}px`;
+    layer.style.width = `${root.width}px`;
+    layer.style.height = `${root.height}px`;
   }
   sceneConverter(root) {
     const ownerWindow = root.ownerDocument.defaultView;

@@ -86,13 +86,13 @@ interface CachedMatch {
 
 interface ViewState {
   root: HTMLElement;
+  mount: HTMLElement;
   layer: HTMLElement;
   anchors: HighlightAnchor[];
   api: SceneApi | null;
   matchCache: Map<string, CachedMatch>;
   indexBuildId: number;
   signature: string;
-  positionedRoot: boolean;
 }
 
 export interface ExcalidrawHighlightHost extends Plugin {
@@ -219,8 +219,8 @@ export class ExcalidrawHighlights {
     if (!api) return;
     viewState.api = api;
     const appState = api.getAppState();
-    const inactiveSignature = `inactive:${Number(this.host.settings.enableHighlight)}:${Number(appState.viewModeEnabled)}:${this.host._indexBuildId || 0}`;
-    if (!this.host.settings.enableHighlight || !appState.viewModeEnabled || !this.host._pattern || !this.host.index.size) {
+    const inactiveSignature = `inactive:${Number(this.host.settings.enableHighlight)}:${this.host._indexBuildId || 0}`;
+    if (!this.host.settings.enableHighlight || !this.host._pattern || !this.host.index.size) {
       if (viewState.signature !== inactiveSignature) {
         viewState.signature = inactiveSignature;
         viewState.anchors = [];
@@ -231,6 +231,7 @@ export class ExcalidrawHighlights {
     const elements = api.getSceneElements();
     const matches = this.matches(viewState, elements);
     const rootRect = root.getBoundingClientRect();
+    this.positionLayer(viewState.layer, rootRect);
     const signature = this.signature(appState, matches, rootRect);
     if (signature === viewState.signature) return;
     viewState.signature = signature;
@@ -303,20 +304,19 @@ export class ExcalidrawHighlights {
 
   private ensureState(view: View, root: HTMLElement): ViewState {
     const existing = this.views.get(view);
-    if (existing?.root === root) return existing;
+    const mount = this.layerMount(root);
+    if (existing?.root === root && existing.mount === mount && existing.layer.isConnected) return existing;
     if (existing) this.removeState(existing);
-    const positionedRoot = root.ownerDocument.defaultView?.getComputedStyle(root).position === "static";
-    if (positionedRoot) root.classList.add("lexis-excalidraw-host");
-    const layer = root.createDiv({ cls: "lexis-excalidraw-hl-layer" });
+    const layer = mount.createDiv({ cls: "lexis-excalidraw-hl-layer" });
     const state: ViewState = {
       root,
+      mount,
       layer,
       anchors: [],
       api: null,
       matchCache: new Map(),
       indexBuildId: -1,
       signature: "",
-      positionedRoot,
     };
     this.views.set(view, state);
     return state;
@@ -324,7 +324,20 @@ export class ExcalidrawHighlights {
 
   private removeState(state: ViewState): void {
     state.layer.remove();
-    if (state.positionedRoot) state.root.classList.remove("lexis-excalidraw-host");
+  }
+
+  private layerMount(root: HTMLElement): HTMLElement {
+    const fullscreen = root.ownerDocument.fullscreenElement;
+    return fullscreen?.instanceOf(HTMLElement) && fullscreen.contains(root)
+      ? fullscreen
+      : root.ownerDocument.body;
+  }
+
+  private positionLayer(layer: HTMLElement, root: DOMRect): void {
+    layer.style.left = `${root.left}px`;
+    layer.style.top = `${root.top}px`;
+    layer.style.width = `${root.width}px`;
+    layer.style.height = `${root.height}px`;
   }
 
   private sceneConverter(root: HTMLElement): (point: { sceneX: number; sceneY: number }, state: SceneState) => { x: number; y: number } {

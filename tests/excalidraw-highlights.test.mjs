@@ -35,3 +35,8 @@ test("uses the Excalidraw 2.27 view API before compatibility fallbacks", () => {
   assert.equal(sceneApiForView({ excalidrawAPI: direct }, plugin), direct);
   assert.equal(sceneApiForView({}, plugin), fallback);
 });
+
+test("does not couple Excalidraw highlights to view-only mode", async () => {
+  const source = await import("node:fs/promises").then(({ readFile }) => readFile("src/excalidraw-highlights.ts", "utf8"));
+  assert.doesNotMatch(source, /!appState\.viewModeEnabled/);
+});
