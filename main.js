@@ -7356,6 +7356,12 @@ function pointInHighlightBox(x, y, box) {
   const localY = deltaX * sine + deltaY * cosine;
   return Math.abs(localX) <= box.width / 2 && Math.abs(localY) <= box.height / 2;
 }
+function sceneApiForView(view, plugin) {
+  if (view.excalidrawAPI) return view.excalidrawAPI;
+  if (plugin && "ea" in plugin && plugin.ea) return plugin.ea.getAPI(view)?.getExcalidrawAPI?.() || null;
+  if (plugin && "getAPI" in plugin) return plugin.getAPI(view)?.getExcalidrawAPI?.() || null;
+  return null;
+}
 var ExcalidrawHighlights = class {
   constructor(host) {
     this.host = host;
@@ -7387,7 +7393,7 @@ var ExcalidrawHighlights = class {
   refresh() {
     const plugin = this.excalidrawPlugin();
     const seen = /* @__PURE__ */ new Set();
-    if (plugin) this.host.app.workspace.iterateAllLeaves((leaf) => {
+    this.host.app.workspace.iterateAllLeaves((leaf) => {
       const view = leaf.view;
       if (view?.getViewType?.() !== "excalidraw") return;
       seen.add(view);
@@ -7403,7 +7409,7 @@ var ExcalidrawHighlights = class {
     const root = view.containerEl?.querySelector(".excalidraw");
     if (!root) return;
     const viewState = this.ensureState(view, root);
-    const api = viewState.api || plugin.getAPI(view)?.getExcalidrawAPI?.();
+    const api = viewState.api || sceneApiForView(view, plugin);
     if (!api) return;
     viewState.api = api;
     const appState = api.getAppState();
@@ -7518,7 +7524,9 @@ var ExcalidrawHighlights = class {
   excalidrawPlugin() {
     const plugins = this.host.app.plugins;
     const plugin = plugins?.getPlugin?.("obsidian-excalidraw-plugin") || plugins?.plugins?.["obsidian-excalidraw-plugin"];
-    return plugin && typeof plugin.getAPI === "function" ? plugin : null;
+    if (!plugin) return null;
+    const api = plugin;
+    return api.ea?.getAPI || typeof api.getAPI === "function" ? api : null;
   }
 };
 

@@ -5,7 +5,7 @@ import { build } from "esbuild";
 
 const result = await build({ entryPoints: ["src/excalidraw-highlights.ts"], bundle: true, write: false, format: "esm", platform: "node" });
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString("base64")}`;
-const { firstExcalidrawMatch, pointInHighlightBox, sceneElementBox } = await import(moduleUrl);
+const { firstExcalidrawMatch, pointInHighlightBox, sceneApiForView, sceneElementBox } = await import(moduleUrl);
 
 test("matches a dictionary entry inside an Excalidraw text element", () => {
   const entry = { display: "格点群" };
@@ -26,4 +26,12 @@ test("hit testing follows a rotated highlight box", () => {
   const box = { left: 100, top: 100, width: 80, height: 20, angle: Math.PI / 2 };
   assert.equal(pointInHighlightBox(140, 135, box), true);
   assert.equal(pointInHighlightBox(175, 110, box), false);
+});
+
+test("uses the Excalidraw 2.27 view API before compatibility fallbacks", () => {
+  const direct = { getAppState() {}, getSceneElements() {} };
+  const fallback = { getAppState() {}, getSceneElements() {} };
+  const plugin = { ea: { getAPI: () => ({ getExcalidrawAPI: () => fallback }) } };
+  assert.equal(sceneApiForView({ excalidrawAPI: direct }, plugin), direct);
+  assert.equal(sceneApiForView({}, plugin), fallback);
 });

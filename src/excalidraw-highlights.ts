@@ -34,6 +34,16 @@ interface ExcalidrawAutomate {
 }
 
 interface ExcalidrawPluginApi {
+  ea?: {
+    getAPI(view: View): ExcalidrawAutomate;
+  };
+}
+
+interface ExcalidrawView extends View {
+  excalidrawAPI?: SceneApi | null;
+}
+
+interface LegacyExcalidrawPluginApi {
   getAPI(view: View): ExcalidrawAutomate;
 }
 
@@ -144,6 +154,16 @@ export function pointInHighlightBox(x: number, y: number, box: HighlightBox): bo
   return Math.abs(localX) <= box.width / 2 && Math.abs(localY) <= box.height / 2;
 }
 
+export function sceneApiForView(
+  view: ExcalidrawView,
+  plugin: ExcalidrawPluginApi | LegacyExcalidrawPluginApi | null,
+): SceneApi | null {
+  if (view.excalidrawAPI) return view.excalidrawAPI;
+  if (plugin && "ea" in plugin && plugin.ea) return plugin.ea.getAPI(view)?.getExcalidrawAPI?.() || null;
+  if (plugin && "getAPI" in plugin) return plugin.getAPI(view)?.getExcalidrawAPI?.() || null;
+  return null;
+}
+
 export class ExcalidrawHighlights {
   private readonly views = new Map<View, ViewState>();
   private timer = 0;
@@ -178,7 +198,7 @@ export class ExcalidrawHighlights {
   private refresh(): void {
     const plugin = this.excalidrawPlugin();
     const seen = new Set<View>();
-    if (plugin) this.host.app.workspace.iterateAllLeaves((leaf) => {
+    this.host.app.workspace.iterateAllLeaves((leaf) => {
       const view = leaf.view;
       if (view?.getViewType?.() !== "excalidraw") return;
       seen.add(view);
@@ -191,11 +211,11 @@ export class ExcalidrawHighlights {
     }
   }
 
-  private renderView(plugin: ExcalidrawPluginApi, view: View): void {
+  private renderView(plugin: ExcalidrawPluginApi | LegacyExcalidrawPluginApi | null, view: View): void {
     const root = view.containerEl?.querySelector<HTMLElement>(".excalidraw");
     if (!root) return;
     const viewState = this.ensureState(view, root);
-    const api = viewState.api || plugin.getAPI(view)?.getExcalidrawAPI?.();
+    const api = viewState.api || sceneApiForView(view, plugin);
     if (!api) return;
     viewState.api = api;
     const appState = api.getAppState();
@@ -315,12 +335,12 @@ export class ExcalidrawHighlights {
       || fallbackSceneToViewport;
   }
 
-  private excalidrawPlugin(): ExcalidrawPluginApi | null {
+  private excalidrawPlugin(): ExcalidrawPluginApi | LegacyExcalidrawPluginApi | null {
     const plugins = (this.host.app as AppWithPlugins).plugins;
     const plugin = plugins?.getPlugin?.("obsidian-excalidraw-plugin")
       || plugins?.plugins?.["obsidian-excalidraw-plugin"];
-    return plugin && typeof (plugin as ExcalidrawPluginApi).getAPI === "function"
-      ? plugin as ExcalidrawPluginApi
-      : null;
+    if (!plugin) return null;
+    const api = plugin as ExcalidrawPluginApi & LegacyExcalidrawPluginApi;
+    return api.ea?.getAPI || typeof api.getAPI === "function" ? api : null;
   }
 }
