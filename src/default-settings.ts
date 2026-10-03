@@ -10,6 +10,7 @@ export const DEFAULT_SETTINGS: DefaultLexisSettings = {
   aliasSources: "",
   inlineEntriesEnabled: true,
   inlineEntryDelimiter: "::",
+  inlineAliasDelimiter: "/",
   inlineClassificationMode: "heading",
   inlineCategoryColors: {},
   inlineCategoryOpacity: {},

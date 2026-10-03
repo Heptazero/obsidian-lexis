@@ -51,6 +51,7 @@ var DEFAULT_SETTINGS = {
   aliasSources: "",
   inlineEntriesEnabled: true,
   inlineEntryDelimiter: "::",
+  inlineAliasDelimiter: "/",
   inlineClassificationMode: "heading",
   inlineCategoryColors: {},
   inlineCategoryOpacity: {},
@@ -868,7 +869,9 @@ var MESSAGES = {
   "settings.enableInline": { zh: "\u542F\u7528\u5185\u8054\u6761\u76EE", en: "Enable inline entries" },
   "settings.enableInlineDesc": { zh: "\u7B14\u8BB0\u9700\u8BBE\u7F6E lexis-inline: true \u6216 #lexis-inline\u3002", en: "Notes require lexis-inline: true or #lexis-inline." },
   "settings.inlineDelimiter": { zh: "\u5185\u8054\u6761\u76EE\u5206\u9694\u7B26", en: "Inline delimiter" },
-  "settings.inlineDelimiterDesc": { zh: "\u683C\u5F0F\uFF1A\u8BCD\u6761::\u6279\u6CE8\u3002", en: "Format: entry:: annotation." },
+  "settings.inlineDelimiterDesc": { zh: "\u683C\u5F0F\uFF1A\u4E3B\u8BCD / \u522B\u540D::\u6279\u6CE8\u3002", en: "Format: entry / alias:: annotation." },
+  "settings.inlineAliasDelimiter": { zh: "\u5185\u8054\u522B\u540D\u5206\u9694\u7B26", en: "Inline alias delimiter" },
+  "settings.inlineAliasDelimiterDesc": { zh: "\u9ED8\u8BA4 /\uFF1B\u524D\u540E\u7A7A\u683C\u53EF\u7701\u7565\uFF0C\\/ \u8868\u793A\u5B57\u9762\u659C\u6760\u3002\u53D7\u201C\u522B\u540D\u4E5F\u7B97\u8BCD\u6761\u201D\u63A7\u5236\u3002", en: "Defaults to /; surrounding spaces are optional, and \\/ means a literal slash. Controlled by Include aliases." },
   "settings.noInlineCategories": { zh: "\u6682\u65E0\u5185\u8054\u5206\u7C7B\u3002", en: "No inline categories." },
   "settings.entryCount": { zh: "{count} \u6761", en: "{count} entries" },
   "settings.showHighlight": { zh: "\u663E\u793A\u9AD8\u4EAE\uFF1B\u5173\u95ED\u540E\u4ECD\u53EF\u60AC\u505C", en: "Show highlight; hover remains available when off" },
@@ -2269,7 +2272,11 @@ function createBridgeRenderApi({ TFile: TFile9, Component: Component5, recentRev
       return (next ? rest.slice(0, next.index) : rest).trim();
     }
     cardHeading(entry) {
-      if (entry.inline) return { title: entry.display, subtitle: entry.category || "" };
+      if (entry.inline) {
+        const title2 = entry.canonical || entry.display;
+        const alias = entry.isAlias && entry.display.toLowerCase() !== title2.toLowerCase() ? entry.display : "";
+        return { title: title2, subtitle: [alias, entry.category || ""].filter(Boolean).join(" \xB7 ") };
+      }
       const title = entry.file?.basename || entry.display;
       const subtitle = entry.isAlias && entry.display.toLowerCase() !== title.toLowerCase() ? entry.display : "";
       return { title, subtitle };
@@ -2287,7 +2294,7 @@ function createBridgeRenderApi({ TFile: TFile9, Component: Component5, recentRev
         return {
           ok: true,
           word: e.display,
-          base: e.display,
+          base: e.canonical || e.display,
           file: e.file.path,
           vault: this.app.vault.getName(),
           inline: true,
@@ -2938,6 +2945,86 @@ function refreshReadingHighlightsInPlace(root, applyHighlights) {
   applyHighlights(root);
 }
 
+// src/inline-entry-parser.ts
+function splitInlineAliases(value, delimiter) {
+  const token = String(delimiter || "/").trim() || "/";
+  const parts = [];
+  let current = "";
+  for (let index = 0; index < value.length; ) {
+    if (value[index] === "\\" && value.slice(index + 1, index + 1 + token.length) === token) {
+      current += token;
+      index += token.length + 1;
+      continue;
+    }
+    if (value.slice(index, index + token.length) === token) {
+      parts.push(current.trim());
+      current = "";
+      index += token.length;
+      continue;
+    }
+    current += value[index];
+    index++;
+  }
+  parts.push(current.trim());
+  const seen = /* @__PURE__ */ new Set();
+  return parts.filter((part) => {
+    const key = part.toLowerCase();
+    if (!part || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+function parseInlineEntries(content, file, syntax) {
+  const entryDelimiter = String(syntax.entryDelimiter || "::").trim() || "::";
+  const lines = String(content || "").split(/\r?\n/);
+  let firstContentLine = 0;
+  if (lines[0]?.trim() === "---") {
+    const end = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
+    if (end >= 0) firstContentLine = end + 1;
+  }
+  const entries = [];
+  const headingStack = [];
+  let inFence = false;
+  for (let lineNo = firstContentLine; lineNo < lines.length; lineNo++) {
+    const line = lines[lineNo];
+    if (/^\s*```/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    const heading = /^\s*(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
+    if (heading) {
+      const level = heading[1].length;
+      headingStack.length = level;
+      headingStack[level - 1] = { name: heading[2].trim(), level, line: lineNo };
+      continue;
+    }
+    const at = line.indexOf(entryDelimiter);
+    if (at < 0) continue;
+    const left = line.slice(0, at).trim().replace(/^[-*+]\s+/, "");
+    const annotation = line.slice(at + entryDelimiter.length).trim();
+    if (!left || /^#/.test(left) || left.toLowerCase() === "color") continue;
+    const [display, ...aliases] = splitInlineAliases(left, syntax.aliasDelimiter);
+    if (!display) continue;
+    const headingPath = headingStack.filter(Boolean).map((item) => ({ ...item }));
+    const categories = headingPath.map((item) => item.name).reverse();
+    entries.push({
+      display,
+      aliases,
+      file,
+      isAlias: false,
+      tags: /* @__PURE__ */ new Set(),
+      inline: true,
+      annotation,
+      category: categories[0] || "",
+      categories,
+      headingPath,
+      line: lineNo
+    });
+  }
+  return entries;
+}
+
 // src/highlight-index.ts
 function createHighlightIndex({ Notice: Notice6, boundedSource: boundedSource2, compactMixedScriptSpacing: compactMixedScriptSpacing2, todayStr }) {
   class HighlightIndex {
@@ -2991,6 +3078,9 @@ function createHighlightIndex({ Notice: Notice6, boundedSource: boundedSource2, 
     inlineDelimiter() {
       return String(this.settings.inlineEntryDelimiter || "::").trim() || "::";
     }
+    inlineAliasDelimiter() {
+      return String(this.settings.inlineAliasDelimiter || "/").trim() || "/";
+    }
     isInlineSourceFile(file) {
       if (!this.settings.inlineEntriesEnabled || !file?.path) return false;
       const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter || {};
@@ -2999,40 +3089,10 @@ function createHighlightIndex({ Notice: Notice6, boundedSource: boundedSource2, 
       return this.getTags(file).has("lexis-inline");
     }
     parseInlineEntries(content, file) {
-      const delimiter = this.inlineDelimiter();
-      const lines = String(content || "").split(/\r?\n/);
-      let firstContentLine = 0;
-      if (lines[0]?.trim() === "---") {
-        const end = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
-        if (end >= 0) firstContentLine = end + 1;
-      }
-      const entries = [];
-      const headingStack = [];
-      let inFence = false;
-      for (let lineNo = firstContentLine; lineNo < lines.length; lineNo++) {
-        const line = lines[lineNo];
-        if (/^\s*```/.test(line)) {
-          inFence = !inFence;
-          continue;
-        }
-        if (inFence) continue;
-        const heading = /^\s*(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
-        if (heading) {
-          const level = heading[1].length;
-          headingStack.length = level;
-          headingStack[level - 1] = { name: heading[2].trim(), level, line: lineNo };
-          continue;
-        }
-        const at = line.indexOf(delimiter);
-        if (at < 0) continue;
-        const left = line.slice(0, at).trim().replace(/^[-*+]\s+/, "");
-        const right = line.slice(at + delimiter.length).trim();
-        if (!left || /^#/.test(left) || left.toLowerCase() === "color") continue;
-        const headingPath = headingStack.filter(Boolean).map((item) => ({ ...item }));
-        const categories = headingPath.map((item) => item.name).reverse();
-        entries.push({ display: left, file, isAlias: false, tags: /* @__PURE__ */ new Set(), inline: true, annotation: right, category: categories[0] || "", categories, headingPath, line: lineNo });
-      }
-      return entries;
+      return parseInlineEntries(content, file, {
+        entryDelimiter: this.inlineDelimiter(),
+        aliasDelimiter: this.inlineAliasDelimiter()
+      });
     }
     extractAliases(file) {
       const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
@@ -3133,6 +3193,14 @@ function createHighlightIndex({ Notice: Notice6, boundedSource: boundedSource2, 
           if (!index.has(key)) {
             index.set(key, entry);
             inlineEntries++;
+          }
+          if (this.settings.includeAliases) for (const alias of entry.aliases || []) {
+            const aliasKey = alias.toLowerCase();
+            own.add(aliasKey);
+            if (!index.has(aliasKey)) {
+              index.set(aliasKey, { ...entry, display: alias, canonical: entry.display, isAlias: true });
+              aliases++;
+            }
           }
         }
         if (entries.length) selfKeysByPath.set(entries[0].file.path, own);
@@ -5788,6 +5856,12 @@ function renderInlineSettings(context) {
   }));
   new Setting3(inlineSection).setName(t("settings.inlineDelimiter")).setDesc(t("settings.inlineDelimiterDesc")).addText((t2) => t2.setPlaceholder("::").setValue(this.plugin.inlineDelimiter()).onChange(async (v) => {
     this.plugin.settings.inlineEntryDelimiter = (v || "").trim() || "::";
+    await save();
+    await this.plugin.rebuildIndex(false);
+    this.renderStats();
+  }));
+  new Setting3(inlineSection).setName(t("settings.inlineAliasDelimiter")).setDesc(t("settings.inlineAliasDelimiterDesc")).addText((t2) => t2.setPlaceholder("/").setValue(this.plugin.inlineAliasDelimiter()).onChange(async (v) => {
+    this.plugin.settings.inlineAliasDelimiter = (v || "").trim() || "/";
     await save();
     await this.plugin.rebuildIndex(false);
     this.renderStats();

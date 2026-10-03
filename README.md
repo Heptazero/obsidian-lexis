@@ -9,7 +9,7 @@ Lexis is a local-first personal lexicon for Obsidian. Your notes are the databas
 ### Store entries as files or inside a note
 
 - **One file per entry.** Point Lexis at one or more folders. Each note title becomes an entry; frontmatter aliases are indexed too.
-- **Many entries in one file.** Mark a note with `lexis-inline: true`, then write `Name:: annotation`. This is useful for recurring characters, places, objects, and factions in a novel without creating hundreds of tiny files.
+- **Many entries in one file.** Mark a note with `lexis-inline: true`, then write `Name / Alias:: annotation`. Spaces around `/` are optional, the delimiter is configurable, and `\/` writes a literal slash. This is useful for recurring characters, places, objects, and factions in a novel without creating hundreds of tiny files.
 
 ```md
 ---
@@ -17,7 +17,7 @@ lexis-inline: true
 ---
 
 ## Characters
-Yalda:: A painter who appears under several names.
+Yalda / Yal:: A painter who appears under several names.
 Otto:: Keeps the notebook everyone else forgets.
 ```
 

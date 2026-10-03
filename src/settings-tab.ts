@@ -30,6 +30,7 @@ export interface SettingsRuntime extends Plugin {
   rebuildIndex(notify?: boolean): Promise<void>;
   collectVocabTags(): string[];
   inlineDelimiter(): string;
+  inlineAliasDelimiter(): string;
   removeSelPill(): void;
   setupPdfHighlight(): void;
   teardownPdfHighlight(): void;

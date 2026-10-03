@@ -51,6 +51,8 @@ export function renderInlineSettings(this: InlineSettingsHost, context: InlineSe
     .addToggle((t) => t.setValue(this.plugin.settings.inlineEntriesEnabled).onChange(async (v) => { this.plugin.settings.inlineEntriesEnabled = v; await save(); await this.plugin.rebuildIndex(false); this.renderStats(); }));
   new Setting(inlineSection).setName(t("settings.inlineDelimiter")).setDesc(t("settings.inlineDelimiterDesc"))
     .addText((t) => t.setPlaceholder("::").setValue(this.plugin.inlineDelimiter()).onChange(async (v) => { this.plugin.settings.inlineEntryDelimiter = (v || "").trim() || "::"; await save(); await this.plugin.rebuildIndex(false); this.renderStats(); }));
+  new Setting(inlineSection).setName(t("settings.inlineAliasDelimiter")).setDesc(t("settings.inlineAliasDelimiterDesc"))
+    .addText((t) => t.setPlaceholder("/").setValue(this.plugin.inlineAliasDelimiter()).onChange(async (v) => { this.plugin.settings.inlineAliasDelimiter = (v || "").trim() || "/"; await save(); await this.plugin.rebuildIndex(false); this.renderStats(); }));
   new Setting(inlineSection).setName(t("settings.inlineClassification")).setDesc(t("settings.inlineClassificationDesc"))
     .addDropdown((dropdown) => dropdown
       .addOption("heading", t("settings.classifyByHeading"))

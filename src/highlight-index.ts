@@ -3,6 +3,7 @@
 import type { App, Notice as ObsidianNotice, TFile } from "obsidian";
 import type { OccurrenceSearch } from "./occurrence-search";
 import type { InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats } from "./types";
+import { parseInlineEntries } from "./inline-entry-parser";
 
 type TranslationVars = Record<string, string | number | boolean>;
 
@@ -82,6 +83,7 @@ function createHighlightIndex({ Notice, boundedSource, compactMixedScriptSpacing
     }
 
     inlineDelimiter() { return String(this.settings.inlineEntryDelimiter || "::").trim() || "::"; }
+    inlineAliasDelimiter() { return String(this.settings.inlineAliasDelimiter || "/").trim() || "/"; }
 
     isInlineSourceFile(file: TFile | null | undefined): boolean {
       if (!this.settings.inlineEntriesEnabled || !file?.path) return false;
@@ -92,37 +94,10 @@ function createHighlightIndex({ Notice, boundedSource, compactMixedScriptSpacing
     }
 
     parseInlineEntries(content: string, file: TFile): LexisEntry[] {
-      const delimiter = this.inlineDelimiter();
-      const lines = String(content || "").split(/\r?\n/);
-      let firstContentLine = 0;
-      if (lines[0]?.trim() === "---") {
-        const end = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
-        if (end >= 0) firstContentLine = end + 1;
-      }
-      const entries: LexisEntry[] = [];
-      const headingStack: { name: string; level: number; line: number }[] = [];
-      let inFence = false;
-      for (let lineNo = firstContentLine; lineNo < lines.length; lineNo++) {
-        const line = lines[lineNo];
-        if (/^\s*```/.test(line)) { inFence = !inFence; continue; }
-        if (inFence) continue;
-        const heading = /^\s*(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
-        if (heading) {
-          const level = heading[1].length;
-          headingStack.length = level;
-          headingStack[level - 1] = { name: heading[2].trim(), level, line: lineNo };
-          continue;
-        }
-        const at = line.indexOf(delimiter);
-        if (at < 0) continue;
-        const left = line.slice(0, at).trim().replace(/^[-*+]\s+/, "");
-        const right = line.slice(at + delimiter.length).trim();
-        if (!left || /^#/.test(left) || left.toLowerCase() === "color") continue;
-        const headingPath = headingStack.filter(Boolean).map((item) => ({ ...item }));
-        const categories = headingPath.map((item) => item.name).reverse();
-        entries.push({ display: left, file, isAlias: false, tags: new Set(), inline: true, annotation: right, category: categories[0] || "", categories, headingPath, line: lineNo });
-      }
-      return entries;
+      return parseInlineEntries(content, file, {
+        entryDelimiter: this.inlineDelimiter(),
+        aliasDelimiter: this.inlineAliasDelimiter(),
+      });
     }
 
     extractAliases(file: TFile): string[] {
@@ -215,6 +190,14 @@ function createHighlightIndex({ Notice, boundedSource, compactMixedScriptSpacing
             categoryOccurrences.set(id, node);
           }
           if (!index.has(key)) { index.set(key, entry); inlineEntries++; }
+          if (this.settings.includeAliases) for (const alias of entry.aliases || []) {
+            const aliasKey = alias.toLowerCase();
+            own.add(aliasKey);
+            if (!index.has(aliasKey)) {
+              index.set(aliasKey, { ...entry, display: alias, canonical: entry.display, isAlias: true });
+              aliases++;
+            }
+          }
         }
         if (entries.length) selfKeysByPath.set(entries[0].file.path, own);
       }

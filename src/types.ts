@@ -118,6 +118,7 @@ export interface LexisSettings {
   aliasSources: string;
   inlineEntriesEnabled: boolean;
   inlineEntryDelimiter: string;
+  inlineAliasDelimiter: string;
   inlineClassificationMode: InlineClassificationMode;
   inlineCategoryColors: Record<string, string>;
   inlineCategoryOpacity: Record<string, number>;
@@ -204,6 +205,8 @@ export interface HeadingRef {
 
 export interface LexisEntry {
   display: string;
+  canonical?: string;
+  aliases?: string[];
   file: TFile;
   isAlias: boolean;
   tags: Set<string>;

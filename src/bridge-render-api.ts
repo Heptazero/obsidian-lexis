@@ -63,7 +63,11 @@ function createBridgeRenderApi({ TFile, Component, recentReviewDates, escapeRe, 
     return (next ? rest.slice(0, next.index) : rest).trim();
   }
   cardHeading(entry: LexisEntry): { title: string; subtitle: string } {
-    if (entry.inline) return { title: entry.display, subtitle: entry.category || "" };
+    if (entry.inline) {
+      const title = entry.canonical || entry.display;
+      const alias = entry.isAlias && entry.display.toLowerCase() !== title.toLowerCase() ? entry.display : "";
+      return { title, subtitle: [alias, entry.category || ""].filter(Boolean).join(" · ") };
+    }
     const title = entry.file?.basename || entry.display;
     const subtitle = entry.isAlias && entry.display.toLowerCase() !== title.toLowerCase() ? entry.display : "";
     return { title, subtitle };
@@ -79,7 +83,7 @@ function createBridgeRenderApi({ TFile, Component, recentReviewDates, escapeRe, 
     if (e.inline) {
       const heading = this.cardHeading(e);
       return {
-        ok: true, word: e.display, base: e.display, file: e.file.path,
+        ok: true, word: e.display, base: e.canonical || e.display, file: e.file.path,
         vault: this.app.vault.getName(), inline: true, category: e.category, markdown: e.annotation || "*(无批注)*",
         title: heading.title, subtitle: heading.subtitle,
         html: await this.renderInlineEntryHtml(e),

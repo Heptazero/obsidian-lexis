@@ -105,6 +105,7 @@ export class LexisPluginBase extends Plugin {
   declare occurrenceSentenceFromSection: (section: string) => string;
   declare renderTemplate: (template: string, vars: Record<string, unknown>) => string;
   declare inlineDelimiter: () => string;
+  declare inlineAliasDelimiter: () => string;
   declare openInlineEntry: (entry: LexisEntry, newTab: boolean) => Promise<void>;
   declare applyPopoverAppearance: (popover: HTMLElement) => void;
   declare updateStatusBar: () => void;
