@@ -4,7 +4,8 @@
 const { isDictionaryVisible, hasExpandedSelection, selectionIntersectsNode } = globalThis.LexisWebConfig;
 const { collectAliasTargets, findExactAliasTarget, rankAliasTargets } = globalThis.LexisAliasSearch;
 const HL = "lexis-web-hl";
-const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "INPUT", "CODE", "PRE", "SELECT", "OPTION", "KBD", "SAMP"]);
+const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "INPUT", "SELECT", "OPTION", "KBD", "SAMP"]);
+const CODE_EDITOR_SELECTOR = ".monaco-editor,.CodeMirror,.cm-editor,.ace_editor";
 const DEFAULT_CFG = { highlight: true, showMemoryCurve: true, color: "#7c5cff", style: "wavy", useObsidianStyle: true, opacity: 100 };
 
 let cfg = null;
@@ -295,6 +296,7 @@ function skip(node) {
   while (p) {
     if (SKIP_TAGS.has(p.tagName)) return true;
     if (p.isContentEditable) return true;
+    if (p.matches(CODE_EDITOR_SELECTOR)) return true;
     if (p.classList && (p.classList.contains(HL) || p.classList.contains("lexis-web-pop"))) return true;
     p = p.parentElement;
   }

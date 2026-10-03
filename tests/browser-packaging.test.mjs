@@ -32,3 +32,12 @@ test("bounds browser detail requests and delays the loading label", async () => 
   assert.match(content, /lexis-preload-visible/);
   assert.doesNotMatch(content, /lexis-web-pop-body">加载中/);
 });
+
+test("highlights static code blocks without touching code editors", async () => {
+  const source = await readFile(`${extensionRoot}/content-core.js`, "utf8");
+  const tags = JSON.parse(/SKIP_TAGS = new Set\((\[[^;]+\])\)/.exec(source)?.[1] || "[]");
+  assert.equal(tags.includes("CODE"), false);
+  assert.equal(tags.includes("PRE"), false);
+  assert.match(source, /CODE_EDITOR_SELECTOR/);
+  assert.match(source, /p\.matches\(CODE_EDITOR_SELECTOR\)/);
+});
