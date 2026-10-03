@@ -25,7 +25,7 @@ lexis-inline: true
 
 Lexis 会高亮已收录的词，悬停显示笔记。支持：
 
-- Obsidian Markdown、实时预览和内置 PDF 阅读器
+- Obsidian Markdown、实时预览、Canvas 节点与连线标签，以及内置 PDF 阅读器
 - 兼容的 epub.js EPUB 阅读器
 - 通过 **Lexis Web** 支持 Chromium 浏览器
 - 通过 **Lexis for Zotero** 支持 Zotero Reader

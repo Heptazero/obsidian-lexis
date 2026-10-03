@@ -3468,6 +3468,7 @@ function createHighlightEngine({ Notice: Notice6, boundedSource: boundedSource2,
       if (this.liveAvailable) this.app.workspace.updateOptions();
       this.rescanPdfLayers();
       this.rescanEpubIframes();
+      this._canvasEdgeHighlights?.refresh();
     }
     // ---------- 阅读模式高亮 ----------
     highlightElement(el, ctx) {
@@ -4338,17 +4339,20 @@ function eventElement(target) {
 function pointInside(rect, x, y) {
   return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
 }
+function pointInsideElement(element, x, y) {
+  return Array.from(element.getClientRects()).some((rect) => pointInside(rect, x, y));
+}
 function canvasHighlightAt(event) {
   const target = eventElement(event.target);
   const canvas = target?.closest(".canvas-wrapper,.canvas");
   if (!canvas) return null;
   const document2 = canvas.ownerDocument;
   for (const element of document2.elementsFromPoint(event.clientX, event.clientY)) {
-    const highlight = element.closest(".canvas-node .lexis-hl");
+    const highlight = element.closest(".canvas-node .lexis-hl,.canvas-path-label-wrapper .lexis-hl");
     if (highlight && canvas.contains(highlight)) return highlight;
   }
-  for (const highlight of canvas.querySelectorAll(".canvas-node .lexis-hl")) {
-    if (pointInside(highlight.getBoundingClientRect(), event.clientX, event.clientY)) return highlight;
+  for (const highlight of canvas.querySelectorAll(".canvas-node .lexis-hl,.canvas-path-label-wrapper .lexis-hl")) {
+    if (pointInsideElement(highlight, event.clientX, event.clientY)) return highlight;
   }
   return null;
 }
@@ -7621,6 +7625,136 @@ var ExcalidrawHighlights = class {
   }
 };
 
+// src/canvas-edge-highlights.ts
+function edgeLabelMatches(text, pattern, resolveKey, index) {
+  if (!text || !pattern) return [];
+  const regex = new RegExp(pattern, "gi");
+  const matches = [];
+  let match;
+  while (match = regex.exec(text)) {
+    const key = resolveKey(match[0]);
+    const entry = index.get(key);
+    if (entry) matches.push({ start: match.index, end: match.index + match[0].length, key, entry });
+    if (!match[0].length) regex.lastIndex++;
+  }
+  return matches;
+}
+function containsEdgeLabel(node) {
+  if (node.nodeType !== Node.ELEMENT_NODE) return false;
+  const element = node;
+  return element.matches(".canvas-path-label-wrapper, .canvas-path-label-wrapper *") || !!element.querySelector(".canvas-path-label-wrapper");
+}
+var CanvasEdgeHighlights = class {
+  constructor(host) {
+    this.host = host;
+    this.documents = /* @__PURE__ */ new Map();
+  }
+  activate(document2) {
+    if (!document2.body) return;
+    if (!this.documents.has(document2)) {
+      const Observer = document2.defaultView?.MutationObserver || MutationObserver;
+      const observer = new Observer((mutations) => {
+        if (!mutations.some((mutation) => {
+          if (mutation.target.closest?.(".lexis-canvas-edge-hl-layer")) return false;
+          return containsEdgeLabel(mutation.target) || [...mutation.addedNodes, ...mutation.removedNodes].some(containsEdgeLabel);
+        })) return;
+        this.schedule(document2);
+      });
+      observer.observe(document2.body, { childList: true, subtree: true });
+      const input = (event) => {
+        const target = event.target;
+        const textarea = target && typeof target === "object" && "nodeType" in target && target.nodeType === Node.ELEMENT_NODE ? target : null;
+        if (textarea?.tagName === "TEXTAREA" && textarea.closest(".canvas-path-label-wrapper")) this.schedule(document2);
+      };
+      document2.addEventListener("input", input, true);
+      document2.addEventListener("scroll", input, true);
+      this.documents.set(document2, { observer, input, frame: 0 });
+    }
+    this.schedule(document2);
+  }
+  close(document2) {
+    const state = this.documents.get(document2);
+    if (!state) return;
+    state.observer.disconnect();
+    document2.removeEventListener("input", state.input, true);
+    document2.removeEventListener("scroll", state.input, true);
+    document2.defaultView?.cancelAnimationFrame(state.frame);
+    document2.querySelectorAll(".lexis-canvas-edge-hl-layer").forEach((element) => element.remove());
+    this.documents.delete(document2);
+  }
+  destroy() {
+    for (const document2 of [...this.documents.keys()]) this.close(document2);
+  }
+  refresh() {
+    for (const document2 of this.documents.keys()) this.schedule(document2, true);
+  }
+  schedule(document2, force = false) {
+    const state = this.documents.get(document2);
+    if (!state) return;
+    if (force) document2.querySelectorAll(".lexis-canvas-edge-hl-layer").forEach((layer) => delete layer.dataset.lexisSignature);
+    if (state.frame) return;
+    state.frame = (document2.defaultView || window).requestAnimationFrame(() => {
+      state.frame = 0;
+      this.render(document2);
+    });
+  }
+  render(document2) {
+    for (const wrapper of document2.querySelectorAll(".canvas-path-label-wrapper")) this.renderLabel(wrapper);
+  }
+  renderLabel(wrapper) {
+    const textarea = wrapper.querySelector("textarea");
+    let layer = wrapper.querySelector(":scope > .lexis-canvas-edge-hl-layer");
+    const active = this.host.settings.enableHighlight && this.host._pattern && this.host.index.size;
+    const matches = active ? edgeLabelMatches(textarea?.value || "", this.host._pattern, (value) => this.host.resolveMatchKey(value), this.host.index) : [];
+    if (!textarea || !matches.length) {
+      layer?.remove();
+      return;
+    }
+    const signature = [
+      this.host._indexBuildId || 0,
+      textarea.value,
+      textarea.scrollLeft,
+      textarea.scrollTop,
+      ...matches.map((match) => `${match.start}:${match.end}:${match.key}:${this.host.inlineStyleForEntry(match.entry, { external: true })}`)
+    ].join("|");
+    if (layer?.dataset.lexisSignature === signature) return;
+    if (!layer) {
+      layer = wrapper.createDiv({ cls: "lexis-canvas-edge-hl-layer", attr: { "aria-hidden": "true" } });
+    }
+    layer.dataset.lexisSignature = signature;
+    layer.replaceChildren();
+    const content = layer.createDiv({ cls: "lexis-canvas-edge-hl-content" });
+    this.copyTypography(textarea, content);
+    content.style.transform = `translate(${-textarea.scrollLeft}px, ${-textarea.scrollTop}px)`;
+    let offset = 0;
+    for (const match of matches) {
+      if (match.start > offset) content.appendChild(content.ownerDocument.createTextNode(textarea.value.slice(offset, match.start)));
+      const highlight = content.createSpan({ cls: "lexis-hl lexis-canvas-edge-hl", text: textarea.value.slice(match.start, match.end) });
+      highlight.dataset.lexisKey = match.key;
+      highlight.setAttribute("style", `${this.host.inlineStyleForEntry(match.entry, { external: true })};padding:0;`);
+      offset = match.end;
+    }
+    if (offset < textarea.value.length) content.appendChild(content.ownerDocument.createTextNode(textarea.value.slice(offset)));
+  }
+  copyTypography(source, target) {
+    const style = source.ownerDocument.defaultView?.getComputedStyle(source);
+    if (!style) return;
+    target.style.fontFamily = style.fontFamily;
+    target.style.fontSize = style.fontSize;
+    target.style.fontStyle = style.fontStyle;
+    target.style.fontWeight = style.fontWeight;
+    target.style.borderStyle = style.borderStyle;
+    target.style.borderWidth = style.borderWidth;
+    target.style.letterSpacing = style.letterSpacing;
+    target.style.lineHeight = style.lineHeight;
+    target.style.padding = style.padding;
+    target.style.textAlign = style.textAlign;
+    target.style.textIndent = style.textIndent;
+    target.style.textTransform = style.textTransform;
+    target.style.wordSpacing = style.wordSpacing;
+  }
+};
+
 // src/restore-modal.ts
 var import_obsidian6 = require("obsidian");
 var LexisRestoreModal = class extends import_obsidian6.Modal {
@@ -9207,6 +9341,7 @@ var LexisPlugin = class extends LexisPluginBase {
         this.removeSelPill();
       },
       activate: (document2, documentChanged) => {
+        this._canvasEdgeHighlights.activate(document2);
         if (documentChanged) {
           this.setupPdfHighlight(document2);
           this.setupEpubIframeHighlight(document2);
@@ -9215,10 +9350,12 @@ var LexisPlugin = class extends LexisPluginBase {
         this.syncActivePageHighlightState();
       },
       close: (document2) => {
+        this._canvasEdgeHighlights.close(document2);
         if (this._popover?.ownerDocument === document2) this.removePopover();
         if (this._selPill?.ownerDocument === document2) this.removeSelPill();
       }
     });
+    this._canvasEdgeHighlights = new CanvasEdgeHighlights(this);
     this._workspaceDocuments.start();
     this._excalidrawHighlights = new ExcalidrawHighlights(this);
     this._excalidrawHighlights.start();
@@ -9289,6 +9426,7 @@ var LexisPlugin = class extends LexisPluginBase {
     this.teardownPdfHighlight();
     this.teardownEpubIframeHighlight();
     this._excalidrawHighlights?.destroy();
+    this._canvasEdgeHighlights?.destroy();
     this.bridge?.stop();
     this._workspaceDocuments?.forEach((document2) => document2.body?.classList.remove("lexis-show-review-metadata"));
   }

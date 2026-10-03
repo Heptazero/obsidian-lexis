@@ -35,6 +35,7 @@ import { repairReviewHistory } from "./review-scheduler";
 import { migrateLegacySettings, pluginFolderName, type StoredSettings } from "./settings-migration";
 import { WorkspaceDocuments } from "./workspace-documents";
 import { ExcalidrawHighlights } from "./excalidraw-highlights";
+import { CanvasEdgeHighlights } from "./canvas-edge-highlights";
 import { LexisRestoreModal } from "./restore-modal";
 import { LexisPluginBase } from "./plugin-base";
 import { pluginDictionaryDescriptors } from "./plugin-dictionary";
@@ -255,6 +256,7 @@ class LexisPlugin extends LexisPluginBase {
         this.removeSelPill();
       },
       activate: (document, documentChanged) => {
+        this._canvasEdgeHighlights.activate(document);
         if (documentChanged) {
           this.setupPdfHighlight(document);
           this.setupEpubIframeHighlight(document);
@@ -263,10 +265,12 @@ class LexisPlugin extends LexisPluginBase {
         this.syncActivePageHighlightState();
       },
       close: (document) => {
+        this._canvasEdgeHighlights.close(document);
         if (this._popover?.ownerDocument === document) this.removePopover();
         if (this._selPill?.ownerDocument === document) this.removeSelPill();
       },
     });
+    this._canvasEdgeHighlights = new CanvasEdgeHighlights(this);
     this._workspaceDocuments.start();
     this._excalidrawHighlights = new ExcalidrawHighlights(this);
     this._excalidrawHighlights.start();
@@ -343,6 +347,7 @@ class LexisPlugin extends LexisPluginBase {
     this.teardownPdfHighlight();
     this.teardownEpubIframeHighlight();
     this._excalidrawHighlights?.destroy();
+    this._canvasEdgeHighlights?.destroy();
     this.bridge?.stop();
     this._workspaceDocuments?.forEach((document) => document.body?.classList.remove("lexis-show-review-metadata"));
   }

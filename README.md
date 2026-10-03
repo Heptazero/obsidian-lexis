@@ -25,7 +25,7 @@ Otto:: Keeps the notebook everyone else forgets.
 
 Lexis highlights known entries and shows their notes on hover in:
 
-- Obsidian Markdown, Live Preview, and the built-in PDF viewer
+- Obsidian Markdown, Live Preview, Canvas nodes and edge labels, and the built-in PDF viewer
 - compatible epub.js-based EPUB readers
 - Chromium browsers through **Lexis Web**
 - Zotero Reader through **Lexis for Zotero**

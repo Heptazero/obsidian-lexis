@@ -8,6 +8,7 @@ import type { OccurrenceSearch } from "./occurrence-search";
 import { refreshReadingHighlightsInPlace } from "./reading-highlights";
 import type { DictionarySetting, InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats } from "./types";
 import { createHighlightIndex } from "./highlight-index";
+import type { CanvasEdgeHighlights } from "./canvas-edge-highlights";
 
 type HighlightStyleOptions = { external?: boolean; pdf?: boolean };
 type HighlightPage = { leaf: WorkspaceLeaf; container: HTMLElement; key: string };
@@ -44,6 +45,7 @@ function createHighlightEngine({ Notice, boundedSource, compactMixedScriptSpacin
   declare liveAvailable: boolean;
   declare _liveRefreshEffect: StateEffectType<void> | null;
   declare _pageHighlightState: WeakMap<WorkspaceLeaf, HighlightPageState>;
+  declare _canvasEdgeHighlights: CanvasEdgeHighlights;
   declare rescanPdfLayers: () => void;
   declare rescanEpubIframes: () => void;
   declare occurrenceSearch: OccurrenceSearch;
@@ -237,6 +239,7 @@ function createHighlightEngine({ Notice, boundedSource, compactMixedScriptSpacin
     if (this.liveAvailable) this.app.workspace.updateOptions();
     this.rescanPdfLayers();
     this.rescanEpubIframes();
+    this._canvasEdgeHighlights?.refresh();
   }
 
   // ---------- 阅读模式高亮 ----------

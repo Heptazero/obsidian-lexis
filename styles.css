@@ -46,6 +46,31 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     pointer-events: none;
 }
 
+/* Canvas edge labels are editable textareas, so highlights live in a visual
+   mirror above the text without taking over pointer or editing events. */
+.lexis-canvas-edge-hl-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    box-sizing: border-box;
+    overflow: hidden;
+    pointer-events: none;
+    color: transparent;
+}
+.lexis-canvas-edge-hl-content {
+    box-sizing: border-box;
+    border-color: transparent;
+    min-width: 100%;
+    min-height: 100%;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    color: transparent;
+}
+.lexis-canvas-edge-hl {
+    pointer-events: none;
+    color: transparent;
+}
+
 /* 设置页:功能分组折叠区 */
 .lexis-settings-root {
     display: block;

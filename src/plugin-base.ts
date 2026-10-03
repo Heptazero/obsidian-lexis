@@ -10,6 +10,7 @@ import type { WorkspaceDocuments } from "./workspace-documents";
 import type { createI18n } from "./i18n";
 import type { createTemplateProvider } from "./template-provider";
 import type { ExcalidrawHighlights } from "./excalidraw-highlights";
+import type { CanvasEdgeHighlights } from "./canvas-edge-highlights";
 
 export type TranslationVars = Record<string, string | number | boolean | null | undefined>;
 export type ReviewCard = ReviewCardState & { history?: ReviewHistoryEvent[] };
@@ -61,6 +62,7 @@ export class LexisPluginBase extends Plugin {
   declare _reviewSessions: WeakMap<object, unknown>;
   declare _workspaceDocuments: WorkspaceDocuments;
   declare _excalidrawHighlights: ExcalidrawHighlights;
+  declare _canvasEdgeHighlights: CanvasEdgeHighlights;
   declare _selPill: HTMLElement | null;
   declare _mobileTapStart: { pointerId: number; x: number; y: number; time: number; target: HTMLElement } | null;
   declare _mobileTapClick: { x: number; y: number; time: number } | null;
