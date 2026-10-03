@@ -159,13 +159,14 @@ function createHighlightIndex({ Notice, boundedSource, compactMixedScriptSpacing
         const archived = frontmatter["lexis-status"] === "archived";
         const retired = frontmatter["lexis-status"] === "retired";
         const pinned = !!frontmatter["lexis-pinned"];
+        const colorToken = typeof frontmatter["lexis-color"] === "string" ? frontmatter["lexis-color"].trim() : "";
         const stability = Number(frontmatter["lexis-s"]);
         const cardS = frontmatter["lexis-s"] == null || isNaN(stability) ? null : stability;
-        if (!index.has(key)) { index.set(key, { display, file, isAlias: false, tags, archived, retired, pinned, cardS }); words++; }
+        if (!index.has(key)) { index.set(key, { display, file, isAlias: false, tags, archived, retired, pinned, cardS, colorToken }); words++; }
         if (this.settings.includeAliases) for (const alias of this.extractAliases(file)) {
           const aliasKey = alias.toLowerCase();
           own.add(aliasKey);
-          if (!index.has(aliasKey)) { index.set(aliasKey, { display: alias, file, isAlias: true, tags, archived, retired, pinned, cardS }); aliases++; }
+          if (!index.has(aliasKey)) { index.set(aliasKey, { display: alias, file, isAlias: true, tags, archived, retired, pinned, cardS, colorToken }); aliases++; }
         }
         selfKeysByPath.set(file.path, own);
         if (!archived && !retired && (frontmatter["lexis-s"] == null || !frontmatter["lexis-due"] || String(frontmatter["lexis-due"]).slice(0, 10) <= today)) due++;

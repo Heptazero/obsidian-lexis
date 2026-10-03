@@ -120,6 +120,52 @@ export function renderHighlightSettings(this: HighlightSettingsHost, context: Hi
   if (hasSuggest) new PathSuggest(this.app, excludeInput.inputEl, () => allTags.filter((tag) => !excludedTags().includes(tag)), (value) => { void addExcludedTags(value); });
   renderExcludedTags();
 
+  const colorRoleSection = this.section(rulesGroup, t("settings.colorRoles"), { desc: t("settings.colorRolesDesc") });
+  const colorRolesWrap = colorRoleSection.createDiv();
+  const renderColorRoles = () => {
+    colorRolesWrap.empty();
+    const grid = colorRolesWrap.createDiv({ cls: "lexis-rule-grid" });
+    const reorder = createReorderController({
+      container: grid,
+      setIcon: obsidian.setIcon,
+      label: t("settings.reorder"),
+      onMove: async (from, to) => {
+        this.plugin.settings.colorRoles = moveItem(this.plugin.settings.colorRoles, from, to);
+        await save();
+        refresh();
+        renderColorRoles();
+      },
+    });
+    this.plugin.settings.colorRoles.forEach((role, index) => {
+      const cell = grid.createDiv({ cls: "lexis-setting-row lexis-rule lexis-color-role-row" });
+      new obsidian.TextComponent(cell).setPlaceholder(t("settings.colorRolePlaceholder")).setValue(role.name).onChange(async (value) => {
+        role.name = value.trim();
+        await save();
+        refresh();
+      });
+      new obsidian.ColorComponent(cell).setValue(role.color || accentHex).onChange(async (value) => {
+        role.color = value;
+        await save();
+        refresh();
+      });
+      new obsidian.ExtraButtonComponent(cell).setIcon("trash").setTooltip(t("common.delete")).onClick(async () => {
+        this.plugin.settings.colorRoles.splice(index, 1);
+        await save();
+        refresh();
+        renderColorRoles();
+      });
+      reorder.attach(cell, index);
+    });
+    const addRole = colorRolesWrap.createEl("button", { text: t("settings.addColorRole") });
+    addRole.setCssStyles({ marginTop: "2px" });
+    addRole.addEventListener("click", () => { void (async () => {
+      this.plugin.settings.colorRoles.push({ name: "", color: accentHex });
+      await save();
+      renderColorRoles();
+    })(); });
+  };
+  renderColorRoles();
+
   const tagColorSection = this.section(rulesGroup, t("settings.tagColors"));
   const rulesWrap = tagColorSection.createDiv();
   const renderRules = () => {

@@ -17,9 +17,11 @@ lexis-inline: true
 ---
 
 ## Characters
-Yalda / Yal:: A painter who appears under several names.
+Yalda / Yal {captain}:: A painter who appears under several names.
 Otto:: Keeps the notebook everyone else forgets.
 ```
+
+Color roles can make people or concepts easier to recognize without tying meaning to a raw color. Define `captain → #8b5cf6` under *Highlights → Rules → Entry color roles*, then use `{captain}` at the end of an inline entry. A one-file entry uses `lexis-color: captain` in frontmatter. You may also write a hex color directly, such as `{#8b5cf6}` or `lexis-color: "#8b5cf6"`. Entry colors override category, tag, dictionary, and global colors.
 
 ### Read with the same lexicon everywhere
 

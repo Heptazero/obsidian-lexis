@@ -43,6 +43,7 @@ export const DEFAULT_SETTINGS: DefaultLexisSettings = {
   homeRetireCollapsed: true,
   homeSuspendedCollapsed: true,
   homeArchivedCollapsed: true,
+  colorRoles: [],
   tagRules: [],
   showRelated: true,
   showOccurrences: true,

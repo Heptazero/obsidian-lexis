@@ -89,6 +89,11 @@ export interface TagRule {
   opacity?: number;
 }
 
+export interface ColorRole {
+  name: string;
+  color: string;
+}
+
 export interface ReviewHistoryEvent {
   date: string;
   s: number;
@@ -151,6 +156,7 @@ export interface LexisSettings {
   homeRetireCollapsed: boolean;
   homeSuspendedCollapsed: boolean;
   homeArchivedCollapsed: boolean;
+  colorRoles: ColorRole[];
   tagRules: TagRule[];
   showRelated: boolean;
   showOccurrences: boolean;
@@ -216,6 +222,7 @@ export interface LexisEntry {
   cardS?: number | null;
   inline?: boolean;
   annotation?: string;
+  colorToken?: string;
   category?: string;
   categories?: string[];
   headingPath?: HeadingRef[];

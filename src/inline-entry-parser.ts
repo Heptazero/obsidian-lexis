@@ -66,7 +66,10 @@ export function parseInlineEntries(content: string, file: TFile, syntax: InlineE
     const left = line.slice(0, at).trim().replace(/^[-*+]\s+/, "");
     const annotation = line.slice(at + entryDelimiter.length).trim();
     if (!left || /^#/.test(left) || left.toLowerCase() === "color") continue;
-    const [display, ...aliases] = splitInlineAliases(left, syntax.aliasDelimiter);
+    const colorMatch = /\s+\{([^{}\n]+)\}\s*$/.exec(left);
+    const colorToken = colorMatch?.[1].trim() || "";
+    const names = colorMatch ? left.slice(0, colorMatch.index).trim() : left;
+    const [display, ...aliases] = splitInlineAliases(names, syntax.aliasDelimiter);
     if (!display) continue;
     const headingPath = headingStack.filter(Boolean).map((item) => ({ ...item }));
     const categories = headingPath.map((item) => item.name).reverse();
@@ -78,6 +81,7 @@ export function parseInlineEntries(content: string, file: TFile, syntax: InlineE
       tags: new Set(),
       inline: true,
       annotation,
+      colorToken,
       category: categories[0] || "",
       categories,
       headingPath,

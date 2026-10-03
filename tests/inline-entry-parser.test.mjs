@@ -37,3 +37,18 @@ test("supports a custom inline alias delimiter and removes duplicates", async ()
   assert.equal(entry.display, "Alpha");
   assert.deepEqual(entry.aliases, ["A"]);
 });
+
+test("parses a trailing color role without changing names", async () => {
+  const { parseInlineEntries } = await loadParser();
+  const file = { path: "People.md", basename: "People" };
+  const entries = parseInlineEntries([
+    "亚尔达 / Yalda {船长}:: 人物批注",
+    "I\\/O {#8b5cf6}:: 术语批注",
+  ].join("\n"), file, { entryDelimiter: "::", aliasDelimiter: "/" });
+
+  assert.equal(entries[0].display, "亚尔达");
+  assert.deepEqual(entries[0].aliases, ["Yalda"]);
+  assert.equal(entries[0].colorToken, "船长");
+  assert.equal(entries[1].display, "I/O");
+  assert.equal(entries[1].colorToken, "#8b5cf6");
+});

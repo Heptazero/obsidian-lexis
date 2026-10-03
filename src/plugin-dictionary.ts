@@ -6,6 +6,7 @@ import type { Occurrence } from "./occurrence-search";
 import { parseSectionLinks, relationHeading, relationTypes } from "./relation-sections";
 import { cssColorToHex, escapeRe, todayString as todayStr } from "./shared-utils";
 import { LexisPluginBase, errorMessage, type RelationBag, type TranslationVars } from "./plugin-base";
+import { resolveEntryColorToken } from "./entry-colors";
 
 export abstract class LexisPluginDictionary extends LexisPluginBase {
   abstract recordEncounter(file: TFile, type: "hover" | "add" | "open"): void;
@@ -38,7 +39,7 @@ export abstract class LexisPluginDictionary extends LexisPluginBase {
   excludeTagSet() { return new Set(this.parseTags(this.settings.excludeTags)); }
   // 词典表的文件夹列表 = 文件夹来源的单一真相
   dictFolders() { return (this.settings.dicts || []).map((d) => this.normalizeFolder(d && d.folder)).filter(Boolean); }
-  // 一条词的最终高亮色(优先级:标签规则 > 词典色 > 全局兜底),返回解析后的真实 hex —— 网页和 ob 同一套优先级
+  // 一条词的最终高亮色:词条角色/直写色 > 内联分类 > 标签 > 词典 > 全局。
   colorForEntry(e: LexisEntry): string {
     let color = this.effectiveHighlightColor();           // 全局兜底(留空=主题色,已解析)
     const dc = this.dictColorForFile(e && e.file);         // 词典映射
@@ -49,6 +50,8 @@ export abstract class LexisPluginDictionary extends LexisPluginBase {
     }
     const inlineColor = this.inlineCategoryColor(e);
     if (inlineColor) color = inlineColor;
+    const entryColor = resolveEntryColorToken(e?.colorToken, this.settings.colorRoles);
+    if (entryColor) color = entryColor;
     return color;
   }
   // 一条词的最终线型(标签规则可覆盖全局)

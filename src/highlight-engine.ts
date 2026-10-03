@@ -9,6 +9,7 @@ import { refreshReadingHighlightsInPlace } from "./reading-highlights";
 import type { DictionarySetting, InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats } from "./types";
 import { createHighlightIndex } from "./highlight-index";
 import type { CanvasEdgeHighlights } from "./canvas-edge-highlights";
+import { resolveEntryColorToken } from "./entry-colors";
 
 type HighlightStyleOptions = { external?: boolean; pdf?: boolean };
 type HighlightPage = { leaf: WorkspaceLeaf; container: HTMLElement; key: string };
@@ -155,7 +156,7 @@ function createHighlightEngine({ Notice, boundedSource, compactMixedScriptSpacin
     // EPUB 内容在独立 iframe 中，读不到 Obsidian 主文档的 --text-accent；跨文档时必须注入解析后的实际颜色。
     let color = opts?.external ? this.effectiveHighlightColor() : (this.settings.highlightColor || "var(--text-accent)");
     let styleKind = this.settings.highlightStyle || "wavy";
-    // 优先级:内联标题分类色 > 标签规则 > 词典色 > 全局色(和网页端 inlineStyleFor 完全一致)
+    // 优先级:词条角色/直写色 > 内联分类 > 标签 > 词典 > 全局。
     const dc = this.dictColorForFile(entry && entry.file);
     if (dc) color = dc;
     if (entry?.tags && this.settings.tagRules?.length) {
@@ -164,6 +165,8 @@ function createHighlightEngine({ Notice, boundedSource, compactMixedScriptSpacin
     }
     const inlineColor = this.inlineCategoryColor(entry);
     if (inlineColor) color = inlineColor;
+    const entryColor = resolveEntryColorToken(entry?.colorToken, this.settings.colorRoles);
+    if (entryColor) color = entryColor;
     // PDF:文字层 opacity 0.2,内嵌高亮不可见 → 单独建一层叠在 Canvas 之上、textLayer 之下,
     // 用内联 .lexis-hl 隐形做事件代理,视觉高亮画在独立 overlay 层里。
     if (opts && opts.pdf) return "--lexis-hl-underline:none;--lexis-hl-background:transparent;";

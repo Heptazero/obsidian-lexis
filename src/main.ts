@@ -376,6 +376,7 @@ class LexisPlugin extends LexisPluginBase {
       await this.saveData(this.settings);
     }
     if (!Array.isArray(this.settings.tagRules)) this.settings.tagRules = [];
+    if (!Array.isArray(this.settings.colorRoles)) this.settings.colorRoles = [];
     if (!this.settings.inlineCategoryColors || typeof this.settings.inlineCategoryColors !== "object" || Array.isArray(this.settings.inlineCategoryColors)) this.settings.inlineCategoryColors = {};
     if (!this.settings.inlineCategoryOpacity || typeof this.settings.inlineCategoryOpacity !== "object" || Array.isArray(this.settings.inlineCategoryOpacity)) this.settings.inlineCategoryOpacity = {};
     if (!this.settings.inlineCategoryHighlight || typeof this.settings.inlineCategoryHighlight !== "object" || Array.isArray(this.settings.inlineCategoryHighlight)) this.settings.inlineCategoryHighlight = {};
