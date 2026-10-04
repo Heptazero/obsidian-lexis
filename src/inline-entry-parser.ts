@@ -72,7 +72,7 @@ export function parseInlineEntries(content: string, file: TFile, syntax: InlineE
     const [display, ...aliases] = splitInlineAliases(names, syntax.aliasDelimiter);
     if (!display) continue;
     const headingPath = headingStack.filter(Boolean).map((item) => ({ ...item }));
-    const categories = headingPath.map((item) => item.name).reverse();
+    const categoryPath = headingPath.map((item) => item.name);
     entries.push({
       display,
       aliases,
@@ -82,8 +82,8 @@ export function parseInlineEntries(content: string, file: TFile, syntax: InlineE
       inline: true,
       annotation,
       colorToken,
-      category: categories[0] || "",
-      categories,
+      category: categoryPath.at(-1) || "",
+      categoryPath,
       headingPath,
       line: lineNo,
     });

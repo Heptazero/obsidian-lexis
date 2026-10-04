@@ -25,6 +25,7 @@ test("parses inline aliases with optional whitespace and escaped delimiters", as
   assert.deepEqual(entries[0].aliases, ["亚尔", "Yalda"]);
   assert.equal(entries[0].display, "亚尔达");
   assert.equal(entries[0].category, "人物");
+  assert.deepEqual(entries[0].categoryPath, ["人物"]);
   assert.equal(entries[1].display, "I/O");
   assert.deepEqual(entries[1].aliases, ["输入输出"]);
 });

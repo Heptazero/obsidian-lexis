@@ -5,6 +5,7 @@ import { containsMath, withTimeout } from "./bridge-render";
 import { relationHeading, relationTypes, replaceLexisFences } from "./relation-sections";
 import type { Occurrence } from "./occurrence-search";
 import type { InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats, ReviewHistoryEvent } from "./types";
+import { inlineCategoryLabel } from "./inline-category";
 
 type Relation = { path: string; basename: string };
 type RelationBag = Record<string, Relation[]>;
@@ -66,7 +67,7 @@ function createBridgeRenderApi({ TFile, Component, recentReviewDates, escapeRe, 
     if (entry.inline) {
       const title = entry.canonical || entry.display;
       const alias = entry.isAlias && entry.display.toLowerCase() !== title.toLowerCase() ? entry.display : "";
-      return { title, subtitle: [alias, entry.category || ""].filter(Boolean).join(" · ") };
+      return { title, subtitle: [alias, inlineCategoryLabel(entry)].filter(Boolean).join(" · ") };
     }
     const title = entry.file?.basename || entry.display;
     const subtitle = entry.isAlias && entry.display.toLowerCase() !== title.toLowerCase() ? entry.display : "";

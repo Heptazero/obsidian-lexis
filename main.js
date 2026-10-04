@@ -2271,6 +2271,24 @@ ${body}`.trim();
   );
 }
 
+// src/inline-category.ts
+function inlineClassificationHeading(entry, level) {
+  const headings = entry.headingPath || [];
+  if (!headings.length) return null;
+  if (!Number.isInteger(level) || level < 1 || level > 6) return headings.at(-1) || null;
+  return [...headings].reverse().find((heading) => heading.level <= level) || headings[0] || null;
+}
+function inlineClassificationPath(entry, level) {
+  const headings = entry.headingPath || [];
+  const category = inlineClassificationHeading(entry, level);
+  if (!category) return [];
+  const start = headings.indexOf(category);
+  return start < 0 ? [category] : headings.slice(start);
+}
+function inlineCategoryLabel(entry) {
+  return (entry.categoryPath?.length ? entry.categoryPath : [entry.category || ""]).filter(Boolean).join(" / ");
+}
+
 // src/bridge-render-api.ts
 function textValue(value) {
   return typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? String(value) : "";
@@ -2290,7 +2308,7 @@ function createBridgeRenderApi({ TFile: TFile9, Component: Component5, recentRev
       if (entry.inline) {
         const title2 = entry.canonical || entry.display;
         const alias = entry.isAlias && entry.display.toLowerCase() !== title2.toLowerCase() ? entry.display : "";
-        return { title: title2, subtitle: [alias, entry.category || ""].filter(Boolean).join(" \xB7 ") };
+        return { title: title2, subtitle: [alias, inlineCategoryLabel(entry)].filter(Boolean).join(" \xB7 ") };
       }
       const title = entry.file?.basename || entry.display;
       const subtitle = entry.isAlias && entry.display.toLowerCase() !== title.toLowerCase() ? entry.display : "";
@@ -3027,7 +3045,7 @@ function parseInlineEntries(content, file, syntax) {
     const [display, ...aliases] = splitInlineAliases(names, syntax.aliasDelimiter);
     if (!display) continue;
     const headingPath = headingStack.filter(Boolean).map((item) => ({ ...item }));
-    const categories = headingPath.map((item) => item.name).reverse();
+    const categoryPath = headingPath.map((item) => item.name);
     entries.push({
       display,
       aliases,
@@ -3037,21 +3055,13 @@ function parseInlineEntries(content, file, syntax) {
       inline: true,
       annotation,
       colorToken,
-      category: categories[0] || "",
-      categories,
+      category: categoryPath.at(-1) || "",
+      categoryPath,
       headingPath,
       line: lineNo
     });
   }
   return entries;
-}
-
-// src/inline-category.ts
-function inlineClassificationHeading(entry, level) {
-  const headings = entry.headingPath || [];
-  if (!headings.length) return null;
-  if (!Number.isInteger(level) || level < 1 || level > 6) return headings.at(-1) || null;
-  return [...headings].reverse().find((heading) => heading.level <= level) || headings[0] || null;
 }
 
 // src/highlight-index.ts
@@ -3215,6 +3225,7 @@ function createHighlightIndex({ Notice: Notice6, boundedSource: boundedSource2, 
           own.add(key);
           const heading = inlineClassificationHeading(entry, this.settings.inlineHeadingLevel);
           entry.category = heading?.name || "";
+          entry.categoryPath = inlineClassificationPath(entry, this.settings.inlineHeadingLevel).map(({ name }) => name);
           if (heading) {
             const id = `${entry.file.path}::${heading.name}`;
             const node = categoryOccurrences.get(id) || { id, name: heading.name, level: heading.level, line: heading.line, file: entry.file, count: 0 };

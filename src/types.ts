@@ -227,7 +227,7 @@ export interface LexisEntry {
   annotation?: string;
   colorToken?: string;
   category?: string;
-  categories?: string[];
+  categoryPath?: string[];
   headingPath?: HeadingRef[];
   line?: number;
 }
