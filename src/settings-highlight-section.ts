@@ -4,7 +4,6 @@ import type { App, ColorComponent } from "obsidian";
 import type { HighlightStyle } from "./types";
 import type { SettingsRuntime } from "./settings-tab";
 import type { PathSuggestConstructor } from "./settings-suggest";
-import { unconfiguredEntryColorUsages } from "./entry-colors";
 
 interface HighlightSettingsHost {
   app: App;
@@ -124,76 +123,6 @@ export function renderHighlightSettings(this: HighlightSettingsHost, context: Hi
   new obsidian.ExtraButtonComponent(excludeAdd).setIcon("plus").setTooltip(t("settings.addExcludedTag")).onClick(() => { void addExcludedTags(excludeInput.inputEl.value); });
   if (hasSuggest) new PathSuggest(this.app, excludeInput.inputEl, () => allTags.filter((tag) => !excludedTags().includes(tag)), (value) => { void addExcludedTags(value); });
   renderExcludedTags();
-
-  const entryColorSection = this.section(rulesGroup, t("settings.entryColors"), { desc: t("settings.entryColorsDesc") });
-  const missingColorsWrap = entryColorSection.createDiv({ cls: "lexis-missing-entry-colors" });
-  const entryColorsWrap = entryColorSection.createDiv();
-  const renderMissingColors = () => {
-    missingColorsWrap.empty();
-    const missing = unconfiguredEntryColorUsages(this.plugin.inlineColorTokenUsages || [], this.plugin.settings.entryColors);
-    if (!missing.length) return;
-    missingColorsWrap.createDiv({ cls: "lexis-missing-entry-colors-label", text: t("settings.unconfiguredEntryColors") });
-    const list = missingColorsWrap.createDiv({ cls: "lexis-missing-entry-colors-list" });
-    for (const usage of missing) {
-      const add = list.createEl("button", {
-        cls: "lexis-missing-entry-color",
-        attr: { type: "button", title: t("settings.addUnconfiguredEntryColor", { name: usage.token }) },
-      });
-      add.createSpan({ text: usage.token });
-      add.createSpan({ cls: "lexis-missing-entry-color-count", text: String(usage.count) });
-      add.addEventListener("click", () => { void (async () => {
-        this.plugin.settings.entryColors.push({ name: usage.token, color: accentHex });
-        await save();
-        refresh();
-        renderEntryColors();
-      })(); });
-    }
-  };
-  const renderEntryColors = () => {
-    entryColorsWrap.empty();
-    const grid = entryColorsWrap.createDiv({ cls: "lexis-rule-grid" });
-    const reorder = createReorderController({
-      container: grid,
-      setIcon: obsidian.setIcon,
-      label: t("settings.reorder"),
-      onMove: async (from, to) => {
-        this.plugin.settings.entryColors = moveItem(this.plugin.settings.entryColors, from, to);
-        await save();
-        refresh();
-        renderEntryColors();
-      },
-    });
-    this.plugin.settings.entryColors.forEach((entryColor, index) => {
-      const cell = grid.createDiv({ cls: "lexis-setting-row lexis-rule lexis-entry-color-row" });
-      new obsidian.TextComponent(cell).setPlaceholder(t("settings.entryColorPlaceholder")).setValue(entryColor.name).onChange(async (value) => {
-        entryColor.name = value.trim();
-        await save();
-        refresh();
-        renderMissingColors();
-      });
-      new obsidian.ColorComponent(cell).setValue(entryColor.color || accentHex).onChange(async (value) => {
-        entryColor.color = value;
-        await save();
-        refresh();
-      });
-      new obsidian.ExtraButtonComponent(cell).setIcon("trash").setTooltip(t("common.delete")).onClick(async () => {
-        this.plugin.settings.entryColors.splice(index, 1);
-        await save();
-        refresh();
-        renderEntryColors();
-      });
-      reorder.attach(cell, index);
-    });
-    const addColor = entryColorsWrap.createEl("button", { text: t("settings.addEntryColor") });
-    addColor.setCssStyles({ marginTop: "2px" });
-    addColor.addEventListener("click", () => { void (async () => {
-      this.plugin.settings.entryColors.push({ name: "", color: accentHex });
-      await save();
-      renderEntryColors();
-    })(); });
-    renderMissingColors();
-  };
-  renderEntryColors();
 
   const tagColorSection = this.section(rulesGroup, t("settings.tagColors"));
   const rulesWrap = tagColorSection.createDiv();
