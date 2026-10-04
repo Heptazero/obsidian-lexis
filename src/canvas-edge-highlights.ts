@@ -1,4 +1,5 @@
 import type { LexisEntry, LexisSettings } from "./types";
+import { textHighlightMatches } from "./text-highlight-matches";
 
 interface CanvasEdgeHighlightHost {
   settings: LexisSettings;
@@ -7,13 +8,6 @@ interface CanvasEdgeHighlightHost {
   _indexBuildId: number;
   resolveMatchKey(value: string): string;
   inlineStyleForEntry(entry: LexisEntry | undefined, options?: { external?: boolean }): string;
-}
-
-interface EdgeLabelMatch {
-  start: number;
-  end: number;
-  key: string;
-  entry: LexisEntry;
 }
 
 interface DocumentState {
@@ -27,18 +21,8 @@ export function edgeLabelMatches(
   pattern: string | null,
   resolveKey: (value: string) => string,
   index: Map<string, LexisEntry>,
-): EdgeLabelMatch[] {
-  if (!text || !pattern) return [];
-  const regex = new RegExp(pattern, "gi");
-  const matches: EdgeLabelMatch[] = [];
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(text))) {
-    const key = resolveKey(match[0]);
-    const entry = index.get(key);
-    if (entry) matches.push({ start: match.index, end: match.index + match[0].length, key, entry });
-    if (!match[0].length) regex.lastIndex++;
-  }
-  return matches;
+): ReturnType<typeof textHighlightMatches> {
+  return textHighlightMatches(text, pattern, resolveKey, index);
 }
 
 function containsEdgeLabel(node: Node): boolean {

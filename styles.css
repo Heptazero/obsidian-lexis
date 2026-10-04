@@ -41,12 +41,17 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
 .lexis-excalidraw-hl-layer.is-interacting {
     visibility: hidden;
 }
-.lexis-excalidraw-hl {
+.lexis-excalidraw-text-mirror {
     position: absolute;
-    display: block;
     box-sizing: border-box;
     transform-origin: center;
     pointer-events: none;
+    white-space: pre;
+    color: transparent;
+}
+.lexis-excalidraw-hl {
+    pointer-events: none;
+    color: transparent;
 }
 
 /* Canvas edge labels are editable textareas, so highlights live in a visual

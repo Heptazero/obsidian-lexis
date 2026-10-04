@@ -1,5 +1,6 @@
 import type { App, Plugin, View } from "obsidian";
 import type { LexisEntry, LexisSettings } from "./types";
+import { textHighlightMatches, type TextHighlightMatch } from "./text-highlight-matches";
 
 interface SceneElement {
   id: string;
@@ -11,6 +12,10 @@ interface SceneElement {
   angle?: number;
   text?: string;
   originalText?: string;
+  fontSize?: number;
+  fontFamily?: number;
+  lineHeight?: number;
+  textAlign?: "left" | "center" | "right";
   version?: number;
   isDeleted?: boolean;
 }
@@ -59,6 +64,7 @@ interface ExcalidrawLib {
     point: { sceneX: number; sceneY: number },
     state: SceneState,
   ) => { x: number; y: number };
+  getFontFamilyString?: (element: { fontFamily: number }) => string;
 }
 
 interface ExcalidrawWindow extends Window {
@@ -81,7 +87,13 @@ interface HighlightAnchor {
 interface CachedMatch {
   version: number | undefined;
   text: string;
-  match: { key: string; entry: LexisEntry } | null;
+  matches: TextHighlightMatch[];
+}
+
+interface MatchedTextElement {
+  element: SceneElement;
+  text: string;
+  matches: TextHighlightMatch[];
 }
 
 interface ViewState {
@@ -113,12 +125,8 @@ export function firstExcalidrawMatch(
   resolveKey: (value: string) => string,
   index: Map<string, LexisEntry>,
 ): { key: string; entry: LexisEntry } | null {
-  if (!text || !pattern) return null;
-  const match = new RegExp(pattern, "i").exec(text);
-  if (!match) return null;
-  const key = resolveKey(match[0]);
-  const entry = index.get(key);
-  return entry ? { key, entry } : null;
+  const match = textHighlightMatches(text, pattern, resolveKey, index)[0];
+  return match ? { key: match.key, entry: match.entry } : null;
 }
 
 function fallbackSceneToViewport(point: { sceneX: number; sceneY: number }, state: SceneState): { x: number; y: number } {
@@ -245,47 +253,83 @@ export class ExcalidrawHighlights {
     if (!matches.length) return;
 
     const sceneToViewport = this.sceneConverter(root);
-    for (const match of matches) {
-      const box = sceneElementBox(match.element, appState, sceneToViewport);
+    for (const item of matches) {
+      const box = sceneElementBox(item.element, appState, sceneToViewport);
       if (box.width < 1 || box.height < 1) continue;
-      const anchor = viewState.layer.createSpan({ cls: "lexis-hl lexis-excalidraw-hl" });
-      anchor.dataset.lexisKey = match.key;
-      anchor.setAttribute("aria-hidden", "true");
-      anchor.setAttribute("style", this.host.inlineStyleForEntry(match.entry, { external: true }));
-      anchor.style.left = `${box.left - rootRect.left}px`;
-      anchor.style.top = `${box.top - rootRect.top}px`;
-      anchor.style.width = `${box.width}px`;
-      anchor.style.height = `${box.height}px`;
-      anchor.style.transform = `rotate(${box.angle}rad)`;
-      viewState.anchors.push({ element: anchor, box });
+      this.renderTextMirror(viewState, item, box, rootRect, appState);
     }
   }
 
-  private matches(viewState: ViewState, elements: readonly SceneElement[]): Array<{ element: SceneElement; key: string; entry: LexisEntry }> {
+  private matches(viewState: ViewState, elements: readonly SceneElement[]): MatchedTextElement[] {
     if (viewState.indexBuildId !== this.host._indexBuildId) {
       viewState.indexBuildId = this.host._indexBuildId;
       viewState.matchCache.clear();
     }
-    const matches: Array<{ element: SceneElement; key: string; entry: LexisEntry }> = [];
+    const matches: MatchedTextElement[] = [];
     const liveIds = new Set<string>();
     for (const element of elements) {
       if (element.type !== "text" || element.isDeleted) continue;
       liveIds.add(element.id);
-      const text = element.originalText || element.text || "";
+      const text = element.text || element.originalText || "";
       const cached = viewState.matchCache.get(element.id);
-      const match = cached?.version === element.version && cached.text === text
-        ? cached.match
-        : firstExcalidrawMatch(text, this.host._pattern, (value) => this.host.resolveMatchKey(value), this.host.index);
-      if (match !== cached?.match) viewState.matchCache.set(element.id, { version: element.version, text, match });
-      if (match) matches.push({ element, ...match });
+      const elementMatches = cached?.version === element.version && cached.text === text
+        ? cached.matches
+        : textHighlightMatches(text, this.host._pattern, (value) => this.host.resolveMatchKey(value), this.host.index);
+      if (elementMatches !== cached?.matches) viewState.matchCache.set(element.id, { version: element.version, text, matches: elementMatches });
+      if (elementMatches.length) matches.push({ element, text, matches: elementMatches });
     }
     for (const id of viewState.matchCache.keys()) if (!liveIds.has(id)) viewState.matchCache.delete(id);
     return matches;
   }
 
+  private renderTextMirror(
+    viewState: ViewState,
+    item: MatchedTextElement,
+    box: HighlightBox,
+    root: DOMRect,
+    state: SceneState,
+  ): void {
+    const mirror = viewState.layer.createDiv({ cls: "lexis-excalidraw-text-mirror", attr: { "aria-hidden": "true" } });
+    mirror.style.left = `${box.left - root.left}px`;
+    mirror.style.top = `${box.top - root.top}px`;
+    mirror.style.width = `${box.width}px`;
+    mirror.style.height = `${box.height}px`;
+    mirror.style.transform = `rotate(${box.angle}rad)`;
+    mirror.style.fontSize = `${Math.max(1, Number(item.element.fontSize) || 20) * (Number(state.zoom?.value) || 1)}px`;
+    mirror.style.fontFamily = this.fontFamily(item.element, viewState.root);
+    mirror.style.lineHeight = String(Number(item.element.lineHeight) || 1.25);
+    mirror.style.textAlign = item.element.textAlign || "left";
+
+    const anchors: HTMLElement[] = [];
+    let offset = 0;
+    for (const match of item.matches) {
+      if (match.start > offset) mirror.appendChild(mirror.ownerDocument.createTextNode(item.text.slice(offset, match.start)));
+      const anchor = mirror.createSpan({ cls: "lexis-hl lexis-excalidraw-hl", text: item.text.slice(match.start, match.end) });
+      anchor.dataset.lexisKey = match.key;
+      anchor.setAttribute("style", `${this.host.inlineStyleForEntry(match.entry, { external: true })};padding:0;`);
+      anchors.push(anchor);
+      offset = match.end;
+    }
+    if (offset < item.text.length) mirror.appendChild(mirror.ownerDocument.createTextNode(item.text.slice(offset)));
+
+    for (const anchor of anchors) for (const rect of Array.from(anchor.getClientRects())) {
+      if (rect.width > 0 && rect.height > 0) viewState.anchors.push({
+        element: anchor,
+        box: { left: rect.left, top: rect.top, width: rect.width, height: rect.height, angle: 0 },
+      });
+    }
+  }
+
+  private fontFamily(element: SceneElement, root: HTMLElement): string {
+    const fontFamily = Number(element.fontFamily) || 1;
+    const resolved = this.excalidrawLib(root)?.getFontFamilyString?.({ fontFamily });
+    if (resolved) return resolved;
+    return ({ 1: "Virgil", 2: "Helvetica", 3: "Cascadia", 4: "Assistant", 5: "Lilita One", 6: "Nunito", 7: "Comic Shanns", 8: "Excalifont" } as Record<number, string>)[fontFamily] || "sans-serif";
+  }
+
   private signature(
     state: SceneState,
-    matches: Array<{ element: SceneElement; key: string; entry: LexisEntry }>,
+    matches: MatchedTextElement[],
     root: DOMRect,
   ): string {
     return [
@@ -300,9 +344,10 @@ export class ExcalidrawHighlights {
       root.height,
       root.left,
       root.top,
-      ...matches.map(({ element, key, entry }) => [
-        element.id, element.version, element.x, element.y, element.width, element.height, element.angle, key,
-        this.host.inlineStyleForEntry(entry, { external: true }),
+      ...matches.map(({ element, matches: textMatches }) => [
+        element.id, element.version, element.x, element.y, element.width, element.height, element.angle,
+        element.fontSize, element.fontFamily, element.lineHeight, element.textAlign,
+        ...textMatches.map((match) => `${match.start}:${match.end}:${match.key}:${this.host.inlineStyleForEntry(match.entry, { external: true })}`),
       ].join(":")),
     ].join("|");
   }
@@ -385,11 +430,14 @@ export class ExcalidrawHighlights {
   }
 
   private sceneConverter(root: HTMLElement): (point: { sceneX: number; sceneY: number }, state: SceneState) => { x: number; y: number } {
+    return this.excalidrawLib(root)?.sceneCoordsToViewportCoords
+      || fallbackSceneToViewport;
+  }
+
+  private excalidrawLib(root: HTMLElement): ExcalidrawLib | undefined {
     const ownerWindow = root.ownerDocument.defaultView as ExcalidrawWindow | null;
     const mainWindow = window as unknown as ExcalidrawWindow;
-    return ownerWindow?.ExcalidrawLib?.sceneCoordsToViewportCoords
-      || mainWindow.ExcalidrawLib?.sceneCoordsToViewportCoords
-      || fallbackSceneToViewport;
+    return ownerWindow?.ExcalidrawLib || mainWindow.ExcalidrawLib;
   }
 
   private excalidrawPlugin(): ExcalidrawPluginApi | LegacyExcalidrawPluginApi | null {

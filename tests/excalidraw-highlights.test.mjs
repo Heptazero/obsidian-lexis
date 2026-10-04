@@ -48,3 +48,10 @@ test("hides Excalidraw overlays during pointer movement and wheel zoom", async (
   assert.match(source, /classList\.add\("is-interacting"\)/);
   assert.match(source, /state\.signature = ""/);
 });
+
+test("renders only matched Excalidraw text fragments instead of the whole text box", async () => {
+  const source = await import("node:fs/promises").then(({ readFile }) => readFile("src/excalidraw-highlights.ts", "utf8"));
+  assert.match(source, /item\.text\.slice\(match\.start, match\.end\)/);
+  assert.match(source, /anchor\.getClientRects\(\)/);
+  assert.doesNotMatch(source, /anchor\.style\.width/);
+});
