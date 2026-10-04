@@ -89,7 +89,7 @@ function createHighlightEngine({ Notice, boundedSource, compactMixedScriptSpacin
   }
   inlineClassificationMode() { return this.settings.inlineClassificationMode === "file" ? "file" : "heading"; }
   inlineSourceKey(entry: LexisEntry): string { return entry.file.path && entry.category ? `${entry.file.path}::${entry.category}` : ""; }
-  // 最近标题模式让所有同名标题共享外观；文件模式让同一来源文件共享外观。Markdown 祖先标题不参与。
+  // 标题模式使用选定层级的祖先标题；文件模式让同一来源文件共享外观。
   inlineCategoryColor(entry: LexisEntry): string {
     if (!entry?.inline) return "";
     const fileMode = this.inlineClassificationMode() === "file";

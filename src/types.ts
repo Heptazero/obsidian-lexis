@@ -3,6 +3,7 @@ import type { TFile } from "obsidian";
 export type Language = "zh" | "en";
 export type HighlightStyle = "wavy" | "underline" | "background";
 export type InlineClassificationMode = "heading" | "file";
+export type InlineHeadingLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 export type EmptyNotePreset = "blank" | "occ";
 export type CardFront = "note" | "cloze";
 export type AnnotationImageLocation = "obsidian" | "custom";
@@ -125,6 +126,7 @@ export interface LexisSettings {
   inlineEntryDelimiter: string;
   inlineAliasDelimiter: string;
   inlineClassificationMode: InlineClassificationMode;
+  inlineHeadingLevel: InlineHeadingLevel;
   inlineCategoryColors: Record<string, string>;
   inlineCategoryOpacity: Record<string, number>;
   inlineCategoryHighlight: Record<string, boolean>;

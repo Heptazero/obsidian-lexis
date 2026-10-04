@@ -4,6 +4,7 @@ import type { App, Notice as ObsidianNotice, TFile } from "obsidian";
 import type { OccurrenceSearch } from "./occurrence-search";
 import type { InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats } from "./types";
 import { parseInlineEntries } from "./inline-entry-parser";
+import { inlineClassificationHeading } from "./inline-category";
 
 type TranslationVars = Record<string, string | number | boolean>;
 
@@ -183,7 +184,8 @@ function createHighlightIndex({ Notice, boundedSource, compactMixedScriptSpacing
         for (const entry of entries) {
           const key = entry.display.toLowerCase();
           own.add(key);
-          const heading = (entry.headingPath || []).at(-1);
+          const heading = inlineClassificationHeading(entry, this.settings.inlineHeadingLevel);
+          entry.category = heading?.name || "";
           if (heading) {
             const id = `${entry.file.path}::${heading.name}`;
             const node = categoryOccurrences.get(id) || { id, name: heading.name, level: heading.level, line: heading.line, file: entry.file, count: 0 };

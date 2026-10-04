@@ -1,7 +1,7 @@
 "use strict";
 
 import type { App } from "obsidian";
-import type { InlineCategoryOccurrence } from "./types";
+import type { InlineCategoryOccurrence, InlineHeadingLevel } from "./types";
 import type { SettingsRuntime } from "./settings-tab";
 
 interface InlineGroup {
@@ -53,13 +53,31 @@ export function renderInlineSettings(this: InlineSettingsHost, context: InlineSe
     .addText((t) => t.setPlaceholder("::").setValue(this.plugin.inlineDelimiter()).onChange(async (v) => { this.plugin.settings.inlineEntryDelimiter = (v || "").trim() || "::"; await save(); await this.plugin.rebuildIndex(false); this.renderStats(); }));
   new Setting(inlineSection).setName(t("settings.inlineAliasDelimiter")).setDesc(t("settings.inlineAliasDelimiterDesc"))
     .addText((t) => t.setPlaceholder("/").setValue(this.plugin.inlineAliasDelimiter()).onChange(async (v) => { this.plugin.settings.inlineAliasDelimiter = (v || "").trim() || "/"; await save(); await this.plugin.rebuildIndex(false); this.renderStats(); }));
+  let renderCategoryColors = () => {};
+  let syncHeadingOptions = () => {};
   new Setting(inlineSection).setName(t("settings.inlineClassification")).setDesc(t("settings.inlineClassificationDesc"))
     .addDropdown((dropdown) => dropdown
       .addOption("heading", t("settings.classifyByHeading"))
       .addOption("file", t("settings.classifyByFile"))
       .setValue(this.plugin.settings.inlineClassificationMode)
-      .onChange(async (mode) => { this.plugin.settings.inlineClassificationMode = mode === "file" ? "file" : "heading"; await save(); renderCategoryColors(); refresh(); }))
+      .onChange(async (mode) => { this.plugin.settings.inlineClassificationMode = mode === "file" ? "file" : "heading"; syncHeadingOptions(); await save(); renderCategoryColors(); refresh(); }))
     .addExtraButton((button) => button.setIcon("refresh-cw").setTooltip(t("settings.refreshCategories")).onClick(async () => { await this.plugin.rebuildIndex(false); renderCategoryColors(); this.renderStats(); }));
+  const headingOptions = inlineSection.createDiv({ cls: "lexis-settings-subgroup" });
+  new Setting(headingOptions).setName(t("settings.inlineHeadingLevel")).setDesc(t("settings.inlineHeadingLevelDesc"))
+    .addDropdown((dropdown) => {
+      dropdown.addOption("0", t("settings.nearestHeading"));
+      for (let level = 1; level <= 6; level++) dropdown.addOption(String(level), t("settings.headingLevel", { marks: "#".repeat(level), level }));
+      dropdown.setValue(String(this.plugin.settings.inlineHeadingLevel)).onChange(async (value) => {
+        const level = Math.max(0, Math.min(6, Number.parseInt(value, 10) || 0)) as InlineHeadingLevel;
+        this.plugin.settings.inlineHeadingLevel = level;
+        await save();
+        await this.plugin.rebuildIndex(false);
+        renderCategoryColors();
+        this.renderStats();
+      });
+    });
+  syncHeadingOptions = () => { headingOptions.hidden = this.plugin.settings.inlineClassificationMode === "file"; };
+  syncHeadingOptions();
   const categoryColorsWrap = inlineSection.createDiv({ cls: "lexis-inline-tree" });
   const openInlineHeading = async (node: InlineCategoryOccurrence) => {
     (this.app as AppWithSettingsModal).setting?.close();
@@ -76,7 +94,7 @@ export function renderInlineSettings(this: InlineSettingsHost, context: InlineSe
     reveal();
     window.setTimeout(reveal, 60);
   };
-  const renderCategoryColors = () => {
+  renderCategoryColors = () => {
     categoryColorsWrap.empty();
     const occurrences = this.plugin.inlineCategoryOccurrences || [];
     if (!occurrences.length) {

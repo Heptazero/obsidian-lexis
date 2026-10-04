@@ -53,6 +53,7 @@ var DEFAULT_SETTINGS = {
   inlineEntryDelimiter: "::",
   inlineAliasDelimiter: "/",
   inlineClassificationMode: "heading",
+  inlineHeadingLevel: 2,
   inlineCategoryColors: {},
   inlineCategoryOpacity: {},
   inlineCategoryHighlight: {},
@@ -882,9 +883,13 @@ var MESSAGES = {
   "settings.resetInlineStyle": { zh: "\u6062\u590D\u5168\u5C40\u989C\u8272\u548C\u900F\u660E\u5EA6", en: "Reset global color and opacity" },
   "settings.categoryAppearance": { zh: "\u201C{name}\u201D\u7684\u9AD8\u4EAE\u5916\u89C2", en: "Highlight appearance for \u201C{name}\u201D" },
   "settings.inlineClassification": { zh: "\u5206\u7C7B\u65B9\u5F0F", en: "Group by" },
-  "settings.inlineClassificationDesc": { zh: "\u6700\u8FD1\u6807\u9898\u5171\u4EAB\u6807\u9898\u989C\u8272\uFF1B\u6309\u6587\u4EF6\u5219\u6574\u4EFD\u6587\u4EF6\u5171\u4EAB\u989C\u8272\u3002", en: "Matching nearest headings share a color, or use one color per source file." },
-  "settings.classifyByHeading": { zh: "\u6700\u8FD1\u6807\u9898", en: "Nearest heading" },
+  "settings.inlineClassificationDesc": { zh: "\u6309\u6807\u9898\u53EF\u8DE8\u6587\u4EF6\u5171\u4EAB\u5206\u7C7B\uFF1B\u6309\u6587\u4EF6\u5219\u6574\u4EFD\u6587\u4EF6\u5171\u4EAB\u989C\u8272\u3002", en: "Heading groups can span files, or use one color per source file." },
+  "settings.classifyByHeading": { zh: "\u6807\u9898", en: "Heading" },
   "settings.classifyByFile": { zh: "\u6587\u4EF6", en: "File" },
+  "settings.inlineHeadingLevel": { zh: "\u5206\u7C7B\u6807\u9898\u7EA7\u522B", en: "Heading level" },
+  "settings.inlineHeadingLevelDesc": { zh: "\u56FA\u5B9A\u7EA7\u522B\u540E\uFF0C\u66F4\u6DF1\u6807\u9898\u7EE7\u627F\u8BE5\u5206\u7C7B\uFF1B\u7F3A\u5C11\u8BE5\u7EA7\u65F6\u4F7F\u7528\u6700\u8FD1\u7684\u4E0A\u7EA7\u6807\u9898\u3002", en: "Deeper headings inherit the selected level; if it is absent, the nearest higher heading is used." },
+  "settings.nearestHeading": { zh: "\u6700\u8FD1\u6807\u9898", en: "Nearest heading" },
+  "settings.headingLevel": { zh: "{marks}\uFF08{level}\u7EA7\uFF09", en: "{marks} (level {level})" },
   "settings.colorByHeading": { zh: "\u6309\u6807\u9898\u5206\u7C7B\u7740\u8272", en: "Color by heading" },
   "settings.colorByHeadingDesc": { zh: "\u5D4C\u5957\u6807\u9898\u7EE7\u627F\u4E0A\u7EA7\u3002", en: "Nested headings inherit from parents." },
   "settings.refreshCategories": { zh: "\u5237\u65B0\u5206\u7C7B", en: "Refresh categories" },
@@ -3040,6 +3045,14 @@ function parseInlineEntries(content, file, syntax) {
   return entries;
 }
 
+// src/inline-category.ts
+function inlineClassificationHeading(entry, level) {
+  const headings = entry.headingPath || [];
+  if (!headings.length) return null;
+  if (!Number.isInteger(level) || level < 1 || level > 6) return headings.at(-1) || null;
+  return [...headings].reverse().find((heading) => heading.level <= level) || headings[0] || null;
+}
+
 // src/highlight-index.ts
 function createHighlightIndex({ Notice: Notice6, boundedSource: boundedSource2, compactMixedScriptSpacing: compactMixedScriptSpacing2, todayStr }) {
   class HighlightIndex {
@@ -3199,7 +3212,8 @@ function createHighlightIndex({ Notice: Notice6, boundedSource: boundedSource2, 
         for (const entry of entries) {
           const key = entry.display.toLowerCase();
           own.add(key);
-          const heading = (entry.headingPath || []).at(-1);
+          const heading = inlineClassificationHeading(entry, this.settings.inlineHeadingLevel);
+          entry.category = heading?.name || "";
           if (heading) {
             const id = `${entry.file.path}::${heading.name}`;
             const node = categoryOccurrences.get(id) || { id, name: heading.name, level: heading.level, line: heading.line, file: entry.file, count: 0 };
@@ -3345,7 +3359,7 @@ function createHighlightEngine({ Notice: Notice6, boundedSource: boundedSource2,
     inlineSourceKey(entry) {
       return entry.file.path && entry.category ? `${entry.file.path}::${entry.category}` : "";
     }
-    // 最近标题模式让所有同名标题共享外观；文件模式让同一来源文件共享外观。Markdown 祖先标题不参与。
+    // 标题模式使用选定层级的祖先标题；文件模式让同一来源文件共享外观。
     inlineCategoryColor(entry) {
       if (!entry?.inline) return "";
       const fileMode = this.inlineClassificationMode() === "file";
@@ -5967,8 +5981,13 @@ function renderInlineSettings(context) {
     await this.plugin.rebuildIndex(false);
     this.renderStats();
   }));
+  let renderCategoryColors = () => {
+  };
+  let syncHeadingOptions = () => {
+  };
   new Setting3(inlineSection).setName(t("settings.inlineClassification")).setDesc(t("settings.inlineClassificationDesc")).addDropdown((dropdown) => dropdown.addOption("heading", t("settings.classifyByHeading")).addOption("file", t("settings.classifyByFile")).setValue(this.plugin.settings.inlineClassificationMode).onChange(async (mode) => {
     this.plugin.settings.inlineClassificationMode = mode === "file" ? "file" : "heading";
+    syncHeadingOptions();
     await save();
     renderCategoryColors();
     refresh();
@@ -5977,6 +5996,23 @@ function renderInlineSettings(context) {
     renderCategoryColors();
     this.renderStats();
   }));
+  const headingOptions = inlineSection.createDiv({ cls: "lexis-settings-subgroup" });
+  new Setting3(headingOptions).setName(t("settings.inlineHeadingLevel")).setDesc(t("settings.inlineHeadingLevelDesc")).addDropdown((dropdown) => {
+    dropdown.addOption("0", t("settings.nearestHeading"));
+    for (let level = 1; level <= 6; level++) dropdown.addOption(String(level), t("settings.headingLevel", { marks: "#".repeat(level), level }));
+    dropdown.setValue(String(this.plugin.settings.inlineHeadingLevel)).onChange(async (value) => {
+      const level = Math.max(0, Math.min(6, Number.parseInt(value, 10) || 0));
+      this.plugin.settings.inlineHeadingLevel = level;
+      await save();
+      await this.plugin.rebuildIndex(false);
+      renderCategoryColors();
+      this.renderStats();
+    });
+  });
+  syncHeadingOptions = () => {
+    headingOptions.hidden = this.plugin.settings.inlineClassificationMode === "file";
+  };
+  syncHeadingOptions();
   const categoryColorsWrap = inlineSection.createDiv({ cls: "lexis-inline-tree" });
   const openInlineHeading = async (node) => {
     this.app.setting?.close();
@@ -5993,7 +6029,7 @@ function renderInlineSettings(context) {
     reveal();
     window.setTimeout(reveal, 60);
   };
-  const renderCategoryColors = () => {
+  renderCategoryColors = () => {
     categoryColorsWrap.empty();
     const occurrences = this.plugin.inlineCategoryOccurrences || [];
     if (!occurrences.length) {
@@ -9634,6 +9670,7 @@ var LexisPlugin = class extends LexisPluginBase {
     if (!this.settings.inlineCategoryOpacity || typeof this.settings.inlineCategoryOpacity !== "object" || Array.isArray(this.settings.inlineCategoryOpacity)) this.settings.inlineCategoryOpacity = {};
     if (!this.settings.inlineCategoryHighlight || typeof this.settings.inlineCategoryHighlight !== "object" || Array.isArray(this.settings.inlineCategoryHighlight)) this.settings.inlineCategoryHighlight = {};
     if (!["heading", "file"].includes(this.settings.inlineClassificationMode)) this.settings.inlineClassificationMode = "heading";
+    if (!Number.isInteger(this.settings.inlineHeadingLevel) || this.settings.inlineHeadingLevel < 0 || this.settings.inlineHeadingLevel > 6) this.settings.inlineHeadingLevel = 2;
     if (!this.settings.inlineFileColors || typeof this.settings.inlineFileColors !== "object" || Array.isArray(this.settings.inlineFileColors)) this.settings.inlineFileColors = {};
     if (!this.settings.inlineFileOpacity || typeof this.settings.inlineFileOpacity !== "object" || Array.isArray(this.settings.inlineFileOpacity)) this.settings.inlineFileOpacity = {};
     if (!this.settings.inlineFileHighlight || typeof this.settings.inlineFileHighlight !== "object" || Array.isArray(this.settings.inlineFileHighlight)) this.settings.inlineFileHighlight = {};

@@ -23,6 +23,8 @@ Otto:: Keeps the notebook everyone else forgets.
 
 Entry colors make people or concepts easier to recognize without tying meaning to a raw color. Under *Highlights → Rules → Entry colors*, one row may contain aliases such as `captain / commander / ENTJ`; spaces around `/` are optional and every name resolves to the same color. Use the preferred name at the end of an inline entry, such as `{captain}`. A one-file entry uses `lexis-color: captain` in frontmatter. You may also write a hex color directly, such as `{#8b5cf6}` or `lexis-color: "#8b5cf6"`. Entry colors override category, tag, dictionary, and global colors.
 
+Inline entries can be grouped by file or heading. Heading groups may follow the nearest heading or a fixed level from H1 to H6. With H2 selected, nested headings such as H3 and H4 inherit their nearest H2 group, which is useful for global categories such as characters and settings.
+
 ### Read with the same lexicon everywhere
 
 Lexis highlights known entries and shows their notes on hover in:
