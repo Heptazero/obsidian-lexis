@@ -36,6 +36,7 @@ import { migrateEntryColors, migrateLegacySettings, pluginFolderName, type Store
 import { WorkspaceDocuments } from "./workspace-documents";
 import { ExcalidrawHighlights } from "./excalidraw-highlights";
 import { CanvasEdgeHighlights } from "./canvas-edge-highlights";
+import { InlineHeadingSuggest } from "./inline-heading-suggest";
 import { LexisRestoreModal } from "./restore-modal";
 import { LexisPluginBase } from "./plugin-base";
 import { pluginDictionaryDescriptors } from "./plugin-dictionary";
@@ -229,6 +230,7 @@ class LexisPlugin extends LexisPluginBase {
     this.registerView(LEXIS_LOG_VIEW, (leaf) => new LexisLogView(leaf, this));
 
     this.addSettingTab(new LexisSettingTab(this.app, this as unknown as ConstructorParameters<typeof LexisSettingTab>[1]));
+    this.registerEditorSuggest(new InlineHeadingSuggest(this.app, this));
 
     this.registerMarkdownPostProcessor((el, ctx) => this.highlightElement(el, ctx));
     this.registerMarkdownCodeBlockProcessor("lexis", (src, el, ctx) => this.renderLexisBlock(el, ctx, src));
