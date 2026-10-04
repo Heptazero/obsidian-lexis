@@ -292,6 +292,7 @@ const MESSAGES: Record<string, TranslationPair> = {
   "settings.showSubsetHighlight": { zh: "启用这个子集", en: "Enable this subset" },
   "settings.resetInlineStyle": { zh: "恢复全局颜色和透明度", en: "Reset global color and opacity" },
   "settings.categoryAppearance": { zh: "“{name}”的高亮外观", en: "Highlight appearance for “{name}”" },
+  "settings.noCustomColor": { zh: "未设颜色", en: "No color" },
   "settings.inlineClassification": { zh: "分类方式", en: "Group by" },
   "settings.inlineClassificationDesc": { zh: "按标题可跨文件共享分类；按文件则整份文件共享颜色。", en: "Heading groups can span files, or use one color per source file." },
   "settings.classifyByHeading": { zh: "标题", en: "Heading" },

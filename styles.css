@@ -308,6 +308,28 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     line-height: 18px;
     text-align: center;
 }
+.lexis-inline-color-status {
+    padding: 1px 5px;
+    border-radius: 999px;
+    background: var(--background-modifier-hover);
+    color: var(--text-muted);
+    font-size: 10px;
+    line-height: 18px;
+    white-space: nowrap;
+}
+.lexis-color-suggest-name {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-weight: 600;
+}
+.lexis-color-suggest-swatch {
+    width: 10px;
+    height: 10px;
+    flex: 0 0 auto;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 50%;
+}
 .lexis-template-setting textarea {
     min-height: 88px;
     resize: vertical;

@@ -164,6 +164,9 @@ export function renderInlineSettings(this: InlineSettingsHost, context: InlineSe
       summary.createSpan({ cls: "lexis-inline-group-name", text: group.name, attr: { title: group.key } });
       const parentControls = summary.createDiv({ cls: "lexis-inline-category-controls" });
       parentControls.addEventListener("click", (event) => event.stopPropagation());
+      const colorStatus = parentControls.createSpan({ cls: "lexis-inline-color-status", text: t("settings.noCustomColor") });
+      const syncColorStatus = () => { colorStatus.hidden = Boolean(String(colors[group.key] || "").trim()); };
+      syncColorStatus();
       const countLabel = t("settings.entryCount", { count: group.count });
       parentControls.createSpan({ cls: "lexis-inline-count", text: countLabel, attr: { title: countLabel } });
       new obsidian.ToggleComponent(parentControls).setTooltip(t("settings.showGroupHighlight")).setValue(enabled)
@@ -178,8 +181,8 @@ export function renderInlineSettings(this: InlineSettingsHost, context: InlineSe
           color: colors[group.key] || accentHex,
           opacity: Number(Object.prototype.hasOwnProperty.call(opacities, group.key) ? opacities[group.key] : this.plugin.settings.highlightOpacity),
         }),
-        onChange: async (patch) => { if (patch.color != null) colors[group.key] = patch.color; if (patch.opacity != null) opacities[group.key] = patch.opacity; await save(); refresh(); },
-        onReset: async () => { delete colors[group.key]; delete opacities[group.key]; await save(); refresh(); },
+        onChange: async (patch) => { if (patch.color != null) colors[group.key] = patch.color; if (patch.opacity != null) opacities[group.key] = patch.opacity; syncColorStatus(); await save(); refresh(); },
+        onReset: async () => { delete colors[group.key]; delete opacities[group.key]; syncColorStatus(); await save(); refresh(); },
       });
       rootReorder.attach(details, groupIndex, { handleParent: summary });
 
