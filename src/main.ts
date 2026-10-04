@@ -32,7 +32,7 @@ import { createReviewState } from "./review-state";
 import { createReviewQueue } from "./review-queue";
 import { relationBlockSource } from "./relation-sections";
 import { repairReviewHistory } from "./review-scheduler";
-import { migrateLegacySettings, pluginFolderName, type StoredSettings } from "./settings-migration";
+import { migrateEntryColors, migrateLegacySettings, pluginFolderName, type StoredSettings } from "./settings-migration";
 import { WorkspaceDocuments } from "./workspace-documents";
 import { ExcalidrawHighlights } from "./excalidraw-highlights";
 import { CanvasEdgeHighlights } from "./canvas-edge-highlights";
@@ -368,7 +368,9 @@ class LexisPlugin extends LexisPluginBase {
   }
 
   async loadSettings() {
-    const stored = await this.loadStoredSettings();
+    const entryColorMigration = migrateEntryColors(await this.loadStoredSettings());
+    const stored = entryColorMigration.settings;
+    if (entryColorMigration.migrated) await this.saveData(stored);
     this.settings = Object.assign({}, DEFAULT_SETTINGS, stored) as LexisSettings;
     if ((!this.settings.tagRules || !this.settings.tagRules.length) && this.settings.tagRulesText) {
       this.settings.tagRules = this.parseTagRulesText(this.settings.tagRulesText);
@@ -376,7 +378,7 @@ class LexisPlugin extends LexisPluginBase {
       await this.saveData(this.settings);
     }
     if (!Array.isArray(this.settings.tagRules)) this.settings.tagRules = [];
-    if (!Array.isArray(this.settings.colorRoles)) this.settings.colorRoles = [];
+    if (!Array.isArray(this.settings.entryColors)) this.settings.entryColors = [];
     if (!this.settings.inlineCategoryColors || typeof this.settings.inlineCategoryColors !== "object" || Array.isArray(this.settings.inlineCategoryColors)) this.settings.inlineCategoryColors = {};
     if (!this.settings.inlineCategoryOpacity || typeof this.settings.inlineCategoryOpacity !== "object" || Array.isArray(this.settings.inlineCategoryOpacity)) this.settings.inlineCategoryOpacity = {};
     if (!this.settings.inlineCategoryHighlight || typeof this.settings.inlineCategoryHighlight !== "object" || Array.isArray(this.settings.inlineCategoryHighlight)) this.settings.inlineCategoryHighlight = {};

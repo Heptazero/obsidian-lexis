@@ -38,7 +38,7 @@ test("supports a custom inline alias delimiter and removes duplicates", async ()
   assert.deepEqual(entry.aliases, ["A"]);
 });
 
-test("parses a trailing color role without changing names", async () => {
+test("parses an entry color name without changing entry aliases", async () => {
   const { parseInlineEntries } = await loadParser();
   const file = { path: "People.md", basename: "People" };
   const entries = parseInlineEntries([

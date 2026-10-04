@@ -1,8 +1,8 @@
 "use strict";
 
-import type { LexisSettings } from "./types";
+import type { EntryColor, LexisSettings } from "./types";
 
-type StoredSettings = Partial<LexisSettings>;
+type StoredSettings = Partial<LexisSettings> & { colorRoles?: EntryColor[] };
 
 interface LegacyMigrationResult {
   settings: StoredSettings;
@@ -34,5 +34,11 @@ function migrateLegacySettings(current: StoredSettings, legacy: StoredSettings |
   };
 }
 
-export { migrateLegacySettings, pluginFolderName };
+function migrateEntryColors(settings: StoredSettings): LegacyMigrationResult {
+  if (Array.isArray(settings.entryColors) || !Array.isArray(settings.colorRoles)) return { settings, migrated: false };
+  const { colorRoles, ...current } = settings;
+  return { settings: { ...current, entryColors: colorRoles }, migrated: true };
+}
+
+export { migrateEntryColors, migrateLegacySettings, pluginFolderName };
 export type { StoredSettings };

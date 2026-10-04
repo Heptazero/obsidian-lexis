@@ -84,7 +84,7 @@ var DEFAULT_SETTINGS = {
   homeRetireCollapsed: true,
   homeSuspendedCollapsed: true,
   homeArchivedCollapsed: true,
-  colorRoles: [],
+  entryColors: [],
   tagRules: [],
   showRelated: true,
   showOccurrences: true,
@@ -909,10 +909,10 @@ var MESSAGES = {
   "settings.fadeDesc": { zh: "\u6700\u7EC8\u900F\u660E\u5EA6 = \u57FA\u7840\u900F\u660E\u5EA6 \xD7 [1 - S/(S+20) \xD7 (1-\u6E10\u9690\u4E0B\u9650)]\u3002S \u4E3A FSRS \u7A33\u5B9A\u5EA6\uFF1B\u65B0\u8BCD\u4FDD\u6301\u57FA\u7840\u900F\u660E\u5EA6\u3002", en: "Final opacity = base opacity \xD7 [1 - S/(S+20) \xD7 (1-fade floor)]. S is FSRS stability; new entries keep the base opacity." },
   "settings.fadeFloor": { zh: "\u6700\u4F4E\u900F\u660E\u5EA6", en: "Minimum opacity" },
   "settings.tagColors": { zh: "\u6309\u6807\u7B7E\u7740\u8272", en: "Color by tag" },
-  "settings.colorRoles": { zh: "\u8BCD\u6761\u989C\u8272\u89D2\u8272", en: "Entry color roles" },
-  "settings.colorRolesDesc": { zh: "\u5185\u8054\u8BCD\u6761\u672B\u5C3E\u5199 {\u8239\u957F}\uFF1B\u5355\u6587\u4EF6\u8BCD\u6761\u5C5E\u6027\u5199 lexis-color: \u8239\u957F\u3002\u4E5F\u53EF\u76F4\u63A5\u4F7F\u7528\u5341\u516D\u8FDB\u5236\u989C\u8272\u3002", en: "End an inline entry with {captain}, or set lexis-color: captain in a note. Hex colors also work directly." },
-  "settings.colorRolePlaceholder": { zh: "\u89D2\u8272\u540D\uFF0C\u5982\u201C\u8239\u957F\u201D", en: "Role, for example captain" },
-  "settings.addColorRole": { zh: "+ \u6DFB\u52A0\u989C\u8272\u89D2\u8272", en: "+ Add color role" },
+  "settings.entryColors": { zh: "\u8BCD\u6761\u989C\u8272", en: "Entry colors" },
+  "settings.entryColorsDesc": { zh: "\u7528 / \u5206\u9694\u540C\u4E00\u79CD\u989C\u8272\u7684\u522B\u540D\uFF0C\u5982 \u8239\u957F / \u6307\u6325\u5B98 / ENTJ\u3002\u5185\u8054\u8BCD\u6761\u672B\u5C3E\u5199 {\u540D\u79F0}\uFF1B\u5355\u6587\u4EF6\u8BCD\u6761\u5199 lexis-color: \u540D\u79F0\u3002", en: "Separate aliases for the same color with /, such as captain / commander / ENTJ. End an inline entry with {name}, or set lexis-color: name in a note." },
+  "settings.entryColorPlaceholder": { zh: "\u8239\u957F / \u6307\u6325\u5B98 / ENTJ", en: "captain / commander / ENTJ" },
+  "settings.addEntryColor": { zh: "+ \u6DFB\u52A0\u8BCD\u6761\u989C\u8272", en: "+ Add entry color" },
   "settings.tagPlaceholder": { zh: "\u6807\u7B7E", en: "Tag" },
   "settings.addTagRule": { zh: "+ \u6DFB\u52A0\u6807\u7B7E\u89C4\u5219", en: "+ Add tag rule" },
   "settings.tagAppearance": { zh: "\u6807\u7B7E\u89C4\u5219\u5916\u89C2", en: "Tag rule appearance" },
@@ -2307,7 +2307,7 @@ function createBridgeRenderApi({ TFile: TFile9, Component: Component5, recentRev
           markdown: e.annotation || "*(\u65E0\u6279\u6CE8)*",
           title: heading2.title,
           subtitle: heading2.subtitle,
-          colorRole: e.colorToken || "",
+          colorName: e.colorToken || "",
           html: await this.renderInlineEntryHtml(e)
         };
       }
@@ -2330,7 +2330,7 @@ function createBridgeRenderApi({ TFile: TFile9, Component: Component5, recentRev
         vault: this.app.vault.getName(),
         title: heading.title,
         subtitle: heading.subtitle,
-        colorRole: e.colorToken || "",
+        colorName: e.colorToken || "",
         alias: !!e.isAlias,
         tags: [...e.tags || []],
         meaning: this.extractSection(body, ["\u610F\u601D", "\u610F\u4E49"]),
@@ -3299,16 +3299,16 @@ function createHighlightIndex({ Notice: Notice6, boundedSource: boundedSource2, 
 
 // src/entry-colors.ts
 var HEX_COLOR = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
-function resolveEntryColorToken(token, roles) {
+function resolveEntryColorToken(token, entries) {
   const value = String(token || "").trim();
   if (!value) return "";
   if (HEX_COLOR.test(value)) return value;
   const key = value.toLowerCase();
-  const role = (roles || []).find((item) => String(item?.name || "").trim().toLowerCase() === key);
-  const color = String(role?.color || "").trim();
+  const entry = (entries || []).find((item) => String(item?.name || "").split(/\s*\/\s*/).some((name) => name.trim().toLowerCase() === key));
+  const color = String(entry?.color || "").trim();
   return HEX_COLOR.test(color) ? color : "";
 }
-function entryColorRoleLabel(token) {
+function entryColorLabel(token) {
   const value = String(token || "").trim();
   return value && !HEX_COLOR.test(value) ? value : "";
 }
@@ -3421,7 +3421,7 @@ function createHighlightEngine({ Notice: Notice6, boundedSource: boundedSource2,
       }
       const inlineColor = this.inlineCategoryColor(entry);
       if (inlineColor) color = inlineColor;
-      const entryColor = resolveEntryColorToken(entry?.colorToken, this.settings.colorRoles);
+      const entryColor = resolveEntryColorToken(entry?.colorToken, this.settings.entryColors);
       if (entryColor) color = entryColor;
       if (opts && opts.pdf) return "--lexis-hl-underline:none;--lexis-hl-background:transparent;";
       if (entry && entry.archived) return "--lexis-hl-underline:none;--lexis-hl-background:transparent;";
@@ -5311,10 +5311,10 @@ ${line}---` + data.slice(fm.index + fm[0].length);
       title.createSpan({ cls: "lexis-popover-title-main", text: heading.title });
       if (heading.subtitle) title.createSpan({ cls: "lexis-popover-alias", text: heading.subtitle });
       if (entry.colorToken) {
-        const label = entryColorRoleLabel(entry.colorToken);
-        const role = title.createSpan({ cls: `lexis-popover-color-role${label ? "" : " is-color-only"}`, text: label });
-        role.setAttribute("title", entry.colorToken);
-        role.style.setProperty("--lexis-role-color", this.colorForEntry(entry));
+        const label = entryColorLabel(entry.colorToken);
+        const color = title.createSpan({ cls: `lexis-popover-entry-color${label ? "" : " is-color-only"}`, text: label });
+        color.setAttribute("title", entry.colorToken);
+        color.style.setProperty("--lexis-entry-color", this.colorForEntry(entry));
       }
       title.addEventListener("click", () => {
         if (entry.inline) void this.openInlineEntry(entry, false);
@@ -5813,53 +5813,53 @@ function renderHighlightSettings(context) {
     void addExcludedTags(value);
   });
   renderExcludedTags();
-  const colorRoleSection = this.section(rulesGroup, t("settings.colorRoles"), { desc: t("settings.colorRolesDesc") });
-  const colorRolesWrap = colorRoleSection.createDiv();
-  const renderColorRoles = () => {
-    colorRolesWrap.empty();
-    const grid = colorRolesWrap.createDiv({ cls: "lexis-rule-grid" });
+  const entryColorSection = this.section(rulesGroup, t("settings.entryColors"), { desc: t("settings.entryColorsDesc") });
+  const entryColorsWrap = entryColorSection.createDiv();
+  const renderEntryColors = () => {
+    entryColorsWrap.empty();
+    const grid = entryColorsWrap.createDiv({ cls: "lexis-rule-grid" });
     const reorder = createReorderController2({
       container: grid,
       setIcon: obsidian6.setIcon,
       label: t("settings.reorder"),
       onMove: async (from, to) => {
-        this.plugin.settings.colorRoles = moveItem2(this.plugin.settings.colorRoles, from, to);
+        this.plugin.settings.entryColors = moveItem2(this.plugin.settings.entryColors, from, to);
         await save();
         refresh();
-        renderColorRoles();
+        renderEntryColors();
       }
     });
-    this.plugin.settings.colorRoles.forEach((role, index) => {
-      const cell = grid.createDiv({ cls: "lexis-setting-row lexis-rule lexis-color-role-row" });
-      new obsidian6.TextComponent(cell).setPlaceholder(t("settings.colorRolePlaceholder")).setValue(role.name).onChange(async (value) => {
-        role.name = value.trim();
+    this.plugin.settings.entryColors.forEach((entryColor, index) => {
+      const cell = grid.createDiv({ cls: "lexis-setting-row lexis-rule lexis-entry-color-row" });
+      new obsidian6.TextComponent(cell).setPlaceholder(t("settings.entryColorPlaceholder")).setValue(entryColor.name).onChange(async (value) => {
+        entryColor.name = value.trim();
         await save();
         refresh();
       });
-      new obsidian6.ColorComponent(cell).setValue(role.color || accentHex).onChange(async (value) => {
-        role.color = value;
+      new obsidian6.ColorComponent(cell).setValue(entryColor.color || accentHex).onChange(async (value) => {
+        entryColor.color = value;
         await save();
         refresh();
       });
       new obsidian6.ExtraButtonComponent(cell).setIcon("trash").setTooltip(t("common.delete")).onClick(async () => {
-        this.plugin.settings.colorRoles.splice(index, 1);
+        this.plugin.settings.entryColors.splice(index, 1);
         await save();
         refresh();
-        renderColorRoles();
+        renderEntryColors();
       });
       reorder.attach(cell, index);
     });
-    const addRole = colorRolesWrap.createEl("button", { text: t("settings.addColorRole") });
-    addRole.setCssStyles({ marginTop: "2px" });
-    addRole.addEventListener("click", () => {
+    const addColor = entryColorsWrap.createEl("button", { text: t("settings.addEntryColor") });
+    addColor.setCssStyles({ marginTop: "2px" });
+    addColor.addEventListener("click", () => {
       void (async () => {
-        this.plugin.settings.colorRoles.push({ name: "", color: accentHex });
+        this.plugin.settings.entryColors.push({ name: "", color: accentHex });
         await save();
-        renderColorRoles();
+        renderEntryColors();
       })();
     });
   };
-  renderColorRoles();
+  renderEntryColors();
   const tagColorSection = this.section(rulesGroup, t("settings.tagColors"));
   const rulesWrap = tagColorSection.createDiv();
   const renderRules = () => {
@@ -7429,6 +7429,11 @@ function migrateLegacySettings(current, legacy) {
     migrated: true
   };
 }
+function migrateEntryColors(settings) {
+  if (Array.isArray(settings.entryColors) || !Array.isArray(settings.colorRoles)) return { settings, migrated: false };
+  const { colorRoles, ...current } = settings;
+  return { settings: { ...current, entryColors: colorRoles }, migrated: true };
+}
 
 // src/workspace-documents.ts
 var WorkspaceDocuments = class {
@@ -7945,7 +7950,7 @@ var LexisPluginDictionary = class extends LexisPluginBase {
     }
     const inlineColor = this.inlineCategoryColor(e);
     if (inlineColor) color = inlineColor;
-    const entryColor = resolveEntryColorToken(e?.colorToken, this.settings.colorRoles);
+    const entryColor = resolveEntryColorToken(e?.colorToken, this.settings.entryColors);
     if (entryColor) color = entryColor;
     return color;
   }
@@ -9530,7 +9535,9 @@ var LexisPlugin = class extends LexisPluginBase {
     }
   }
   async loadSettings() {
-    const stored = await this.loadStoredSettings();
+    const entryColorMigration = migrateEntryColors(await this.loadStoredSettings());
+    const stored = entryColorMigration.settings;
+    if (entryColorMigration.migrated) await this.saveData(stored);
     this.settings = Object.assign({}, DEFAULT_SETTINGS, stored);
     if ((!this.settings.tagRules || !this.settings.tagRules.length) && this.settings.tagRulesText) {
       this.settings.tagRules = this.parseTagRulesText(this.settings.tagRulesText);
@@ -9538,7 +9545,7 @@ var LexisPlugin = class extends LexisPluginBase {
       await this.saveData(this.settings);
     }
     if (!Array.isArray(this.settings.tagRules)) this.settings.tagRules = [];
-    if (!Array.isArray(this.settings.colorRoles)) this.settings.colorRoles = [];
+    if (!Array.isArray(this.settings.entryColors)) this.settings.entryColors = [];
     if (!this.settings.inlineCategoryColors || typeof this.settings.inlineCategoryColors !== "object" || Array.isArray(this.settings.inlineCategoryColors)) this.settings.inlineCategoryColors = {};
     if (!this.settings.inlineCategoryOpacity || typeof this.settings.inlineCategoryOpacity !== "object" || Array.isArray(this.settings.inlineCategoryOpacity)) this.settings.inlineCategoryOpacity = {};
     if (!this.settings.inlineCategoryHighlight || typeof this.settings.inlineCategoryHighlight !== "object" || Array.isArray(this.settings.inlineCategoryHighlight)) this.settings.inlineCategoryHighlight = {};

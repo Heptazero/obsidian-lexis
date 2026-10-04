@@ -9,7 +9,7 @@ import type { InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats, R
 import { createReaderContent } from "./reader-content";
 import { createReaderHomeBlocks } from "./reader-home-blocks";
 import { renderReaderPopoverControls } from "./reader-popover-controls";
-import { entryColorRoleLabel } from "./entry-colors";
+import { entryColorLabel } from "./entry-colors";
 
 type CurveCard = { s?: number | null; due?: string | null; last?: string | null; history?: ReviewHistoryEvent[] };
 type BridgeResult = { ok: boolean; error?: string; tags?: string[] };
@@ -265,10 +265,10 @@ function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, da
     title.createSpan({ cls: "lexis-popover-title-main", text: heading.title });
     if (heading.subtitle) title.createSpan({ cls: "lexis-popover-alias", text: heading.subtitle });
     if (entry.colorToken) {
-      const label = entryColorRoleLabel(entry.colorToken);
-      const role = title.createSpan({ cls: `lexis-popover-color-role${label ? "" : " is-color-only"}`, text: label });
-      role.setAttribute("title", entry.colorToken);
-      role.style.setProperty("--lexis-role-color", this.colorForEntry(entry));
+      const label = entryColorLabel(entry.colorToken);
+      const color = title.createSpan({ cls: `lexis-popover-entry-color${label ? "" : " is-color-only"}`, text: label });
+      color.setAttribute("title", entry.colorToken);
+      color.style.setProperty("--lexis-entry-color", this.colorForEntry(entry));
     }
     title.addEventListener("click", () => { if (entry.inline) void this.openInlineEntry(entry, false); else this.openAndClose(entry.file); });
     const corner = scroll.createDiv({ cls: "lexis-popover-corner" });

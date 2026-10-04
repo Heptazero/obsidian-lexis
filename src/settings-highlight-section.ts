@@ -120,51 +120,51 @@ export function renderHighlightSettings(this: HighlightSettingsHost, context: Hi
   if (hasSuggest) new PathSuggest(this.app, excludeInput.inputEl, () => allTags.filter((tag) => !excludedTags().includes(tag)), (value) => { void addExcludedTags(value); });
   renderExcludedTags();
 
-  const colorRoleSection = this.section(rulesGroup, t("settings.colorRoles"), { desc: t("settings.colorRolesDesc") });
-  const colorRolesWrap = colorRoleSection.createDiv();
-  const renderColorRoles = () => {
-    colorRolesWrap.empty();
-    const grid = colorRolesWrap.createDiv({ cls: "lexis-rule-grid" });
+  const entryColorSection = this.section(rulesGroup, t("settings.entryColors"), { desc: t("settings.entryColorsDesc") });
+  const entryColorsWrap = entryColorSection.createDiv();
+  const renderEntryColors = () => {
+    entryColorsWrap.empty();
+    const grid = entryColorsWrap.createDiv({ cls: "lexis-rule-grid" });
     const reorder = createReorderController({
       container: grid,
       setIcon: obsidian.setIcon,
       label: t("settings.reorder"),
       onMove: async (from, to) => {
-        this.plugin.settings.colorRoles = moveItem(this.plugin.settings.colorRoles, from, to);
+        this.plugin.settings.entryColors = moveItem(this.plugin.settings.entryColors, from, to);
         await save();
         refresh();
-        renderColorRoles();
+        renderEntryColors();
       },
     });
-    this.plugin.settings.colorRoles.forEach((role, index) => {
-      const cell = grid.createDiv({ cls: "lexis-setting-row lexis-rule lexis-color-role-row" });
-      new obsidian.TextComponent(cell).setPlaceholder(t("settings.colorRolePlaceholder")).setValue(role.name).onChange(async (value) => {
-        role.name = value.trim();
+    this.plugin.settings.entryColors.forEach((entryColor, index) => {
+      const cell = grid.createDiv({ cls: "lexis-setting-row lexis-rule lexis-entry-color-row" });
+      new obsidian.TextComponent(cell).setPlaceholder(t("settings.entryColorPlaceholder")).setValue(entryColor.name).onChange(async (value) => {
+        entryColor.name = value.trim();
         await save();
         refresh();
       });
-      new obsidian.ColorComponent(cell).setValue(role.color || accentHex).onChange(async (value) => {
-        role.color = value;
+      new obsidian.ColorComponent(cell).setValue(entryColor.color || accentHex).onChange(async (value) => {
+        entryColor.color = value;
         await save();
         refresh();
       });
       new obsidian.ExtraButtonComponent(cell).setIcon("trash").setTooltip(t("common.delete")).onClick(async () => {
-        this.plugin.settings.colorRoles.splice(index, 1);
+        this.plugin.settings.entryColors.splice(index, 1);
         await save();
         refresh();
-        renderColorRoles();
+        renderEntryColors();
       });
       reorder.attach(cell, index);
     });
-    const addRole = colorRolesWrap.createEl("button", { text: t("settings.addColorRole") });
-    addRole.setCssStyles({ marginTop: "2px" });
-    addRole.addEventListener("click", () => { void (async () => {
-      this.plugin.settings.colorRoles.push({ name: "", color: accentHex });
+    const addColor = entryColorsWrap.createEl("button", { text: t("settings.addEntryColor") });
+    addColor.setCssStyles({ marginTop: "2px" });
+    addColor.addEventListener("click", () => { void (async () => {
+      this.plugin.settings.entryColors.push({ name: "", color: accentHex });
       await save();
-      renderColorRoles();
+      renderEntryColors();
     })(); });
   };
-  renderColorRoles();
+  renderEntryColors();
 
   const tagColorSection = this.section(rulesGroup, t("settings.tagColors"));
   const rulesWrap = tagColorSection.createDiv();

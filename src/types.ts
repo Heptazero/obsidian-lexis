@@ -89,7 +89,7 @@ export interface TagRule {
   opacity?: number;
 }
 
-export interface ColorRole {
+export interface EntryColor {
   name: string;
   color: string;
 }
@@ -156,7 +156,7 @@ export interface LexisSettings {
   homeRetireCollapsed: boolean;
   homeSuspendedCollapsed: boolean;
   homeArchivedCollapsed: boolean;
-  colorRoles: ColorRole[];
+  entryColors: EntryColor[];
   tagRules: TagRule[];
   showRelated: boolean;
   showOccurrences: boolean;

@@ -165,7 +165,7 @@ function createHighlightEngine({ Notice, boundedSource, compactMixedScriptSpacin
     }
     const inlineColor = this.inlineCategoryColor(entry);
     if (inlineColor) color = inlineColor;
-    const entryColor = resolveEntryColorToken(entry?.colorToken, this.settings.colorRoles);
+    const entryColor = resolveEntryColorToken(entry?.colorToken, this.settings.entryColors);
     if (entryColor) color = entryColor;
     // PDF:文字层 opacity 0.2,内嵌高亮不可见 → 单独建一层叠在 Canvas 之上、textLayer 之下,
     // 用内联 .lexis-hl 隐形做事件代理,视觉高亮画在独立 overlay 层里。

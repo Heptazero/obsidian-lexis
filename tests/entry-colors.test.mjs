@@ -8,18 +8,20 @@ async function loadColors() {
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString("base64")}`);
 }
 
-test("resolves semantic roles without case sensitivity", async () => {
+test("resolves slash-separated entry color aliases without case sensitivity", async () => {
   const { resolveEntryColorToken } = await loadColors();
-  const roles = [{ name: "Captain", color: "#8b5cf6" }];
+  const entries = [{ name: "Captain / Commander / 船长", color: "#8b5cf6" }];
 
-  assert.equal(resolveEntryColorToken(" captain ", roles), "#8b5cf6");
+  assert.equal(resolveEntryColorToken(" captain ", entries), "#8b5cf6");
+  assert.equal(resolveEntryColorToken("COMMANDER", entries), "#8b5cf6");
+  assert.equal(resolveEntryColorToken("船长", entries), "#8b5cf6");
 });
 
 test("accepts direct hex colors and rejects unknown values", async () => {
-  const { resolveEntryColorToken, entryColorRoleLabel } = await loadColors();
+  const { resolveEntryColorToken, entryColorLabel } = await loadColors();
 
   assert.equal(resolveEntryColorToken("#abc", []), "#abc");
   assert.equal(resolveEntryColorToken("red", []), "");
-  assert.equal(entryColorRoleLabel("Captain"), "Captain");
-  assert.equal(entryColorRoleLabel("#8b5cf6"), "");
+  assert.equal(entryColorLabel("ENTJ"), "ENTJ");
+  assert.equal(entryColorLabel("#8b5cf6"), "");
 });

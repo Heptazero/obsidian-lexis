@@ -85,7 +85,7 @@ function createBridgeRenderApi({ TFile, Component, recentReviewDates, escapeRe, 
       return {
         ok: true, word: e.display, base: e.canonical || e.display, file: e.file.path,
         vault: this.app.vault.getName(), inline: true, category: e.category, markdown: e.annotation || "*(无批注)*",
-        title: heading.title, subtitle: heading.subtitle, colorRole: e.colorToken || "",
+        title: heading.title, subtitle: heading.subtitle, colorName: e.colorToken || "",
         html: await this.renderInlineEntryHtml(e),
       };
     }
@@ -102,7 +102,7 @@ function createBridgeRenderApi({ TFile, Component, recentReviewDates, escapeRe, 
     return {
       ok: true, word: e.display, base: e.file && e.file.basename, file: e.file && e.file.path,
       vault: this.app.vault.getName(),
-      title: heading.title, subtitle: heading.subtitle, colorRole: e.colorToken || "",
+      title: heading.title, subtitle: heading.subtitle, colorName: e.colorToken || "",
       alias: !!e.isAlias, tags: [...(e.tags || [])],
       meaning: this.extractSection(body, ["意思", "意义"]),
       markdown: body, html, mathCss: html.includes("<mjx-container") ? this.bridgeMathCss() : "",

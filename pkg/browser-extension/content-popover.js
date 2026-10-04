@@ -160,13 +160,13 @@ function renderDetail(box, data) {
   } else {
     titleEl.textContent = primary;
   }
-  if (data.colorRole) {
-    const role = document.createElement("span");
-    const directColor = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(data.colorRole);
-    role.className = "lexis-web-color-role" + (directColor ? " is-color-only" : "");
-    role.textContent = directColor ? "" : data.colorRole;
-    role.title = data.colorRole;
-    titleEl.appendChild(role);
+  if (data.colorName) {
+    const color = document.createElement("span");
+    const directColor = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(data.colorName);
+    color.className = "lexis-web-entry-color" + (directColor ? " is-color-only" : "");
+    color.textContent = directColor ? "" : data.colorName;
+    color.title = data.colorName;
+    titleEl.appendChild(color);
   }
   // 所属文件夹/词典小标;点击可把这个词移到别的词典(只移动文件,正文/批注不变)
   {

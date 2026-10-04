@@ -85,7 +85,7 @@
   margin-bottom: 6px;
   overflow-wrap: anywhere;
 }
-.lexis-web-color-role {
+.lexis-web-entry-color {
   display: inline-flex;
   align-items: center;
   min-height: 20px;
@@ -98,7 +98,7 @@
   font-weight: 600;
   line-height: 1;
 }
-.lexis-web-color-role.is-color-only {
+.lexis-web-entry-color.is-color-only {
   width: 10px;
   min-height: 10px;
   padding: 0;

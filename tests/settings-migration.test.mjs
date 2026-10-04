@@ -26,3 +26,14 @@ test("imports legacy settings once while preserving new review records", async (
   assert.equal(first.settings.legacySettingsImported, true);
   assert.equal(migrateLegacySettings(first.settings, legacy).migrated, false);
 });
+
+test("renames the temporary color role setting once without keeping the old key", async () => {
+  const { migrateEntryColors } = await loadMigration();
+  const colors = [{ name: "Captain", color: "#8b5cf6" }];
+  const result = migrateEntryColors({ colorRoles: colors });
+
+  assert.equal(result.migrated, true);
+  assert.deepEqual(result.settings.entryColors, colors);
+  assert.equal("colorRoles" in result.settings, false);
+  assert.equal(migrateEntryColors(result.settings).migrated, false);
+});

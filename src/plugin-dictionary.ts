@@ -50,7 +50,7 @@ export abstract class LexisPluginDictionary extends LexisPluginBase {
     }
     const inlineColor = this.inlineCategoryColor(e);
     if (inlineColor) color = inlineColor;
-    const entryColor = resolveEntryColorToken(e?.colorToken, this.settings.colorRoles);
+    const entryColor = resolveEntryColorToken(e?.colorToken, this.settings.entryColors);
     if (entryColor) color = entryColor;
     return color;
   }
