@@ -63,6 +63,10 @@ export function renderHighlightSettings(this: HighlightSettingsHost, context: Hi
     .addToggle((t) => t.setValue(this.plugin.settings.enableLivePreview).setDisabled(!this.plugin.liveAvailable).onChange(async (v) => { this.plugin.settings.enableLivePreview = v; await save(); refresh(); }));
   new Setting(scopeGroup).setName(t("settings.pdfHighlight")).setDesc(t("settings.pdfHighlightDesc"))
     .addToggle((t) => t.setValue(this.plugin.settings.enablePdfHighlight).onChange(async (v) => { this.plugin.settings.enablePdfHighlight = v; await save(); if (v) this.plugin.setupPdfHighlight(); else { this.plugin.teardownPdfHighlight(); this.plugin.rescanPdfLayers(); } }));
+  const interactionGroup = highlightOptions.createDiv({ cls: "lexis-settings-subgroup" });
+  interactionGroup.createDiv({ cls: "lexis-settings-subheading", text: t("settings.highlightInteraction") });
+  new Setting(interactionGroup).setName(t("settings.clickHighlightToOpen")).setDesc(t("settings.clickHighlightToOpenDesc"))
+    .addToggle((toggle) => toggle.setValue(this.plugin.settings.clickHighlightToOpen !== false).onChange(async (value) => { this.plugin.settings.clickHighlightToOpen = value; await save(); }));
   const styleGroup = highlightOptions.createDiv({ cls: "lexis-settings-subgroup" });
   styleGroup.createDiv({ cls: "lexis-settings-subheading", text: t("settings.highlightAppearance") });
   new Setting(styleGroup).setName(t("settings.highlightStyle"))

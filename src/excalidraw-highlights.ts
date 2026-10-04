@@ -93,6 +93,9 @@ interface ViewState {
   matchCache: Map<string, CachedMatch>;
   indexBuildId: number;
   signature: string;
+  interacting: boolean;
+  interactionTimer: number;
+  stopInteractionTracking: () => void;
 }
 
 export interface ExcalidrawHighlightHost extends Plugin {
@@ -185,6 +188,7 @@ export class ExcalidrawHighlights {
   highlightAt(event: MouseEvent): HTMLElement | null {
     for (const state of this.views.values()) {
       if (state.root.ownerDocument !== event.view?.document || !state.root.isConnected) continue;
+      if (state.interacting) continue;
       const rootRect = state.root.getBoundingClientRect();
       if (event.clientX < rootRect.left || event.clientX > rootRect.right || event.clientY < rootRect.top || event.clientY > rootRect.bottom) continue;
       for (let index = state.anchors.length - 1; index >= 0; index--) {
@@ -215,6 +219,7 @@ export class ExcalidrawHighlights {
     const root = view.containerEl?.querySelector<HTMLElement>(".excalidraw");
     if (!root) return;
     const viewState = this.ensureState(view, root);
+    if (viewState.interacting) return;
     const api = viewState.api || sceneApiForView(view, plugin);
     if (!api) return;
     viewState.api = api;
@@ -317,13 +322,52 @@ export class ExcalidrawHighlights {
       matchCache: new Map(),
       indexBuildId: -1,
       signature: "",
+      interacting: false,
+      interactionTimer: 0,
+      stopInteractionTracking: () => {},
     };
+    state.stopInteractionTracking = this.trackInteractions(state);
     this.views.set(view, state);
     return state;
   }
 
   private removeState(state: ViewState): void {
+    state.stopInteractionTracking();
     state.layer.remove();
+  }
+
+  private trackInteractions(state: ViewState): () => void {
+    const root = state.root;
+    const ownerDocument = root.ownerDocument;
+    const hostWindow = ownerDocument.defaultView || window;
+    const begin = () => {
+      hostWindow.clearTimeout(state.interactionTimer);
+      state.interacting = true;
+      state.layer.classList.add("is-interacting");
+    };
+    const finish = () => {
+      hostWindow.clearTimeout(state.interactionTimer);
+      if (!state.interacting) return;
+      state.interacting = false;
+      state.layer.classList.remove("is-interacting");
+      state.signature = "";
+      this.refresh();
+    };
+    const wheel = () => {
+      begin();
+      state.interactionTimer = hostWindow.setTimeout(finish, 140);
+    };
+    root.addEventListener("pointerdown", begin, true);
+    root.addEventListener("wheel", wheel, { capture: true, passive: true });
+    ownerDocument.addEventListener("pointerup", finish, true);
+    ownerDocument.addEventListener("pointercancel", finish, true);
+    return () => {
+      hostWindow.clearTimeout(state.interactionTimer);
+      root.removeEventListener("pointerdown", begin, true);
+      root.removeEventListener("wheel", wheel, true);
+      ownerDocument.removeEventListener("pointerup", finish, true);
+      ownerDocument.removeEventListener("pointercancel", finish, true);
+    };
   }
 
   private layerMount(root: HTMLElement): HTMLElement {

@@ -40,6 +40,10 @@ function hasExpandedSelection(element: Element): boolean {
   return !!selection && !selection.isCollapsed && selection.rangeCount > 0;
 }
 
+export function shouldHandleHighlightClick(isMobile: boolean, clickToOpen: boolean | undefined): boolean {
+  return isMobile || clickToOpen !== false;
+}
+
 function createReaderInteractions(): PropertyDescriptorMap {
   class ReaderInteractions {
   declare app: App;
@@ -178,6 +182,7 @@ function createReaderInteractions(): PropertyDescriptorMap {
     if (t) {
       if (hasExpandedSelection(t)) return;
       if (this.index.has(t.dataset.lexisKey)) {
+        if (!shouldHandleHighlightClick(obsidian.Platform.isMobile, this.settings.clickHighlightToOpen)) return;
         e.preventDefault();
         this.activateHighlight(t, e.ctrlKey || e.metaKey);
       }

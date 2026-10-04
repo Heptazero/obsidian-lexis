@@ -74,6 +74,7 @@ var DEFAULT_SETTINGS = {
   popoverMaxHeight: 420,
   popoverFontSize: 14,
   hoverDelayMs: 250,
+  clickHighlightToOpen: true,
   mobileTapAction: "popover",
   fadeByMemory: true,
   fadeFloor: 0.25,
@@ -891,6 +892,9 @@ var MESSAGES = {
   "settings.enableHighlight": { zh: "\u542F\u7528\u9AD8\u4EAE", en: "Enable highlights" },
   "settings.enableHighlightDesc": { zh: "\u5F00\u542F\u540E\uFF0C\u9605\u8BFB\u89C6\u56FE\u59CB\u7EC8\u9AD8\u4EAE\uFF1B\u5B9E\u65F6\u9884\u89C8\u548C PDF \u53EF\u5206\u522B\u63A7\u5236\u3002", en: "When enabled, reading view is always highlighted; Live Preview and PDF can be controlled separately." },
   "settings.highlightScope": { zh: "\u663E\u793A\u4F4D\u7F6E", en: "Where to show" },
+  "settings.highlightInteraction": { zh: "\u4EA4\u4E92", en: "Interaction" },
+  "settings.clickHighlightToOpen": { zh: "\u684C\u9762\u7AEF\u70B9\u51FB\u9AD8\u4EAE\u8DF3\u8F6C", en: "Open entries by clicking highlights on desktop" },
+  "settings.clickHighlightToOpenDesc": { zh: "\u5173\u95ED\u540E\u4ECD\u53EF\u60AC\u6D6E\u67E5\u770B\u5361\u7247\uFF1B\u70B9\u51FB\u5361\u7247\u6807\u9898\u4ECD\u53EF\u6253\u5F00\u8BCD\u6761\u3002", en: "Hover cards remain available, and their titles can still open entries." },
   "settings.highlightAppearance": { zh: "\u6837\u5F0F", en: "Appearance" },
   "settings.highlightRules": { zh: "\u89C4\u5219", en: "Rules" },
   "settings.livePreview": { zh: "\u5B9E\u65F6\u9884\u89C8\u4E5F\u9AD8\u4EAE", en: "Highlight in Live Preview" },
@@ -4405,6 +4409,9 @@ function hasExpandedSelection(element) {
   const selection = element.ownerDocument.defaultView?.getSelection();
   return !!selection && !selection.isCollapsed && selection.rangeCount > 0;
 }
+function shouldHandleHighlightClick(isMobile, clickToOpen) {
+  return isMobile || clickToOpen !== false;
+}
 function createReaderInteractions() {
   class ReaderInteractions {
     // ---------- 悬浮卡 ----------
@@ -4510,6 +4517,7 @@ function createReaderInteractions() {
       if (t) {
         if (hasExpandedSelection(t)) return;
         if (this.index.has(t.dataset.lexisKey)) {
+          if (!shouldHandleHighlightClick(obsidian2.Platform.isMobile, this.settings.clickHighlightToOpen)) return;
           e.preventDefault();
           this.activateHighlight(t, e.ctrlKey || e.metaKey);
         }
@@ -5722,6 +5730,12 @@ function renderHighlightSettings(context) {
       this.plugin.teardownPdfHighlight();
       this.plugin.rescanPdfLayers();
     }
+  }));
+  const interactionGroup = highlightOptions.createDiv({ cls: "lexis-settings-subgroup" });
+  interactionGroup.createDiv({ cls: "lexis-settings-subheading", text: t("settings.highlightInteraction") });
+  new Setting3(interactionGroup).setName(t("settings.clickHighlightToOpen")).setDesc(t("settings.clickHighlightToOpenDesc")).addToggle((toggle) => toggle.setValue(this.plugin.settings.clickHighlightToOpen !== false).onChange(async (value) => {
+    this.plugin.settings.clickHighlightToOpen = value;
+    await save();
   }));
   const styleGroup = highlightOptions.createDiv({ cls: "lexis-settings-subgroup" });
   styleGroup.createDiv({ cls: "lexis-settings-subheading", text: t("settings.highlightAppearance") });
@@ -7555,6 +7569,7 @@ var ExcalidrawHighlights = class {
   highlightAt(event) {
     for (const state of this.views.values()) {
       if (state.root.ownerDocument !== event.view?.document || !state.root.isConnected) continue;
+      if (state.interacting) continue;
       const rootRect = state.root.getBoundingClientRect();
       if (event.clientX < rootRect.left || event.clientX > rootRect.right || event.clientY < rootRect.top || event.clientY > rootRect.bottom) continue;
       for (let index = state.anchors.length - 1; index >= 0; index--) {
@@ -7583,6 +7598,7 @@ var ExcalidrawHighlights = class {
     const root = view.containerEl?.querySelector(".excalidraw");
     if (!root) return;
     const viewState = this.ensureState(view, root);
+    if (viewState.interacting) return;
     const api = viewState.api || sceneApiForView(view, plugin);
     if (!api) return;
     viewState.api = api;
@@ -7681,13 +7697,52 @@ var ExcalidrawHighlights = class {
       api: null,
       matchCache: /* @__PURE__ */ new Map(),
       indexBuildId: -1,
-      signature: ""
+      signature: "",
+      interacting: false,
+      interactionTimer: 0,
+      stopInteractionTracking: () => {
+      }
     };
+    state.stopInteractionTracking = this.trackInteractions(state);
     this.views.set(view, state);
     return state;
   }
   removeState(state) {
+    state.stopInteractionTracking();
     state.layer.remove();
+  }
+  trackInteractions(state) {
+    const root = state.root;
+    const ownerDocument = root.ownerDocument;
+    const hostWindow = ownerDocument.defaultView || window;
+    const begin = () => {
+      hostWindow.clearTimeout(state.interactionTimer);
+      state.interacting = true;
+      state.layer.classList.add("is-interacting");
+    };
+    const finish = () => {
+      hostWindow.clearTimeout(state.interactionTimer);
+      if (!state.interacting) return;
+      state.interacting = false;
+      state.layer.classList.remove("is-interacting");
+      state.signature = "";
+      this.refresh();
+    };
+    const wheel = () => {
+      begin();
+      state.interactionTimer = hostWindow.setTimeout(finish, 140);
+    };
+    root.addEventListener("pointerdown", begin, true);
+    root.addEventListener("wheel", wheel, { capture: true, passive: true });
+    ownerDocument.addEventListener("pointerup", finish, true);
+    ownerDocument.addEventListener("pointercancel", finish, true);
+    return () => {
+      hostWindow.clearTimeout(state.interactionTimer);
+      root.removeEventListener("pointerdown", begin, true);
+      root.removeEventListener("wheel", wheel, true);
+      ownerDocument.removeEventListener("pointerup", finish, true);
+      ownerDocument.removeEventListener("pointercancel", finish, true);
+    };
   }
   layerMount(root) {
     const fullscreen = root.ownerDocument.fullscreenElement;

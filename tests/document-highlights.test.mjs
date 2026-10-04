@@ -62,12 +62,15 @@ test("global highlight switch also stops PDF highlight observation", async () =>
 });
 
 test("does not open a highlight while text remains selected", async () => {
-  const { hasExpandedSelection } = await loadReaderInteractions();
+  const { hasExpandedSelection, shouldHandleHighlightClick } = await loadReaderInteractions();
   const selection = { isCollapsed: false, rangeCount: 1 };
   const element = { ownerDocument: { defaultView: { getSelection: () => selection } } };
   assert.equal(hasExpandedSelection(element), true);
   selection.isCollapsed = true;
   assert.equal(hasExpandedSelection(element), false);
+  assert.equal(shouldHandleHighlightClick(false, false), false);
+  assert.equal(shouldHandleHighlightClick(false, true), true);
+  assert.equal(shouldHandleHighlightClick(true, false), true);
 });
 
 test("mobile PDF tap opens once without treating scroll, long press, or selection as a tap", async () => {

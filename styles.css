@@ -38,6 +38,9 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     pointer-events: none;
     z-index: 20;
 }
+.lexis-excalidraw-hl-layer.is-interacting {
+    visibility: hidden;
+}
 .lexis-excalidraw-hl {
     position: absolute;
     display: block;

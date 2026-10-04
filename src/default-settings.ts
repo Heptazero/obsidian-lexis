@@ -33,6 +33,7 @@ export const DEFAULT_SETTINGS: DefaultLexisSettings = {
   popoverMaxHeight: 420,
   popoverFontSize: 14,
   hoverDelayMs: 250,
+  clickHighlightToOpen: true,
   mobileTapAction: "popover",
   fadeByMemory: true,
   fadeFloor: 0.25,

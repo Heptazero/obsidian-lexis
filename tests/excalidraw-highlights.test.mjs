@@ -40,3 +40,11 @@ test("does not couple Excalidraw highlights to view-only mode", async () => {
   const source = await import("node:fs/promises").then(({ readFile }) => readFile("src/excalidraw-highlights.ts", "utf8"));
   assert.doesNotMatch(source, /!appState\.viewModeEnabled/);
 });
+
+test("hides Excalidraw overlays during pointer movement and wheel zoom", async () => {
+  const source = await import("node:fs/promises").then(({ readFile }) => readFile("src/excalidraw-highlights.ts", "utf8"));
+  assert.match(source, /addEventListener\("pointerdown", begin/);
+  assert.match(source, /addEventListener\("wheel", wheel/);
+  assert.match(source, /classList\.add\("is-interacting"\)/);
+  assert.match(source, /state\.signature = ""/);
+});
