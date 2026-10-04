@@ -95,6 +95,12 @@ export interface EntryColor {
   color: string;
 }
 
+export interface InlineColorTokenUsage {
+  token: string;
+  count: number;
+  fileCount: number;
+}
+
 export interface ReviewHistoryEvent {
   date: string;
   s: number;

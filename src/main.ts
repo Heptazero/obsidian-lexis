@@ -97,6 +97,7 @@ class LexisPlugin extends LexisPluginBase {
     this.index = new Map();
     this.vocabPaths = new Set();
     this.stats = { words: 0, aliases: 0, inlineEntries: 0, due: 0 };
+    this.inlineColorTokenUsages = [];
     this._pattern = null;
     this._indexKeysByCompact = new Map();
     this._matchKeysByCompact = new Map();

@@ -3,7 +3,7 @@
 import * as obsidian from "obsidian";
 import { Component, Plugin, TFile } from "obsidian";
 import type { Occurrence, OccurrenceSearch } from "./occurrence-search";
-import type { InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats, ReviewCardState, ReviewHistoryEvent, ReviewItem, ReviewOptions, ReviewStateSnapshot } from "./types";
+import type { InlineCategoryOccurrence, InlineColorTokenUsage, LexisEntry, LexisSettings, LexisStats, ReviewCardState, ReviewHistoryEvent, ReviewItem, ReviewOptions, ReviewStateSnapshot } from "./types";
 import type { EncounterMutation, EncounterSummary, EncounterStore } from "./encounter-store";
 import type { ReviewSchedule } from "./review-scheduler";
 import type { WorkspaceDocuments } from "./workspace-documents";
@@ -30,6 +30,7 @@ export class LexisPluginBase extends Plugin {
   declare index: Map<string, LexisEntry>;
   declare stats: LexisStats;
   declare inlineCategoryOccurrences: InlineCategoryOccurrence[];
+  declare inlineColorTokenUsages: InlineColorTokenUsage[];
   declare inlineCategories: { name: string; count: number }[];
   declare vocabPaths: Set<string>;
   declare inlineSourcePaths: Set<string>;

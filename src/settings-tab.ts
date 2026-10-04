@@ -2,7 +2,7 @@
 
 import type { App, ColorComponent, MetadataCache, Plugin, Setting, SettingDefinitionItem, View } from "obsidian";
 import type { TranslationVars } from "./i18n";
-import type { InlineCategoryOccurrence, LexisSettings, LexisStats } from "./types";
+import type { InlineCategoryOccurrence, InlineColorTokenUsage, LexisSettings, LexisStats } from "./types";
 import { renderHighlightSettings } from "./settings-highlight-section";
 import { renderInlineSettings } from "./settings-inline-section";
 import { createPathSuggest } from "./settings-suggest";
@@ -14,6 +14,7 @@ export interface SettingsRuntime extends Plugin {
   settings: LexisSettings;
   stats: LexisStats;
   inlineCategoryOccurrences: InlineCategoryOccurrence[];
+  inlineColorTokenUsages: InlineColorTokenUsage[];
   liveAvailable: boolean;
   _occCache: Map<string, unknown>;
   templateProvider: {

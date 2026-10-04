@@ -2,9 +2,10 @@
 
 import type { App, Notice as ObsidianNotice, TFile } from "obsidian";
 import type { OccurrenceSearch } from "./occurrence-search";
-import type { InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats } from "./types";
+import type { InlineCategoryOccurrence, InlineColorTokenUsage, LexisEntry, LexisSettings, LexisStats } from "./types";
 import { parseInlineEntries } from "./inline-entry-parser";
 import { inlineClassificationHeading, inlineClassificationPath } from "./inline-category";
+import { collectInlineColorTokenUsages } from "./entry-colors";
 
 type TranslationVars = Record<string, string | number | boolean>;
 
@@ -22,6 +23,7 @@ function createHighlightIndex({ Notice, boundedSource, compactMixedScriptSpacing
     declare index: Map<string, LexisEntry>;
     declare stats: LexisStats;
     declare inlineCategoryOccurrences: InlineCategoryOccurrence[];
+    declare inlineColorTokenUsages: InlineColorTokenUsage[];
     declare inlineCategories: { name: string; count: number }[];
     declare vocabPaths: Set<string>;
     declare inlineSourcePaths: Set<string>;
@@ -179,6 +181,7 @@ function createHighlightIndex({ Notice, boundedSource, compactMixedScriptSpacing
         catch { return []; }
       }));
       if (buildId !== this._indexBuildId) return this.stats;
+      this.inlineColorTokenUsages = collectInlineColorTokenUsages(parsed.flat());
       for (const entries of parsed) {
         const own = new Set<string>();
         for (const entry of entries) {

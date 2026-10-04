@@ -882,7 +882,6 @@ var MESSAGES = {
   "settings.showSubsetHighlight": { zh: "\u542F\u7528\u8FD9\u4E2A\u5B50\u96C6", en: "Enable this subset" },
   "settings.resetInlineStyle": { zh: "\u6062\u590D\u5168\u5C40\u989C\u8272\u548C\u900F\u660E\u5EA6", en: "Reset global color and opacity" },
   "settings.categoryAppearance": { zh: "\u201C{name}\u201D\u7684\u9AD8\u4EAE\u5916\u89C2", en: "Highlight appearance for \u201C{name}\u201D" },
-  "settings.noCustomColor": { zh: "\u672A\u8BBE\u989C\u8272", en: "No color" },
   "settings.inlineClassification": { zh: "\u5206\u7C7B\u65B9\u5F0F", en: "Group by" },
   "settings.inlineClassificationDesc": { zh: "\u6309\u6807\u9898\u53EF\u8DE8\u6587\u4EF6\u5171\u4EAB\u5206\u7C7B\uFF1B\u6309\u6587\u4EF6\u5219\u6574\u4EFD\u6587\u4EF6\u5171\u4EAB\u989C\u8272\u3002", en: "Heading groups can span files, or use one color per source file." },
   "settings.classifyByHeading": { zh: "\u6807\u9898", en: "Heading" },
@@ -922,6 +921,8 @@ var MESSAGES = {
   "settings.tagColors": { zh: "\u6309\u6807\u7B7E\u7740\u8272", en: "Color by tag" },
   "settings.entryColors": { zh: "\u8BCD\u6761\u989C\u8272", en: "Entry colors" },
   "settings.entryColorsDesc": { zh: "\u7528 / \u5206\u9694\u540C\u4E00\u79CD\u989C\u8272\u7684\u522B\u540D\uFF0C\u5982 \u8239\u957F / \u6307\u6325\u5B98 / ENTJ\u3002\u5185\u8054\u8BCD\u6761\u672B\u5C3E\u5199 {\u540D\u79F0}\uFF1B\u5355\u6587\u4EF6\u8BCD\u6761\u5199 lexis-color: \u540D\u79F0\u3002", en: "Separate aliases for the same color with /, such as captain / commander / ENTJ. End an inline entry with {name}, or set lexis-color: name in a note." },
+  "settings.unconfiguredEntryColors": { zh: "\u6587\u4E2D\u4F7F\u7528\u4F46\u5C1A\u672A\u914D\u7F6E", en: "Used in notes but not configured" },
+  "settings.addUnconfiguredEntryColor": { zh: "\u628A\u201C{name}\u201D\u6DFB\u52A0\u5230\u8BCD\u6761\u989C\u8272", en: "Add \u201C{name}\u201D to entry colors" },
   "settings.entryColorPlaceholder": { zh: "\u8239\u957F / \u6307\u6325\u5B98 / ENTJ", en: "captain / commander / ENTJ" },
   "settings.addEntryColor": { zh: "+ \u6DFB\u52A0\u8BCD\u6761\u989C\u8272", en: "+ Add entry color" },
   "settings.tagPlaceholder": { zh: "\u6807\u7B7E", en: "Tag" },
@@ -3065,6 +3066,38 @@ function parseInlineEntries(content, file, syntax) {
   return entries;
 }
 
+// src/entry-colors.ts
+var HEX_COLOR = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+function resolveEntryColorToken(token, entries) {
+  const value = String(token || "").trim();
+  if (!value) return "";
+  if (HEX_COLOR.test(value)) return value;
+  const key = value.toLowerCase();
+  const entry = (entries || []).find((item) => String(item?.name || "").split(/\s*\/\s*/).some((name) => name.trim().toLowerCase() === key));
+  const color = String(entry?.color || "").trim();
+  return HEX_COLOR.test(color) ? color : "";
+}
+function entryColorLabel(token) {
+  const value = String(token || "").trim();
+  return value && !HEX_COLOR.test(value) ? value : "";
+}
+function collectInlineColorTokenUsages(entries) {
+  const usages = /* @__PURE__ */ new Map();
+  for (const entry of entries) {
+    const token = String(entry.colorToken || "").trim();
+    const key = token.normalize("NFKC").toLowerCase();
+    if (!key) continue;
+    const usage = usages.get(key) || { token, count: 0, files: /* @__PURE__ */ new Set() };
+    usage.count++;
+    if (entry.file?.path) usage.files.add(entry.file.path);
+    usages.set(key, usage);
+  }
+  return [...usages.values()].map(({ token, count, files }) => ({ token, count, fileCount: files.size }));
+}
+function unconfiguredEntryColorUsages(usages, entries) {
+  return usages.filter(({ token }) => !resolveEntryColorToken(token, entries));
+}
+
 // src/highlight-index.ts
 function createHighlightIndex({ Notice: Notice6, boundedSource: boundedSource2, compactMixedScriptSpacing: compactMixedScriptSpacing2, todayStr }) {
   class HighlightIndex {
@@ -3219,6 +3252,7 @@ function createHighlightIndex({ Notice: Notice6, boundedSource: boundedSource2, 
         }
       }));
       if (buildId !== this._indexBuildId) return this.stats;
+      this.inlineColorTokenUsages = collectInlineColorTokenUsages(parsed.flat());
       for (const entries of parsed) {
         const own = /* @__PURE__ */ new Set();
         for (const entry of entries) {
@@ -3326,22 +3360,6 @@ function createHighlightIndex({ Notice: Notice6, boundedSource: boundedSource2, 
   }
   const { constructor: _constructor, ...descriptors } = Object.getOwnPropertyDescriptors(HighlightIndex.prototype);
   return descriptors;
-}
-
-// src/entry-colors.ts
-var HEX_COLOR = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
-function resolveEntryColorToken(token, entries) {
-  const value = String(token || "").trim();
-  if (!value) return "";
-  if (HEX_COLOR.test(value)) return value;
-  const key = value.toLowerCase();
-  const entry = (entries || []).find((item) => String(item?.name || "").split(/\s*\/\s*/).some((name) => name.trim().toLowerCase() === key));
-  const color = String(entry?.color || "").trim();
-  return HEX_COLOR.test(color) ? color : "";
-}
-function entryColorLabel(token) {
-  const value = String(token || "").trim();
-  return value && !HEX_COLOR.test(value) ? value : "";
 }
 
 // src/highlight-engine.ts
@@ -5855,7 +5873,31 @@ function renderHighlightSettings(context) {
   });
   renderExcludedTags();
   const entryColorSection = this.section(rulesGroup, t("settings.entryColors"), { desc: t("settings.entryColorsDesc") });
+  const missingColorsWrap = entryColorSection.createDiv({ cls: "lexis-missing-entry-colors" });
   const entryColorsWrap = entryColorSection.createDiv();
+  const renderMissingColors = () => {
+    missingColorsWrap.empty();
+    const missing = unconfiguredEntryColorUsages(this.plugin.inlineColorTokenUsages || [], this.plugin.settings.entryColors);
+    if (!missing.length) return;
+    missingColorsWrap.createDiv({ cls: "lexis-missing-entry-colors-label", text: t("settings.unconfiguredEntryColors") });
+    const list = missingColorsWrap.createDiv({ cls: "lexis-missing-entry-colors-list" });
+    for (const usage of missing) {
+      const add = list.createEl("button", {
+        cls: "lexis-missing-entry-color",
+        attr: { type: "button", title: t("settings.addUnconfiguredEntryColor", { name: usage.token }) }
+      });
+      add.createSpan({ text: usage.token });
+      add.createSpan({ cls: "lexis-missing-entry-color-count", text: String(usage.count) });
+      add.addEventListener("click", () => {
+        void (async () => {
+          this.plugin.settings.entryColors.push({ name: usage.token, color: accentHex });
+          await save();
+          refresh();
+          renderEntryColors();
+        })();
+      });
+    }
+  };
   const renderEntryColors = () => {
     entryColorsWrap.empty();
     const grid = entryColorsWrap.createDiv({ cls: "lexis-rule-grid" });
@@ -5876,6 +5918,7 @@ function renderHighlightSettings(context) {
         entryColor.name = value.trim();
         await save();
         refresh();
+        renderMissingColors();
       });
       new obsidian6.ColorComponent(cell).setValue(entryColor.color || accentHex).onChange(async (value) => {
         entryColor.color = value;
@@ -5899,6 +5942,7 @@ function renderHighlightSettings(context) {
         renderEntryColors();
       })();
     });
+    renderMissingColors();
   };
   renderEntryColors();
   const tagColorSection = this.section(rulesGroup, t("settings.tagColors"));
@@ -6117,11 +6161,6 @@ function renderInlineSettings(context) {
       summary.createSpan({ cls: "lexis-inline-group-name", text: group.name, attr: { title: group.key } });
       const parentControls = summary.createDiv({ cls: "lexis-inline-category-controls" });
       parentControls.addEventListener("click", (event) => event.stopPropagation());
-      const colorStatus = parentControls.createSpan({ cls: "lexis-inline-color-status", text: t("settings.noCustomColor") });
-      const syncColorStatus = () => {
-        colorStatus.hidden = Boolean(String(colors[group.key] || "").trim());
-      };
-      syncColorStatus();
       const countLabel = t("settings.entryCount", { count: group.count });
       parentControls.createSpan({ cls: "lexis-inline-count", text: countLabel, attr: { title: countLabel } });
       new obsidian6.ToggleComponent(parentControls).setTooltip(t("settings.showGroupHighlight")).setValue(enabled).onChange(async (value) => {
@@ -6143,14 +6182,12 @@ function renderInlineSettings(context) {
         onChange: async (patch) => {
           if (patch.color != null) colors[group.key] = patch.color;
           if (patch.opacity != null) opacities[group.key] = patch.opacity;
-          syncColorStatus();
           await save();
           refresh();
         },
         onReset: async () => {
           delete colors[group.key];
           delete opacities[group.key];
-          syncColorStatus();
           await save();
           refresh();
         }
@@ -9534,6 +9571,7 @@ var LexisPlugin = class extends LexisPluginBase {
     this.index = /* @__PURE__ */ new Map();
     this.vocabPaths = /* @__PURE__ */ new Set();
     this.stats = { words: 0, aliases: 0, inlineEntries: 0, due: 0 };
+    this.inlineColorTokenUsages = [];
     this._pattern = null;
     this._indexKeysByCompact = /* @__PURE__ */ new Map();
     this._matchKeysByCompact = /* @__PURE__ */ new Map();

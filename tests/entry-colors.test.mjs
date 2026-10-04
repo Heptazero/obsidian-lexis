@@ -25,3 +25,17 @@ test("accepts direct hex colors and rejects unknown values", async () => {
   assert.equal(entryColorLabel("ENTJ"), "ENTJ");
   assert.equal(entryColorLabel("#8b5cf6"), "");
 });
+
+test("lists inline color tokens that are used in notes but not configured", async () => {
+  const { collectInlineColorTokenUsages, unconfiguredEntryColorUsages } = await loadColors();
+  const fileA = { path: "Novel A.md" };
+  const usages = collectInlineColorTokenUsages([
+    { colorToken: "船长", file: fileA },
+    { colorToken: "船员色", file: fileA },
+    { colorToken: "船员色", file: { path: "Novel B.md" } },
+    { colorToken: "#8b5cf6", file: fileA },
+  ]);
+  const missing = unconfiguredEntryColorUsages(usages, [{ name: "船长 / 指挥官", color: "#2563eb" }]);
+
+  assert.deepEqual(missing, [{ token: "船员色", count: 2, fileCount: 2 }]);
+});

@@ -308,15 +308,6 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     line-height: 18px;
     text-align: center;
 }
-.lexis-inline-color-status {
-    padding: 1px 5px;
-    border-radius: 999px;
-    background: var(--background-modifier-hover);
-    color: var(--text-muted);
-    font-size: 10px;
-    line-height: 18px;
-    white-space: nowrap;
-}
 .lexis-color-suggest-name {
     display: flex;
     align-items: center;
@@ -329,6 +320,35 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     flex: 0 0 auto;
     border: 1px solid var(--background-modifier-border);
     border-radius: 50%;
+}
+.lexis-missing-entry-colors:empty {
+    display: none;
+}
+.lexis-missing-entry-colors {
+    margin: 2px 0 10px;
+}
+.lexis-missing-entry-colors-label {
+    margin-bottom: 5px;
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+}
+.lexis-missing-entry-colors-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+button.lexis-missing-entry-color {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 26px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    font-size: var(--font-ui-smaller);
+}
+.lexis-missing-entry-color-count {
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
 }
 .lexis-template-setting textarea {
     min-height: 88px;
