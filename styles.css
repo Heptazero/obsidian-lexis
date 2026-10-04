@@ -148,6 +148,39 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     font-weight: 600;
 }
 .lexis-settings-subheading + .setting-item { border-top: none; }
+.lexis-inline-settings-section {
+    margin-top: 6px;
+    border-top: 1px solid var(--background-modifier-border);
+}
+.lexis-inline-settings-summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 0;
+    font-weight: var(--font-semibold);
+    list-style: none;
+    cursor: pointer;
+}
+.lexis-inline-settings-summary::-webkit-details-marker {
+    display: none;
+}
+.lexis-inline-settings-chevron {
+    display: inline-flex;
+    flex: 0 0 auto;
+    color: var(--text-faint);
+    transition: transform 120ms ease;
+}
+.lexis-inline-settings-section[open] > .lexis-inline-settings-summary .lexis-inline-settings-chevron {
+    transform: rotate(90deg);
+}
+.lexis-inline-settings-body {
+    margin: 0 0 12px 18px;
+    padding-left: 14px;
+    border-left: 1px solid var(--background-modifier-border);
+}
+.lexis-inline-heading-options .setting-item:first-child {
+    border-top: none;
+}
 
 .lexis-template-setting {
     align-items: flex-start;

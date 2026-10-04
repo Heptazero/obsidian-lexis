@@ -54,8 +54,17 @@ export function renderInlineSettings(this: InlineSettingsHost, context: InlineSe
     .addText((t) => t.setPlaceholder("::").setValue(this.plugin.inlineDelimiter()).onChange(async (v) => { this.plugin.settings.inlineEntryDelimiter = (v || "").trim() || "::"; await save(); await this.plugin.rebuildIndex(false); this.renderStats(); }));
   new Setting(inlineSection).setName(t("settings.inlineAliasDelimiter")).setDesc(t("settings.inlineAliasDelimiterDesc"))
     .addText((t) => t.setPlaceholder("/").setValue(this.plugin.inlineAliasDelimiter()).onChange(async (v) => { this.plugin.settings.inlineAliasDelimiter = (v || "").trim() || "/"; await save(); await this.plugin.rebuildIndex(false); this.renderStats(); }));
-  const entryColorGroup = inlineSection.createDiv({ cls: "lexis-settings-subgroup" });
-  entryColorGroup.createDiv({ cls: "lexis-settings-subheading", text: t("settings.entryColors") });
+  const inlineSubsection = (key: string, title: string) => {
+    const details = inlineSection.createEl("details", { cls: "lexis-inline-settings-section" });
+    details.open = this.plugin.settings.inlineSettingsCollapsed[key] !== true;
+    details.addEventListener("toggle", () => { this.plugin.settings.inlineSettingsCollapsed[key] = !details.open; void save(); });
+    const summary = details.createEl("summary", { cls: "lexis-inline-settings-summary" });
+    const chevron = summary.createSpan({ cls: "lexis-inline-settings-chevron" });
+    obsidian.setIcon(chevron, "chevron-right");
+    summary.createSpan({ text: title });
+    return details.createDiv({ cls: "lexis-inline-settings-body" });
+  };
+  const entryColorGroup = inlineSubsection("entry-colors", t("settings.entryColors"));
   entryColorGroup.createDiv({ cls: "setting-item-description", text: t("settings.entryColorsDesc") });
   const missingColorsWrap = entryColorGroup.createDiv({ cls: "lexis-missing-entry-colors" });
   const entryColorsWrap = entryColorGroup.createDiv();
@@ -125,16 +134,17 @@ export function renderInlineSettings(this: InlineSettingsHost, context: InlineSe
     renderMissingColors();
   };
   renderEntryColors();
+  const classificationGroup = inlineSubsection("classification", t("settings.inlineClassificationSection"));
   let renderCategoryColors = () => {};
   let syncHeadingOptions = () => {};
-  new Setting(inlineSection).setName(t("settings.inlineClassification")).setDesc(t("settings.inlineClassificationDesc"))
+  new Setting(classificationGroup).setName(t("settings.inlineClassification")).setDesc(t("settings.inlineClassificationDesc"))
     .addDropdown((dropdown) => dropdown
       .addOption("heading", t("settings.classifyByHeading"))
       .addOption("file", t("settings.classifyByFile"))
       .setValue(this.plugin.settings.inlineClassificationMode)
       .onChange(async (mode) => { this.plugin.settings.inlineClassificationMode = mode === "file" ? "file" : "heading"; syncHeadingOptions(); await save(); renderCategoryColors(); refresh(); }))
     .addExtraButton((button) => button.setIcon("refresh-cw").setTooltip(t("settings.refreshCategories")).onClick(async () => { await this.plugin.rebuildIndex(false); renderCategoryColors(); this.renderStats(); }));
-  const headingOptions = inlineSection.createDiv({ cls: "lexis-settings-subgroup" });
+  const headingOptions = classificationGroup.createDiv({ cls: "lexis-inline-heading-options" });
   new Setting(headingOptions).setName(t("settings.inlineHeadingLevel")).setDesc(t("settings.inlineHeadingLevelDesc"))
     .addDropdown((dropdown) => {
       dropdown.addOption("0", t("settings.nearestHeading"));
@@ -150,7 +160,7 @@ export function renderInlineSettings(this: InlineSettingsHost, context: InlineSe
     });
   syncHeadingOptions = () => { headingOptions.hidden = this.plugin.settings.inlineClassificationMode === "file"; };
   syncHeadingOptions();
-  const categoryColorsWrap = inlineSection.createDiv({ cls: "lexis-inline-tree" });
+  const categoryColorsWrap = classificationGroup.createDiv({ cls: "lexis-inline-tree" });
   const openInlineHeading = async (node: InlineCategoryOccurrence) => {
     (this.app as AppWithSettingsModal).setting?.close();
     const leaf = this.app.workspace.getLeaf(false);

@@ -141,6 +141,7 @@ export interface LexisSettings {
   inlineFileHighlight: Record<string, boolean>;
   inlineSourceHighlight: Record<string, boolean>;
   inlineCollapsedGroups: Record<string, boolean>;
+  inlineSettingsCollapsed: Record<string, boolean>;
   inlineCategoryOrder: string[];
   inlineFileOrder: string[];
   inlineCategoryOrderByParent: Record<string, string[]>;

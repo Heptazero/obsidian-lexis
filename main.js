@@ -62,6 +62,7 @@ var DEFAULT_SETTINGS = {
   inlineFileHighlight: {},
   inlineSourceHighlight: {},
   inlineCollapsedGroups: {},
+  inlineSettingsCollapsed: { "entry-colors": true, classification: true },
   inlineCategoryOrder: [],
   inlineFileOrder: [],
   inlineCategoryOrderByParent: {},
@@ -883,6 +884,7 @@ var MESSAGES = {
   "settings.resetInlineStyle": { zh: "\u6062\u590D\u5168\u5C40\u989C\u8272\u548C\u900F\u660E\u5EA6", en: "Reset global color and opacity" },
   "settings.categoryAppearance": { zh: "\u201C{name}\u201D\u7684\u9AD8\u4EAE\u5916\u89C2", en: "Highlight appearance for \u201C{name}\u201D" },
   "settings.inlineClassification": { zh: "\u5206\u7C7B\u65B9\u5F0F", en: "Group by" },
+  "settings.inlineClassificationSection": { zh: "\u5206\u7C7B\u4E0E\u6765\u6E90", en: "Classification and sources" },
   "settings.inlineClassificationDesc": { zh: "\u6309\u6807\u9898\u53EF\u8DE8\u6587\u4EF6\u5171\u4EAB\u5206\u7C7B\uFF1B\u6309\u6587\u4EF6\u5219\u6574\u4EFD\u6587\u4EF6\u5171\u4EAB\u989C\u8272\u3002", en: "Heading groups can span files, or use one color per source file." },
   "settings.classifyByHeading": { zh: "\u6807\u9898", en: "Heading" },
   "settings.classifyByFile": { zh: "\u6587\u4EF6", en: "File" },
@@ -5965,8 +5967,20 @@ function renderInlineSettings(context) {
     await this.plugin.rebuildIndex(false);
     this.renderStats();
   }));
-  const entryColorGroup = inlineSection.createDiv({ cls: "lexis-settings-subgroup" });
-  entryColorGroup.createDiv({ cls: "lexis-settings-subheading", text: t("settings.entryColors") });
+  const inlineSubsection = (key, title) => {
+    const details = inlineSection.createEl("details", { cls: "lexis-inline-settings-section" });
+    details.open = this.plugin.settings.inlineSettingsCollapsed[key] !== true;
+    details.addEventListener("toggle", () => {
+      this.plugin.settings.inlineSettingsCollapsed[key] = !details.open;
+      void save();
+    });
+    const summary = details.createEl("summary", { cls: "lexis-inline-settings-summary" });
+    const chevron = summary.createSpan({ cls: "lexis-inline-settings-chevron" });
+    obsidian6.setIcon(chevron, "chevron-right");
+    summary.createSpan({ text: title });
+    return details.createDiv({ cls: "lexis-inline-settings-body" });
+  };
+  const entryColorGroup = inlineSubsection("entry-colors", t("settings.entryColors"));
   entryColorGroup.createDiv({ cls: "setting-item-description", text: t("settings.entryColorsDesc") });
   const missingColorsWrap = entryColorGroup.createDiv({ cls: "lexis-missing-entry-colors" });
   const entryColorsWrap = entryColorGroup.createDiv();
@@ -6040,11 +6054,12 @@ function renderInlineSettings(context) {
     renderMissingColors();
   };
   renderEntryColors();
+  const classificationGroup = inlineSubsection("classification", t("settings.inlineClassificationSection"));
   let renderCategoryColors = () => {
   };
   let syncHeadingOptions = () => {
   };
-  new Setting3(inlineSection).setName(t("settings.inlineClassification")).setDesc(t("settings.inlineClassificationDesc")).addDropdown((dropdown) => dropdown.addOption("heading", t("settings.classifyByHeading")).addOption("file", t("settings.classifyByFile")).setValue(this.plugin.settings.inlineClassificationMode).onChange(async (mode) => {
+  new Setting3(classificationGroup).setName(t("settings.inlineClassification")).setDesc(t("settings.inlineClassificationDesc")).addDropdown((dropdown) => dropdown.addOption("heading", t("settings.classifyByHeading")).addOption("file", t("settings.classifyByFile")).setValue(this.plugin.settings.inlineClassificationMode).onChange(async (mode) => {
     this.plugin.settings.inlineClassificationMode = mode === "file" ? "file" : "heading";
     syncHeadingOptions();
     await save();
@@ -6055,7 +6070,7 @@ function renderInlineSettings(context) {
     renderCategoryColors();
     this.renderStats();
   }));
-  const headingOptions = inlineSection.createDiv({ cls: "lexis-settings-subgroup" });
+  const headingOptions = classificationGroup.createDiv({ cls: "lexis-inline-heading-options" });
   new Setting3(headingOptions).setName(t("settings.inlineHeadingLevel")).setDesc(t("settings.inlineHeadingLevelDesc")).addDropdown((dropdown) => {
     dropdown.addOption("0", t("settings.nearestHeading"));
     for (let level = 1; level <= 6; level++) dropdown.addOption(String(level), t("settings.headingLevel", { marks: "#".repeat(level), level }));
@@ -6072,7 +6087,7 @@ function renderInlineSettings(context) {
     headingOptions.hidden = this.plugin.settings.inlineClassificationMode === "file";
   };
   syncHeadingOptions();
-  const categoryColorsWrap = inlineSection.createDiv({ cls: "lexis-inline-tree" });
+  const categoryColorsWrap = classificationGroup.createDiv({ cls: "lexis-inline-tree" });
   const openInlineHeading = async (node) => {
     this.app.setting?.close();
     const leaf = this.app.workspace.getLeaf(false);

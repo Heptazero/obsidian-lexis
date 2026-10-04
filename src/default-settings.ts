@@ -21,6 +21,7 @@ export const DEFAULT_SETTINGS: DefaultLexisSettings = {
   inlineFileHighlight: {},
   inlineSourceHighlight: {},
   inlineCollapsedGroups: {},
+  inlineSettingsCollapsed: { "entry-colors": true, classification: true },
   inlineCategoryOrder: [],
   inlineFileOrder: [],
   inlineCategoryOrderByParent: {},
