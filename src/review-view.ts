@@ -5,6 +5,8 @@ import type { App, TFile, WorkspaceLeaf } from "obsidian";
 import type { TranslationVars } from "./i18n";
 import { chooseClozeRevealMode, type ClozeRevealMode } from "./review-item";
 import { findClozeAnswerRanges, maskClozeAnswers } from "./flashcard-syntax";
+import { sessionReviewProgress } from "./review-progress";
+import { renderReviewProgressBar } from "./review-progress-bar";
 import type { LexisSettings, ReviewCardState, ReviewItem, ReviewOptions, ReviewStateSnapshot } from "./types";
 
 interface ReviewSchedule {
@@ -84,6 +86,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
   _comp: Component | null = null;
   _frontComp: Component | null = null;
   _imagePreview: HTMLElement | null = null;
+  private grading = false;
 
   isContextCard(item: ReviewItem | null): boolean {
     return !!item && item.type === "note" && this.options.content === "context";
@@ -120,7 +123,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
     this.revealed = false;
     const item = this.currentItem = this.queue[this.pos];
     const topbar = c.createDiv({ cls: "lexis-rv-topbar" });
-    topbar.createDiv({ cls: "lexis-rv-progress", text: this.plugin.t("review.progress", { done: this.reviewed, left: this.queue.length - this.pos }) });
+    renderReviewProgressBar(topbar, sessionReviewProgress(this.queue, this.pos, this.plugin.settings.reviewEvents, todayStr(), this.plugin.settings.suspendedReviewItems), (key, vars) => this.plugin.t(key, vars));
     const topbtns = topbar.createDiv({ cls: "lexis-rv-topbtns" });
     if (this.undoStack.length) {
       const ub = topbtns.createEl("button", { cls: "lexis-rv-undo", text: `↩ ${this.plugin.t("review.undo")}` });
@@ -165,7 +168,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
       for (const t of tagsSet) {
         const pill = tw.createSpan({ cls: "lexis-tag", text: "#" + t });
         pill.setAttribute("title", this.plugin.t("review.onlyTag", { tag: t }));
-        pill.addEventListener("click", () => { void this.plugin.openReview({ ...this.options, scope: "tag", tag: t }); });
+        pill.addEventListener("click", () => { void this.plugin.openReview({ ...this.options, sources: undefined, targetKeys: undefined, dailyCardLimit: undefined, scope: "tag", tag: t }); });
       }
     }
     this.backEl = card.createDiv({ cls: "lexis-rv-back" });
@@ -257,8 +260,10 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
     if (rateBarHeight) this.containerEl.setCssProps({ "--lexis-mobile-rate-height": `${rateBarHeight}px` });
   }
   async grade(g: number) {
+    if (this.grading) return;
     if (!this.revealed) { new Notice(this.plugin.t("review.revealFirst")); return; }
     const item = this.currentItem;
+    this.grading = true;
     try {
       const snapshot = this.plugin.snapshotReviewItem(item);
       const previousCard = { ...item.card };
@@ -276,7 +281,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
     } catch (err) {
       new Notice(this.plugin.t("review.gradeFailed", { error: errorMessage(err) }));
       console.error("[Lexis] grade error", err);
-    }
+    } finally { this.grading = false; }
   }
   async undo() {
     const u = this.undoStack.pop();
@@ -457,9 +462,11 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
     }
   }
   renderDone(c: HTMLElement) {
+    const progress = sessionReviewProgress(this.queue, this.pos, this.plugin.settings.reviewEvents, todayStr(), this.plugin.settings.suspendedReviewItems);
+    renderReviewProgressBar(c, progress, (key, vars) => this.plugin.t(key, vars));
     const d = c.createDiv({ cls: "lexis-rv-done" });
     d.createDiv({ cls: "lexis-rv-done-emoji", text: "🎉" });
-    d.createDiv({ text: this.reviewed ? this.plugin.t("review.done", { count: this.reviewed }) : this.plugin.t("review.noneDue") });
+    d.createDiv({ text: progress.completed ? this.plugin.t("review.done", { count: progress.completed }) : this.plugin.t("review.noneDue") });
     const b = d.createEl("button", { cls: "mod-cta", text: this.plugin.t("review.checkAgain") });
     b.onclick = () => { void this.plugin.rebuildIndex(false); void this.refresh(); };
     this.plugin.renderHeatmap(d.createDiv({ cls: "lexis-hm-wrap" }));

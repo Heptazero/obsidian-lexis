@@ -12,6 +12,7 @@ import type { createTemplateProvider } from "./template-provider";
 import type { ExcalidrawHighlights } from "./excalidraw-highlights";
 import type { CanvasEdgeHighlights } from "./canvas-edge-highlights";
 import type { LexisStatusBar } from "./status-bar";
+import type { ReviewDashboard } from "./review-dashboard";
 
 export type TranslationVars = Record<string, string | number | boolean | null | undefined>;
 export type ReviewCard = ReviewCardState & { history?: ReviewHistoryEvent[] };
@@ -41,6 +42,7 @@ export class LexisPluginBase extends Plugin {
   declare bridge: BridgeRuntime | null;
   declare liveAvailable: boolean;
   declare statusBar: LexisStatusBar;
+  declare reviewDashboard: ReviewDashboard;
   declare _pattern: string | null;
   declare _indexBuildId: number;
   declare _indexKeysByCompact: Map<string, string>;
@@ -71,7 +73,7 @@ export class LexisPluginBase extends Plugin {
   declare highlightElement: (el: HTMLElement, ctx: obsidian.MarkdownPostProcessorContext) => void;
   declare renderLexisBlock: (el: HTMLElement, ctx: obsidian.MarkdownPostProcessorContext, src: string) => Promise<void>;
   declare renderHeatmap: (el: HTMLElement) => void;
-  declare renderHomeBlock: (el: HTMLElement) => void;
+  declare renderHomeBlock: (el: HTMLElement, source?: string, context?: obsidian.MarkdownPostProcessorContext) => void;
   declare setupLiveExtension: () => void;
   declare setupPdfHighlight: (document?: Document) => void;
   declare setupEpubIframeHighlight: (document?: Document) => void;
@@ -135,5 +137,6 @@ export class LexisPluginBase extends Plugin {
   declare collectReviewTags: () => string[];
   declare collectSuspendedReviewItems: () => Promise<import("./types").SuspendedReviewEntry[]>;
   declare buildQueue: (options?: ReviewOptions) => Promise<ReviewItem[]>;
+  declare collectReviewItems: (options?: ReviewOptions, includeReviewed?: boolean) => Promise<ReviewItem[]>;
   declare migrateSyntaxCardPath: (file: TFile, oldPath: string) => Promise<void>;
 }

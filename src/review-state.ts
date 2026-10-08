@@ -19,6 +19,7 @@ interface ReviewStateHost {
   app: App;
   settings: LexisSettings;
   saveSettings(): Promise<void>;
+  reviewDashboard?: { refresh(): void };
 }
 
 const cloneState = (state: ReviewCardState | null | undefined): ReviewCardState | null => state ? { ...state } : null;
@@ -35,6 +36,7 @@ export function createReviewState({ todayStr, round2 }: ReviewStateDependencies)
     declare app: ReviewStateHost["app"];
     declare settings: ReviewStateHost["settings"];
     declare saveSettings: ReviewStateHost["saveSettings"];
+    declare reviewDashboard: ReviewStateHost["reviewDashboard"];
 
     readSyntaxCardState(id: string): ReviewCardState {
       const state = this.settings.syntaxCardStates?.[id] || {};
@@ -79,6 +81,7 @@ export function createReviewState({ todayStr, round2 }: ReviewStateDependencies)
     async suspendReviewItem(item: ReviewItem): Promise<void> {
       for (const key of reviewItemSuspensionKeys(item)) this.settings.suspendedReviewItems[key] = true;
       await this.saveSettings();
+      this.reviewDashboard?.refresh();
     }
 
     async restoreReviewItem(item: ReviewItem, snapshot: ReviewStateSnapshot): Promise<void> {
@@ -135,6 +138,7 @@ export function createReviewState({ todayStr, round2 }: ReviewStateDependencies)
         this.settings.reviewHistory[key] = history.slice(-64);
       }
       await this.saveSettings();
+      this.reviewDashboard?.refresh();
       return id;
     }
 
@@ -152,6 +156,7 @@ export function createReviewState({ todayStr, round2 }: ReviewStateDependencies)
       }
       this.settings.reviewEvents = this.settings.reviewEvents.filter((event) => event.id !== eventId);
       await this.saveSettings();
+      this.reviewDashboard?.refresh();
     }
   }
 

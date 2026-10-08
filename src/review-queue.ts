@@ -1,6 +1,6 @@
 import type { App, TFile } from "obsidian";
 import { parseSyntaxCards, type FlashcardTemplates, type ParsedSyntaxCard } from "./flashcard-syntax";
-import { noteSuspensionKey, syntaxSuspensionKey } from "./review-item";
+import { noteSuspensionKey, syntaxSuspensionKey, restrictReviewItem, reviewItemKeys, reviewGroupState } from "./review-item";
 import type { LexisSettings, ReviewCardState, ReviewItem, ReviewOptions, ReviewSortKey, SuspendedReviewEntry } from "./types";
 
 interface ReviewQueueDependencies {
@@ -34,11 +34,6 @@ const syntaxTemplates = (settings: LexisSettings): FlashcardTemplates => ({
   block: settings.flashcardBlockTemplate,
   cloze: settings.flashcardClozeTemplate,
 });
-
-const representativeState = (states: ReviewCardState[]): ReviewCardState => {
-  if (!states.length || states.some(isFresh)) return {};
-  return [...states].sort((left, right) => String(left.due || "").localeCompare(String(right.due || "")))[0];
-};
 
 const stripFrontmatter = (markdown: string): string => markdown.replace(/^---\s*\n[\s\S]*?\n---(?:\n|$)/, "");
 
@@ -135,6 +130,13 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
     }
 
     reviewScopeFiles(options: ReviewOptions): TFile[] {
+      if (options.sources) {
+        const files = new Map<string, TFile>();
+        for (const source of options.sources) {
+          for (const file of this.reviewScopeFiles({ scope: source.scope, folder: source.value, linkSource: source.value, tag: source.value })) files.set(file.path, file);
+        }
+        return [...files.values()];
+      }
       const scope = options.scope || "vocab";
       let files = this.app.vault.getMarkdownFiles();
       if (scope === "vocab") {
@@ -158,12 +160,12 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
       });
     }
 
-    syntaxItems(file: TFile, cards: ParsedSyntaxCard[], today: string): ReviewItem[] {
+    syntaxItems(file: TFile, cards: ParsedSyntaxCard[], today: string, includeReviewed = false): ReviewItem[] {
       const result: ReviewItem[] = [];
       const combinedGroups = new Map<string, ParsedSyntaxCard[]>();
       for (const syntax of cards) {
         const card = this.readSyntaxCardState(syntax.id);
-        if (this.settings.suspendedReviewItems?.[syntaxSuspensionKey(syntax.id)] || reviewedToday(card, today)) continue;
+        if (this.settings.suspendedReviewItems?.[syntaxSuspensionKey(syntax.id)] || (!includeReviewed && reviewedToday(card, today))) continue;
         if (syntax.kind === "cloze") {
           const group = combinedGroups.get(syntax.groupId) || [];
           group.push(syntax);
@@ -183,7 +185,7 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
         result.push({
           type: "syntax",
           file,
-          card: representativeState(members.map((member) => member.card)),
+          card: reviewGroupState(members.map((member) => member.card)),
           syntax: {
             id: first.groupId,
             memberIds: members.map((member) => member.id),
@@ -236,15 +238,13 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
       if (changed) await this.saveSettings();
     }
 
-    async buildQueue(options: ReviewOptions = {}): Promise<ReviewItem[]> {
+    async collectReviewItems(options: ReviewOptions = {}, includeReviewed = false): Promise<ReviewItem[]> {
       const resolved = options || {};
       const content = resolved.content || "notes";
-      const sortBy = resolved.sortBy || "due";
-      const direction = resolved.sortDirection === "desc" ? -1 : 1;
       const files = this.reviewScopeFiles(resolved);
       const today = todayStr();
       const markdownByPath = new Map<string, string>();
-      if (content !== "notes" || sortBy === "wordCount") {
+      if (content === "syntax" || content === "both") {
         await Promise.all(files.map(async (file) => {
           try { markdownByPath.set(file.path, await this.app.vault.cachedRead(file)); }
           catch { markdownByPath.set(file.path, ""); }
@@ -254,16 +254,34 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
       if (content === "notes" || content === "context" || content === "both") {
         for (const file of files) {
           const card = this.readCard(file);
-          if (!this.settings.suspendedReviewItems?.[noteSuspensionKey(file.path)] && !reviewedToday(card, today)) {
+          if (!this.settings.suspendedReviewItems?.[noteSuspensionKey(file.path)] && (includeReviewed || !reviewedToday(card, today))) {
             candidates.push({ type: "note", file, card });
           }
         }
       }
       if (content === "syntax" || content === "both") {
         const templates = syntaxTemplates(this.settings);
-        const parsed = files.map((file) => this.syntaxItems(file, parseSyntaxCards(markdownByPath.get(file.path) || "", file.path, templates), today));
+        const parsed = files.map((file) => this.syntaxItems(file, parseSyntaxCards(markdownByPath.get(file.path) || "", file.path, templates), today, includeReviewed));
         for (const items of parsed) candidates.push(...items);
       }
+      return candidates;
+    }
+
+    async buildQueue(options: ReviewOptions = {}): Promise<ReviewItem[]> {
+      const resolved = options || {};
+      const sortBy = resolved.sortBy || "due";
+      const direction = resolved.sortDirection === "desc" ? -1 : 1;
+      const today = todayStr();
+      let candidates = await this.collectReviewItems(resolved);
+      if (resolved.targetKeys) {
+        const allowed = new Set(resolved.targetKeys);
+        candidates = candidates.map((item) => restrictReviewItem(item, allowed)).filter((item): item is ReviewItem => !!item);
+      }
+      const markdownByPath = new Map<string, string>();
+      if (sortBy === "wordCount") await Promise.all([...new Map(candidates.map((item) => [item.file.path, item.file])).values()].map(async (file) => {
+        try { markdownByPath.set(file.path, await this.app.vault.cachedRead(file)); }
+        catch { markdownByPath.set(file.path, ""); }
+      }));
 
       const due = candidates.filter((item) => !isFresh(item.card) && (!item.card.due || String(item.card.due).slice(0, 10) <= today));
       const fresh = candidates.filter((item) => isFresh(item.card));
@@ -297,6 +315,14 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
       const newLimit = Math.max(0, this.settings.newPerDay ?? 20);
       let admittedFresh = 0;
       queue = queue.filter((item) => !isFresh(item.card) || admittedFresh++ < newLimit);
+      if (resolved.dailyCardLimit != null) {
+        let left = Math.max(0, resolved.dailyCardLimit);
+        queue = queue.map((item) => {
+          const keys = reviewItemKeys(item).slice(0, left);
+          left -= keys.length;
+          return restrictReviewItem(item, new Set(keys));
+        }).filter((item): item is ReviewItem => !!item);
+      }
       return queue.slice(0, this.settings.maxReviewsPerSession || 200);
     }
   }

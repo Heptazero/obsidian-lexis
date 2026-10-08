@@ -35,6 +35,7 @@ function createHighlightIndex({ Notice, boundedSource, compactMixedScriptSpacing
     declare _indexKeysByCompact: Map<string, string>;
     declare _matchKeysByCompact: Map<string, string>;
     declare statusBar: { update(): void };
+    declare reviewDashboard: { refresh(): void };
     declare bridge: { running: boolean } | null;
     declare occurrenceSearch: OccurrenceSearch;
     declare saveSettings: () => Promise<void>;
@@ -233,6 +234,7 @@ function createHighlightIndex({ Notice, boundedSource, compactMixedScriptSpacing
       this._occCache.clear();
       this.buildMatcher();
       this.updateStatusBar();
+      this.reviewDashboard?.refresh();
       this.refreshAllViews();
       if (notify) {
         const aliasPart = this.settings.includeAliases ? this.t("notice.aliasCount", { count: aliases }) : "";

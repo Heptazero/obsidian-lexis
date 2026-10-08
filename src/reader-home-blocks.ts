@@ -1,6 +1,8 @@
 "use strict";
 
 import type { LexisSettings } from "./types";
+import { MarkdownRenderChild, type MarkdownPostProcessorContext } from "obsidian";
+import { mountReviewDashboard, type DashboardViewHost } from "./review-dashboard-view";
 
 type StatsSummary = { due: number; fresh: number; total: number };
 type TranslationVars = Record<string, string | number | boolean>;
@@ -51,20 +53,13 @@ function createReaderHomeBlocks(fmtDate: (date: Date) => string): PropertyDescri
       el.createDiv({ cls: "lexis-hm-caption", text: this.t("home.heatmapCaption", { weeks, count: total }) });
     }
 
-    renderHomeBlock(el: HTMLElement): void {
+    renderHomeBlock(el: HTMLElement, source = "", context?: MarkdownPostProcessorContext): void {
       el.addClass("lexis-home-block");
-      const summary = this.computeStats();
-      const stats = el.createDiv({ cls: "lexis-home-stats" });
-      stats.createDiv({ cls: "lexis-stat", text: `⏰ ${this.t("home.due", { count: summary.due })}` });
-      stats.createDiv({ cls: "lexis-stat", text: `✨ ${this.t("home.new", { count: summary.fresh })}` });
-      stats.createDiv({ cls: "lexis-stat", text: `📚 ${this.t("home.total", { count: summary.total })}` });
-      const heatmap = el.createDiv({ cls: "lexis-hm-wrap lexis-home-block-hm" });
-      heatmap.setAttribute("title", this.t("log.title"));
-      this.renderHeatmap(heatmap);
-      heatmap.addEventListener("click", () => { void this.openReviewLog(); });
-      const buttons = el.createDiv({ cls: "lexis-home-block-btns" });
-      buttons.createEl("button", { cls: "mod-cta", text: `▶ ${this.t("home.start")}` }).addEventListener("click", (event) => { event.stopPropagation(); void this.openReview(); });
-      buttons.createEl("button", { text: `📕 ${this.t("home.open")}` }).addEventListener("click", (event) => { event.stopPropagation(); void this.openHome(); });
+      if (!context) return;
+      const component = new MarkdownRenderChild(el);
+      context.addChild(component);
+      const planName = /^plan:\s*(.+)$/m.exec(source)?.[1].trim();
+      mountReviewDashboard(el, this as unknown as DashboardViewHost, component, { compact: true, planName });
     }
   }
   const { constructor: _constructor, ...descriptors } = Object.getOwnPropertyDescriptors(ReaderHomeBlocks.prototype);

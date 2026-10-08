@@ -10,6 +10,7 @@ import { createPathSuggest } from "./settings-suggest";
 import { renderStorageSettings } from "./settings-storage-section";
 import { addSelectionPillPosition } from "./settings-selection-pill";
 import { orderedSectionKeys } from "./settings-section-order";
+import { renderReviewGoalSettings } from "./settings-review-goals";
 
 export interface SettingsRuntime extends Plugin {
   settings: LexisSettings;
@@ -357,6 +358,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       }
 
       const fsrsSection = topSection("review", t("settings.review"));
+      renderReviewGoalSettings(fsrsSection, this.plugin);
       const syntaxTemplates: Array<[keyof Pick<LexisSettings, "flashcardInlineTemplate" | "flashcardBidirectionalTemplate" | "flashcardBlockTemplate" | "flashcardClozeTemplate">, string, string]> = [
         ["flashcardInlineTemplate", "settings.flashcardInline", "{{question}}::{{answer}}"],
         ["flashcardBidirectionalTemplate", "settings.flashcardBidirectional", "{{sideA}}:::{{sideB}}"],

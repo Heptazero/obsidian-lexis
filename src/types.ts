@@ -31,6 +31,28 @@ export interface ReviewOptions {
   content?: ReviewContentMode;
   sortBy?: ReviewSortKey;
   sortDirection?: ReviewSortDirection;
+  sources?: ReviewSource[];
+  targetKeys?: string[];
+  dailyCardLimit?: number;
+}
+
+export interface ReviewSource {
+  scope: "vocab" | "folder" | "links" | "tag";
+  value: string;
+}
+
+export interface ReviewPlan {
+  id: string;
+  name: string;
+  sources: ReviewSource[];
+  content: ReviewContentMode;
+}
+
+export interface ReviewDailyTarget {
+  date: string;
+  keys: string[];
+  goal: number;
+  minimum: number;
 }
 
 export interface SyntaxReviewCard {
@@ -178,6 +200,11 @@ export interface LexisSettings {
   requestRetention: number;
   newPerDay: number;
   maxReviewsPerSession: number;
+  reviewDailyGoal: number;
+  reviewMinimumGoal: number;
+  reviewPlans: ReviewPlan[];
+  reviewDailyTargets: Record<string, ReviewDailyTarget>;
+  reviewGoalHistory: Record<string, { goal: number; minimum: number }>;
   reviewLog: Record<string, number>;
   reviewHistory: Record<string, ReviewHistoryEvent[]>;
   reviewEvents: ReviewLogEvent[];

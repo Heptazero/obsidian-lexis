@@ -871,6 +871,12 @@ button.lexis-missing-entry-color {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 16px;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding-block: 4px;
+    background: var(--background-primary);
 }
 .lexis-rv-undo {
     font-size: 12px;
@@ -1449,6 +1455,8 @@ button.lexis-missing-entry-color {
 .lexis-rv-topbtns {
     display: flex;
     gap: 8px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
 }
 .lexis-occ-add {
     cursor: pointer;
@@ -1772,4 +1780,208 @@ body.is-phone .workspace-leaf-content[data-type="lexis-review-view"] .lexis-rv-r
 .lexis-status-bar-icon svg {
   width: 14px;
   height: 14px;
+}
+
+.lexis-progress-track {
+    display: flex;
+    width: 100%;
+    height: 8px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--background-modifier-border);
+}
+.lexis-progress-segment {
+    width: var(--lexis-progress-width, 0%);
+    flex: 0 0 auto;
+    transition: width 160ms ease;
+}
+.lexis-progress-segment.is-complete {
+    background: var(--color-green, #41a441);
+}
+.lexis-progress-segment.is-retry {
+    background: var(--color-red, #d9534f);
+}
+.lexis-review-progress {
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
+}
+.lexis-review-progress-caption {
+    margin-bottom: 8px;
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+}
+.lexis-dashboard-top {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+    gap: 22px;
+    align-items: stretch;
+}
+.lexis-dashboard h4 {
+    margin: 0 0 12px;
+}
+.lexis-dashboard-main-count {
+    margin-bottom: 16px;
+    font-size: var(--font-text-size);
+    font-weight: 600;
+}
+.lexis-dashboard-goal {
+    margin-block: 10px;
+}
+.lexis-dashboard-goal-caption,
+.lexis-dashboard-header,
+.lexis-plan-folder > summary,
+.lexis-plan-folder-leaf {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+}
+.lexis-dashboard-goal-caption {
+    margin-bottom: 5px;
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+}
+.lexis-dashboard-start {
+    width: 100%;
+    min-height: 42px;
+    margin-top: 12px;
+    font-size: var(--font-text-size);
+}
+.lexis-dashboard-label {
+    margin-bottom: 10px;
+    font-weight: 600;
+}
+.lexis-week-chart {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 4px;
+}
+.lexis-week-chart > .lexis-week-day {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    width: 100%;
+    height: auto;
+    padding: 4px 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+}
+.lexis-week-chart > .lexis-week-day:hover {
+    background: var(--background-modifier-hover);
+}
+.lexis-week-column {
+    position: relative;
+    width: 100%;
+    height: 96px;
+}
+.lexis-week-bar {
+    position: absolute;
+    inset-inline: 20%;
+    bottom: 0;
+    height: var(--lexis-week-height);
+    min-height: 2px;
+    border-radius: 4px 4px 0 0;
+    background: color-mix(in srgb, var(--interactive-accent) 50%, transparent);
+}
+.lexis-week-day.is-complete .lexis-week-bar {
+    background: var(--color-green, #41a441);
+}
+.lexis-week-goal {
+    position: absolute;
+    inset-inline: 10%;
+    bottom: var(--lexis-week-height);
+    border-top: 1px dashed var(--text-muted);
+}
+.lexis-dashboard-plans {
+    margin-block: 24px;
+}
+.lexis-dashboard-header h4 {
+    margin: 0;
+}
+.lexis-dashboard-header {
+    margin-bottom: 10px;
+}
+.lexis-plan-row {
+    border-bottom: 1px solid var(--background-modifier-border);
+    padding-block: 10px;
+}
+.lexis-plan-row > summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+}
+.lexis-plan-row > summary::before {
+    content: "›";
+    color: var(--text-muted);
+}
+.lexis-plan-row[open] > summary::before {
+    transform: rotate(90deg);
+}
+.lexis-plan-info {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.lexis-plan-info .lexis-dim {
+    font-size: var(--font-ui-small);
+}
+.lexis-plan-tree,
+.lexis-plan-folder-body {
+    padding-inline-start: 16px;
+}
+.lexis-plan-folder {
+    margin-block: 8px;
+}
+.lexis-plan-folder-leaf {
+    margin-block: 8px;
+    padding-inline-start: 12px;
+    font-size: var(--font-ui-small);
+}
+.lexis-plan-folder > summary {
+    font-size: var(--font-ui-small);
+    cursor: pointer;
+}
+.lexis-plan-folder > summary::before {
+    content: "›";
+}
+.lexis-plan-folder[open] > summary::before {
+    transform: rotate(90deg);
+}
+.lexis-plan-folder > summary > :first-child {
+    flex: 1;
+    overflow-wrap: anywhere;
+}
+.lexis-plan-editor .setting-item {
+    flex-wrap: wrap;
+    gap: 10px;
+}
+.lexis-plan-source-input {
+    width: 100%;
+}
+.lexis-plan-sources {
+    margin-block: 12px;
+}
+.lexis-plan-source {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding-block: 4px;
+    overflow-wrap: anywhere;
+}
+.lexis-plan-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+@media (prefers-reduced-motion: reduce) {
+    .lexis-progress-segment { transition: none; }
 }

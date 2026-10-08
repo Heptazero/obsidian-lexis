@@ -1,8 +1,9 @@
-import { ItemView, Setting, TFile, type WorkspaceLeaf } from "obsidian";
+import { Component, ItemView, Setting, TFile, type WorkspaceLeaf } from "obsidian";
 import { LEXIS_HOME_VIEW } from "./constants";
 import { FolderSuggest } from "./folder-suggest";
 import type { TranslationVars } from "./i18n";
 import { MarkdownFileSuggest } from "./markdown-file-suggest";
+import { mountReviewDashboard, type DashboardViewHost } from "./review-dashboard-view";
 import type { LexisSettings, ReviewContentMode, ReviewOptions, ReviewScopeMode, ReviewSortDirection, ReviewSortKey, SuspendedReviewEntry } from "./types";
 
 export interface RetireCandidate {
@@ -14,7 +15,7 @@ export interface RetireCandidate {
   sinceLast: number;
 }
 
-interface HomeViewHost {
+interface HomeViewHost extends DashboardViewHost {
   app: ItemView["app"];
   settings: LexisSettings;
   t(key: string, variables?: TranslationVars): string;
@@ -36,6 +37,8 @@ interface HomeViewHost {
 }
 
 export class LexisHomeView extends ItemView {
+  private dashboardCleanup: (() => void) | null = null;
+  private dashboardComponent: Component | null = null;
   private retireRenderTimer: number | undefined;
   private fileSuggest: MarkdownFileSuggest | null = null;
   private folderSuggest: FolderSuggest | null = null;
@@ -51,19 +54,23 @@ export class LexisHomeView extends ItemView {
   async onOpen(): Promise<void> { this.render(); }
 
   render(): void {
+    this.dashboardCleanup?.();
+    if (this.dashboardComponent) this.removeChild(this.dashboardComponent);
+    this.dashboardComponent = this.addChild(new Component());
     const container = this.contentEl;
     container.empty();
     container.addClass("lexis-home");
     container.createEl("h3", { text: "📕 Lexis" });
-    const current = this.plugin.computeStats();
-    const stats = container.createDiv({ cls: "lexis-home-stats" });
-    stats.createDiv({ cls: "lexis-stat", text: `⏰ ${this.plugin.t("home.due", { count: current.due })}` });
-    stats.createDiv({ cls: "lexis-stat", text: `✨ ${this.plugin.t("home.new", { count: current.fresh })}` });
-    stats.createDiv({ cls: "lexis-stat", text: `📚 ${this.plugin.t("home.total", { count: current.total })}` });
-    const heatmap = container.createDiv({ cls: "lexis-hm-wrap lexis-log-trigger" });
-    heatmap.setAttribute("title", this.plugin.t("log.title"));
-    this.plugin.renderHeatmap(heatmap);
-    heatmap.addEventListener("click", () => { void this.plugin.openReviewLog(); });
+    const dashboard = container.createDiv();
+    this.dashboardCleanup = mountReviewDashboard(dashboard, this.plugin, this.dashboardComponent);
+    const history = container.createEl("details", { cls: "lexis-home-section" });
+    history.createEl("summary", { text: this.plugin.t("dashboard.history") });
+    let historyRendered = false;
+    history.addEventListener("toggle", () => {
+      if (history.open && !historyRendered) { historyRendered = true; this.plugin.renderHeatmap(history.createDiv({ cls: "lexis-hm-wrap" })); }
+    });
+    const custom = container.createEl("details", { cls: "lexis-home-section" });
+    custom.createEl("summary", { text: this.plugin.t("dashboard.custom") });
 
     const folders = this.plugin.collectReviewFolders();
     const dictionaries = this.plugin.dictFolders();
@@ -80,7 +87,7 @@ export class LexisHomeView extends ItemView {
     let selectedContent: ReviewContentMode = "notes";
     let selectedSort: ReviewSortKey = "due";
     let selectedDirection: ReviewSortDirection = "asc";
-    const controls = container.createDiv({ cls: "lexis-review-controls" });
+    const controls = custom.createDiv({ cls: "lexis-review-controls" });
     let renderControls: () => void;
     const rerenderControls = () => {
       const scrollTop = container.scrollTop;
@@ -428,5 +435,5 @@ export class LexisHomeView extends ItemView {
     });
   }
 
-  async onClose(): Promise<void> { this.fileSuggest?.close(); }
+  async onClose(): Promise<void> { this.dashboardCleanup?.(); this.fileSuggest?.close(); this.folderSuggest?.close(); }
 }

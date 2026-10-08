@@ -44,7 +44,10 @@ Each Obsidian dictionary has its own highlight switch. Lexis Web keeps a separat
 - FSRS spaced repetition with note and occurrence-cloze cards
 - review by dictionary, folder, tag, current note, or the direct links of one selected file; choose whole notes, syntax cards, or both
 - choose one or all answers on multi-cloze cards, and suspend cards without deleting notes or highlights
-- due/new counts, review heatmap, undo, and skip
+- daily minimum and full goals, deduplicated completions, and a seven-day chart linked to the review log
+- saved review plans combining folders, dictionaries, tags, and Hub links; expandable folder counts
+- session progress: green completed, red retry, and neutral remaining; undo and skip
+- a collapsible long-term review heatmap
 - highlights that fade as memory stability grows
 - real reading encounters that can pull a distant review closer
 - retirement candidates based on long absence, with the final decision always left to you
@@ -106,6 +109,18 @@ Relation types come from heading text rather than a fixed list. Any Markdown hea
 This is shorthand for `rel Antonyms` inside a `lexis` block. The block adds missing reverse links without repeating links already written in the note.
 
 Use `lexis-home` for a compact home summary, or `lexis-heatmap` for the heatmap alone.
+
+Daily goals are configured in *Settings → Lexis → Review → Review goals*. Today's target is fixed when the dashboard first opens; changes apply tomorrow. Each cloze counts separately, regardless of whether answers are shown individually or together. Only remembered cards count as completed, once per day, across review entry points.
+
+Create saved plans on Lexis Home. A `lexis-home` block can show one plan by name:
+
+````md
+```lexis-home
+plan: Mathematics
+```
+````
+
+Without `plan:`, the block shows the combined plans, or the dictionary when no plans are saved. Goals, plans, and daily target snapshots are stored in the existing Lexis settings file; no extra data folder is created.
 
 ## Why a personal lexicon
 

@@ -1,6 +1,7 @@
 "use strict";
 
 import type { Language } from "./types";
+import { dashboardMessages } from "./review-dashboard-i18n";
 
 interface TranslationPair {
   zh: string;
@@ -11,6 +12,7 @@ export type TranslationVars = Record<string, string | number | boolean | null | 
 
 // Keep both translations beside each other. UI code refers only to semantic keys.
 const MESSAGES: Record<string, TranslationPair> = {
+  ...dashboardMessages,
   "language.name": { zh: "界面语言", en: "Interface language" },
   "language.zh": { zh: "中文", en: "中文" },
   "language.en": { zh: "English", en: "English" },

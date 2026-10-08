@@ -39,6 +39,7 @@ import { CanvasEdgeHighlights } from "./canvas-edge-highlights";
 import { InlineHeadingSuggest } from "./inline-heading-suggest";
 import { InlineColorSuggest } from "./inline-color-suggest";
 import { LexisStatusBar } from "./status-bar";
+import { ReviewDashboard } from "./review-dashboard";
 import { LexisRestoreModal } from "./restore-modal";
 import { LexisPluginBase } from "./plugin-base";
 import { pluginDictionaryDescriptors } from "./plugin-dictionary";
@@ -98,6 +99,7 @@ class LexisPlugin extends LexisPluginBase {
     this.index = new Map();
     this.vocabPaths = new Set();
     this.stats = { words: 0, aliases: 0, inlineEntries: 0, due: 0 };
+    this.reviewDashboard = new ReviewDashboard(this);
     this.inlineColorTokenUsages = [];
     this._pattern = null;
     this._indexKeysByCompact = new Map();
@@ -236,7 +238,7 @@ class LexisPlugin extends LexisPluginBase {
     this.registerMarkdownCodeBlockProcessor("lexis", (src, el, ctx) => this.renderLexisBlock(el, ctx, src));
     this.registerMarkdownCodeBlockProcessor("rel", (src, el, ctx) => this.renderLexisBlock(el, ctx, relationBlockSource(src, ctx.getSectionInfo(el)?.text)));
     this.registerMarkdownCodeBlockProcessor("lexis-heatmap", (src, el) => this.renderHeatmap(el));
-    this.registerMarkdownCodeBlockProcessor("lexis-home", (src, el) => this.renderHomeBlock(el));
+    this.registerMarkdownCodeBlockProcessor("lexis-home", (src, el, ctx) => this.renderHomeBlock(el, src, ctx));
     this.setupLiveExtension();
     this._workspaceDocuments = new WorkspaceDocuments(this, {
       mousemove: (event) => this.onMouseMove(event),
