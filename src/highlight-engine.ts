@@ -41,7 +41,7 @@ function createHighlightEngine({ Notice, boundedSource, compactMixedScriptSpacin
   declare _pattern: string | null;
   declare _indexKeysByCompact: Map<string, string>;
   declare _matchKeysByCompact: Map<string, string>;
-  declare statusBarEl: HTMLElement | null;
+  declare statusBar: { update(): void };
   declare bridge: { running: boolean } | null;
   declare liveAvailable: boolean;
   declare _liveRefreshEffect: StateEffectType<void> | null;

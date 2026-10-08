@@ -5,6 +5,8 @@ export type DefaultLexisSettings = Omit<LexisSettings, "dicts" | "vocabFolders" 
 
 export const DEFAULT_SETTINGS: DefaultLexisSettings = {
   language: "zh",
+  statusBarVisible: true,
+  statusBarExpanded: false,
   vocabTags: "",
   includeAliases: true,
   aliasSources: "",

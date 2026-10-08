@@ -46,6 +46,8 @@ var LEXIS_BRIDGE_DEFAULT_PORT = 12345;
 // src/default-settings.ts
 var DEFAULT_SETTINGS = {
   language: "zh",
+  statusBarVisible: true,
+  statusBarExpanded: false,
   vocabTags: "",
   includeAliases: true,
   aliasSources: "",
@@ -666,14 +668,15 @@ var MESSAGES = {
   "command.home": { zh: "\u5728\u4E2D\u95F4\u6253\u5F00 Lexis \u4E3B\u9875", en: "Open Lexis home in main area" },
   "command.homeSidebar": { zh: "\u5728\u4FA7\u8FB9\u680F\u6253\u5F00 Lexis \u4E3B\u9875", en: "Open Lexis home in sidebar" },
   "command.toggleHighlights": { zh: "\u5207\u6362\u5F53\u524D\u9875\u9762\u7684\u6240\u6709\u9AD8\u4EAE", en: "Toggle all highlights on current page" },
+  "command.toggleStatusBar": { zh: "\u5207\u6362 Lexis \u72B6\u6001\u680F", en: "Toggle Lexis status bar" },
   "command.archive": { zh: "\u6807\u4E3A\u5DF2\u638C\u63E1\uFF08\u5F52\u6863\uFF09", en: "Mark as mastered (archive)" },
   "command.restore": { zh: "\u6062\u590D\uFF08\u53D6\u6D88\u5F52\u6863\uFF09", en: "Restore from archive" },
   "command.pin": { zh: "\u5207\u6362\u5E38\u9A7B\u72B6\u6001", en: "Toggle resident status" },
   "command.migrate": { zh: "\u8FC1\u79FB\uFF1A\u628A #\u719F\u6089 \u6279\u91CF\u6807\u4E3A\u5F52\u6863", en: "Migrate: archive entries tagged #\u719F\u6089" },
   "ribbon.home": { zh: "Lexis \u4E3B\u9875", en: "Lexis home" },
   "ribbon.review": { zh: "Lexis \u590D\u4E60", en: "Lexis review" },
-  "status.rebuildAria": { zh: "\u70B9\u51FB\u91CD\u5EFA\u7D22\u5F15\uFF1B\u53F3\u952E\u5F00\u59CB\u590D\u4E60", en: "Click to rebuild index; right-click to review" },
-  "status.summary": { zh: "\u{1F4D5} {words} \u8BCD{aliases}{inline}{due}{bridge}", en: "\u{1F4D5} {words} entries{aliases}{inline}{due}{bridge}" },
+  "status.toggleDetailsAria": { zh: "\u5C55\u5F00\u6216\u6536\u8D77 Lexis \u72B6\u6001", en: "Expand or collapse Lexis status" },
+  "status.summary": { zh: "{words} \u8BCD{aliases}{inline}{due}{bridge}", en: "{words} entries{aliases}{inline}{due}{bridge}" },
   "status.aliases": { zh: " +{count} \u522B\u540D", en: " +{count} aliases" },
   "status.inline": { zh: " +{count} \u5185\u8054", en: " +{count} inline" },
   "notice.desktopBridge": { zh: "Lexis\uFF1A\u672C\u673A\u6865\u63A5\u4EC5\u652F\u6301\u684C\u9762\u7AEF", en: "Lexis: the local bridge is desktop-only" },
@@ -846,6 +849,8 @@ var MESSAGES = {
   "restore.kept": { zh: "Lexis\uFF1A\u300C{word}\u300D\u5DF2\u6062\u590D\u5E76\u4FDD\u7559\u8FDB\u5EA6", en: "Lexis: restored \u201C{word}\u201D with its progress" },
   "restore.resetDone": { zh: "Lexis\uFF1A\u300C{word}\u300D\u5DF2\u6062\u590D\u4E3A\u65B0\u8BCD", en: "Lexis: restored \u201C{word}\u201D as new" },
   "settings.title": { zh: "Lexis \u8BBE\u7F6E", en: "Lexis settings" },
+  "settings.statusBar": { zh: "\u663E\u793A\u72B6\u6001\u680F\u5165\u53E3", en: "Show status bar item" },
+  "settings.statusBarDesc": { zh: "\u5E73\u65F6\u53EA\u663E\u793A\u56FE\u6807\uFF0C\u70B9\u51FB\u53EF\u5C55\u5F00\u6216\u6536\u8D77\u7EDF\u8BA1\u3002\u9690\u85CF\u540E\u53EF\u7528\u547D\u4EE4\u9762\u677F\u6062\u590D\u3002", en: "Shows an icon by default; click it to expand or collapse statistics. Restore it from the command palette after hiding it." },
   "settings.dictionary": { zh: "\u8BCD\u5178\u4E0E\u8BCD\u5E93\u6765\u6E90", en: "Dictionaries and sources" },
   "settings.dictionaryDesc": { zh: "\u6BCF\u884C\u4E00\u4E2A\u6765\u6E90\uFF1B\u6587\u4EF6\u5939\u53EF\u8BBE\u6A21\u677F\uFF0C\u6807\u7B7E\u6765\u6E90\u53EA\u8D1F\u8D23\u6536\u5F55\u3002", en: "One source per row; folders can use templates, tags only collect entries." },
   "settings.folderPlaceholder": { zh: "\u6587\u4EF6\u5939\uFF0C\u6216\u8F93\u5165 #\u6807\u7B7E", en: "Folder, or enter #tag" },
@@ -3352,12 +3357,7 @@ function createHighlightIndex({ Notice: Notice6, boundedSource: boundedSource2, 
       return this._matchKeysByCompact.get(key) || this._matchKeysByCompact.get(compactMixedScriptSpacing2(key)) || key;
     }
     updateStatusBar() {
-      if (!this.statusBarEl) return;
-      const aliasPart = this.settings.includeAliases && this.stats.aliases ? this.t("status.aliases", { count: this.stats.aliases }) : "";
-      const inlinePart = this.stats.inlineEntries ? this.t("status.inline", { count: this.stats.inlineEntries }) : "";
-      const duePart = this.stats.due ? ` \xB7 \u23F0${this.stats.due}` : "";
-      const bridgePart = this.bridge?.running ? " \xB7 \u{1F310}" : "";
-      this.statusBarEl.setText(this.t("status.summary", { words: this.stats.words, aliases: aliasPart, inline: inlinePart, due: duePart, bridge: bridgePart }));
+      this.statusBar?.update();
     }
   }
   const { constructor: _constructor, ...descriptors } = Object.getOwnPropertyDescriptors(HighlightIndex.prototype);
@@ -5497,7 +5497,7 @@ function moveItem(items, from, to) {
   next.splice(to, 0, item);
   return next;
 }
-function createReorderController({ container, onMove, setIcon, label = "Reorder", longPressMs = 260 }) {
+function createReorderController({ container, onMove, setIcon: setIcon2, label = "Reorder", longPressMs = 260 }) {
   let from = -1;
   let active = false;
   let timer = 0;
@@ -5625,7 +5625,7 @@ function createReorderController({ container, onMove, setIcon, label = "Reorder"
         cls: "lexis-drag-handle clickable-icon",
         attr: { type: "button", "aria-label": label, title: label }
       });
-      if (setIcon) setIcon(handle, "grip-vertical");
+      if (setIcon2) setIcon2(handle, "grip-vertical");
       else handle.setText("\u22EE\u22EE");
       handle.addEventListener("click", (event) => {
         event.preventDefault();
@@ -6527,6 +6527,7 @@ var createSettingsTab = ({ obsidian: obsidian6, PluginSettingTab: PluginSettingT
         new Notice6(t("language.reload"));
         this.rerender();
       }));
+      new Setting3(containerEl).setName(t("settings.statusBar")).setDesc(t("settings.statusBarDesc")).addToggle((toggle) => toggle.setValue(this.plugin.settings.statusBarVisible !== false).onChange((value) => this.plugin.statusBar.setVisible(value)));
       const sectionsContainer = containerEl.createDiv({ cls: "lexis-settings-sections" });
       const sections = /* @__PURE__ */ new Map();
       const topSection = (key, title, options = {}) => {
@@ -8162,6 +8163,77 @@ var InlineColorSuggest = class extends import_obsidian7.EditorSuggest {
   }
 };
 
+// src/status-bar.ts
+function statusBarSummary(runtime) {
+  const aliasPart = runtime.settings.includeAliases && runtime.stats.aliases ? runtime.t("status.aliases", { count: runtime.stats.aliases }) : "";
+  const inlinePart = runtime.stats.inlineEntries ? runtime.t("status.inline", { count: runtime.stats.inlineEntries }) : "";
+  const duePart = runtime.stats.due ? ` \xB7 \u23F0${runtime.stats.due}` : "";
+  const bridgePart = runtime.bridge?.running ? " \xB7 \u{1F310}" : "";
+  return runtime.t("status.summary", {
+    words: runtime.stats.words,
+    aliases: aliasPart,
+    inline: inlinePart,
+    due: duePart,
+    bridge: bridgePart
+  });
+}
+var LexisStatusBar = class {
+  constructor(plugin, setIcon2) {
+    this.plugin = plugin;
+    this.setIcon = setIcon2;
+    this.element = null;
+  }
+  mount() {
+    const element = this.plugin.addStatusBarItem();
+    element.addClass("lexis-status-bar");
+    element.setAttribute("role", "button");
+    element.tabIndex = 0;
+    this.element = element;
+    this.plugin.registerDomEvent(element, "click", () => this.toggleExpanded());
+    this.plugin.registerDomEvent(element, "keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      this.toggleExpanded();
+    });
+    this.plugin.addCommand(this.visibilityCommand());
+    this.update();
+  }
+  update() {
+    const element = this.element;
+    if (!element) return;
+    const visible = this.plugin.settings.statusBarVisible !== false;
+    element.hidden = !visible;
+    if (!visible) return;
+    const summary = statusBarSummary(this.plugin);
+    element.empty();
+    const icon = element.createSpan({ cls: "lexis-status-bar-icon" });
+    this.setIcon(icon, "book-open");
+    if (this.plugin.settings.statusBarExpanded) {
+      element.createSpan({ cls: "lexis-status-bar-summary", text: summary });
+    }
+    element.setAttribute("aria-expanded", String(!!this.plugin.settings.statusBarExpanded));
+    element.setAttribute("aria-label", this.plugin.t("status.toggleDetailsAria"));
+    element.setAttribute("title", summary);
+  }
+  setVisible(visible) {
+    this.plugin.settings.statusBarVisible = visible;
+    this.update();
+    void this.plugin.saveSettings();
+  }
+  toggleExpanded() {
+    this.plugin.settings.statusBarExpanded = !this.plugin.settings.statusBarExpanded;
+    this.update();
+    void this.plugin.saveSettings();
+  }
+  visibilityCommand() {
+    return {
+      id: "toggle-status-bar",
+      name: this.plugin.t("command.toggleStatusBar"),
+      callback: () => this.setVisible(this.plugin.settings.statusBarVisible === false)
+    };
+  }
+};
+
 // src/restore-modal.ts
 var import_obsidian8 = require("obsidian");
 var LexisRestoreModal = class extends import_obsidian8.Modal {
@@ -9635,12 +9707,8 @@ var LexisPlugin = class extends LexisPluginBase {
       if (file instanceof import_obsidian15.TFile && this.inVocabFolder(file.path)) this.recordEncounter(file, "open");
       window.requestAnimationFrame(() => this.syncActivePageHighlightState());
     }));
-    this.statusBarEl = this.addStatusBarItem();
-    if (this.statusBarEl) {
-      this.statusBarEl.setCssStyles({ cursor: "pointer" });
-      this.statusBarEl.setAttribute("aria-label", this.t("status.rebuildAria"));
-      this.registerDomEvent(this.statusBarEl, "click", () => this.rebuildIndex(true));
-    }
+    this.statusBar = new LexisStatusBar(this, obsidian5.setIcon);
+    this.statusBar.mount();
     this.addCommand({ id: "rebuild-index", name: this.t("command.rebuild"), callback: () => this.rebuildIndex(true) });
     this.addCommand({ id: "open-review", name: this.t("command.review"), callback: () => this.openHome() });
     this.addCommand({ id: "open-review-log", name: this.t("log.title"), callback: () => this.openReviewLog() });

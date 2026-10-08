@@ -11,6 +11,7 @@ import type { createI18n } from "./i18n";
 import type { createTemplateProvider } from "./template-provider";
 import type { ExcalidrawHighlights } from "./excalidraw-highlights";
 import type { CanvasEdgeHighlights } from "./canvas-edge-highlights";
+import type { LexisStatusBar } from "./status-bar";
 
 export type TranslationVars = Record<string, string | number | boolean | null | undefined>;
 export type ReviewCard = ReviewCardState & { history?: ReviewHistoryEvent[] };
@@ -39,7 +40,7 @@ export class LexisPluginBase extends Plugin {
   declare occurrenceSearch: OccurrenceSearch;
   declare bridge: BridgeRuntime | null;
   declare liveAvailable: boolean;
-  declare statusBarEl: HTMLElement | null;
+  declare statusBar: LexisStatusBar;
   declare _pattern: string | null;
   declare _indexBuildId: number;
   declare _indexKeysByCompact: Map<string, string>;

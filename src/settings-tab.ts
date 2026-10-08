@@ -3,6 +3,7 @@
 import type { App, ColorComponent, MetadataCache, Plugin, Setting, SettingDefinitionItem, View } from "obsidian";
 import type { TranslationVars } from "./i18n";
 import type { InlineCategoryOccurrence, InlineColorTokenUsage, LexisSettings, LexisStats } from "./types";
+import type { LexisStatusBar } from "./status-bar";
 import { renderHighlightSettings } from "./settings-highlight-section";
 import { renderInlineSettings } from "./settings-inline-section";
 import { createPathSuggest } from "./settings-suggest";
@@ -24,6 +25,7 @@ export interface SettingsRuntime extends Plugin {
     generateToken(): string;
     restart(): void;
   };
+  statusBar: LexisStatusBar;
   t(key: string, vars?: TranslationVars): string;
   saveSettings(): Promise<void>;
   setEncounterFolder(folder: string): Promise<void>;
@@ -135,6 +137,9 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
           new Notice(t("language.reload"));
           this.rerender();
         }));
+
+      new Setting(containerEl).setName(t("settings.statusBar")).setDesc(t("settings.statusBarDesc"))
+        .addToggle((toggle) => toggle.setValue(this.plugin.settings.statusBarVisible !== false).onChange((value) => this.plugin.statusBar.setVisible(value)));
 
       const sectionsContainer = containerEl.createDiv({ cls: "lexis-settings-sections" });
       const sections = new Map<string, HTMLElement>();

@@ -38,6 +38,7 @@ import { ExcalidrawHighlights } from "./excalidraw-highlights";
 import { CanvasEdgeHighlights } from "./canvas-edge-highlights";
 import { InlineHeadingSuggest } from "./inline-heading-suggest";
 import { InlineColorSuggest } from "./inline-color-suggest";
+import { LexisStatusBar } from "./status-bar";
 import { LexisRestoreModal } from "./restore-modal";
 import { LexisPluginBase } from "./plugin-base";
 import { pluginDictionaryDescriptors } from "./plugin-dictionary";
@@ -142,12 +143,8 @@ class LexisPlugin extends LexisPluginBase {
       window.requestAnimationFrame(() => this.syncActivePageHighlightState());
     }));
 
-    this.statusBarEl = this.addStatusBarItem();
-    if (this.statusBarEl) {
-      this.statusBarEl.setCssStyles({ cursor: "pointer" });
-      this.statusBarEl.setAttribute("aria-label", this.t("status.rebuildAria"));
-      this.registerDomEvent(this.statusBarEl, "click", () => this.rebuildIndex(true));
-    }
+    this.statusBar = new LexisStatusBar(this, obsidian.setIcon);
+    this.statusBar.mount();
 
     this.addCommand({ id: "rebuild-index", name: this.t("command.rebuild"), callback: () => this.rebuildIndex(true) });
     this.addCommand({ id: "open-review", name: this.t("command.review"), callback: () => this.openHome() });

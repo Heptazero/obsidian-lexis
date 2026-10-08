@@ -125,6 +125,8 @@ export interface ReviewLogEvent {
 export interface LexisSettings {
   legacySettingsImported?: boolean;
   language: Language;
+  statusBarVisible: boolean;
+  statusBarExpanded: boolean;
   vocabTags: string;
   includeAliases: boolean;
   aliasSources: string;

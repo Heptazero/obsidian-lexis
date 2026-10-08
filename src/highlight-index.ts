@@ -34,7 +34,7 @@ function createHighlightIndex({ Notice, boundedSource, compactMixedScriptSpacing
     declare _pattern: string | null;
     declare _indexKeysByCompact: Map<string, string>;
     declare _matchKeysByCompact: Map<string, string>;
-    declare statusBarEl: HTMLElement | null;
+    declare statusBar: { update(): void };
     declare bridge: { running: boolean } | null;
     declare occurrenceSearch: OccurrenceSearch;
     declare saveSettings: () => Promise<void>;
@@ -280,12 +280,7 @@ function createHighlightIndex({ Notice, boundedSource, compactMixedScriptSpacing
     }
 
     updateStatusBar() {
-      if (!this.statusBarEl) return;
-      const aliasPart = this.settings.includeAliases && this.stats.aliases ? this.t("status.aliases", { count: this.stats.aliases }) : "";
-      const inlinePart = this.stats.inlineEntries ? this.t("status.inline", { count: this.stats.inlineEntries }) : "";
-      const duePart = this.stats.due ? ` · ⏰${this.stats.due}` : "";
-      const bridgePart = this.bridge?.running ? " · 🌐" : "";
-      this.statusBarEl.setText(this.t("status.summary", { words: this.stats.words, aliases: aliasPart, inline: inlinePart, due: duePart, bridge: bridgePart }));
+      this.statusBar?.update();
     }
   }
   const { constructor: _constructor, ...descriptors } = Object.getOwnPropertyDescriptors(HighlightIndex.prototype);

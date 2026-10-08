@@ -1759,3 +1759,17 @@ body.is-phone .workspace-leaf-content[data-type="lexis-review-view"] .lexis-rv-r
     background-repeat: repeat-x;
     background-size: 4px 2px, 4px 2px;
 }
+.lexis-status-bar {
+  gap: 4px;
+  cursor: pointer;
+}
+
+.lexis-status-bar-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.lexis-status-bar-icon svg {
+  width: 14px;
+  height: 14px;
+}
