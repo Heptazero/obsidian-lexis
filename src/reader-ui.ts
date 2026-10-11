@@ -4,7 +4,7 @@ import { attachPopoverEditor } from "./popover-editor";
 import * as obsidian from "obsidian";
 import type { App, Component as ObsidianComponent, Editor, MarkdownPostProcessorContext, Notice as ObsidianNotice, TFile as ObsidianTFile, WorkspaceLeaf } from "obsidian";
 import type { Occurrence } from "./occurrence-search";
-import { overlayDocumentFor } from "./reader-interactions";
+import { overlayAnchorFor, overlayDocumentFor, readerRectInDocument } from "./reader-frame-geometry";
 import { pdfTargetSource } from "./pdf-highlight-targets";
 import type { InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats, ReviewHistoryEvent } from "./types";
 import { createReaderContent } from "./reader-content";
@@ -217,8 +217,7 @@ function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, da
   highlightSource(span: HTMLElement): HighlightSource {
     if (span === this._manualLookupAnchor && this._manualLookupSource) return this._manualLookupSource;
     const sourceDocument = span.ownerDocument;
-    const frame = sourceDocument.defaultView?.frameElement;
-    const locatedNode = frame || span;
+    const locatedNode = overlayAnchorFor(span);
     let file: ObsidianTFile | null = null;
     this.app.workspace.iterateAllLeaves((leaf) => {
       const view = leaf.view as { containerEl?: HTMLElement; file?: ObsidianTFile };
@@ -347,15 +346,13 @@ function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, da
     } catch (err) { body.setText(this.t("popover.readFailed", { error: errorMessage(err) })); }
   }
   positionPopover(pop: HTMLElement, spanEl: HTMLElement): void {
-    const r = spanEl.getBoundingClientRect();
+    const r = readerRectInDocument(spanEl.getBoundingClientRect(), spanEl.ownerDocument, pop.ownerDocument);
     const pr = pop.getBoundingClientRect();
-    const ownerWin = spanEl.ownerDocument?.defaultView;
     const hostWin = pop.ownerDocument.defaultView || window;
-    const frameRect = ownerWin?.frameElement?.ownerDocument === pop.ownerDocument ? ownerWin.frameElement.getBoundingClientRect() : null;
-    let left = r.left + (frameRect ? frameRect.left : 0), top = r.bottom + (frameRect ? frameRect.top : 0) + 6;
+    let left = r.left, top = r.bottom + 6;
     if (left + pr.width > hostWin.innerWidth - 10) left = hostWin.innerWidth - pr.width - 10;
     if (left < 10) left = 10;
-    if (top + pr.height > hostWin.innerHeight - 10) top = r.top + (frameRect ? frameRect.top : 0) - pr.height - 6;
+    if (top + pr.height > hostWin.innerHeight - 10) top = r.top - pr.height - 6;
     if (top < 10) top = 10;
     pop.setCssStyles({ left: left + "px", top: top + "px" });
   }

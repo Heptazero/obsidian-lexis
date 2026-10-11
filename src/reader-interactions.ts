@@ -11,6 +11,7 @@ import { canvasHighlightAt } from "./canvas-highlight-target";
 import type { ExcalidrawHighlights } from "./excalidraw-highlights";
 import { manualLookupEnabled } from "./highlight-mode";
 import { finishPopoverEdit } from "./popover-edit-lifecycle";
+import { overlayDocumentFor, readerRectInDocument } from "./reader-frame-geometry";
 
 type AddWordOptions = {
   openExisting?: boolean;
@@ -31,11 +32,6 @@ function eventElement(target: EventTarget | null): HTMLElement | null {
 
 function closestHighlight(target: EventTarget | null): HTMLElement | null {
   return eventElement(target)?.closest<HTMLElement>(".lexis-hl,.lexis-pdf-hl") || null;
-}
-
-function overlayDocumentFor(element: Element): Document {
-  const sourceDocument = element.ownerDocument;
-  return sourceDocument.defaultView?.frameElement?.ownerDocument || sourceDocument;
 }
 
 function hasExpandedSelection(element: Element): boolean {
@@ -305,7 +301,7 @@ function createReaderInteractions(): PropertyDescriptorMap {
     this._aliasSearch = null;
     if (this._selPill) { this._selPill.remove(); this._selPill = null; }
   }
-  maybeShowSelPill(e: MouseEvent, fromEpubIframe = false): void {
+  maybeShowSelPill(e: Pick<MouseEvent, "target">, fromEpubIframe = false): void {
     if (!this.settings.selectionPill) return;
     const tgt = eventElement(e.target);
     // 点到自己的 UI(药丸/悬浮卡/菜单)不处理,避免抢选区
@@ -323,10 +319,7 @@ function createReaderInteractions(): PropertyDescriptorMap {
     if (!host || (!fromEpubIframe && !host.closest(".markdown-source-view, .markdown-reading-view, .markdown-preview-view, .pdf-viewer, .pdf-container, .pdf-embed, .textLayer"))) { this.removeSelPill(); return; }
     let rect: Pick<DOMRect, "left" | "right" | "top" | "bottom" | "width" | "height">; try { rect = sel.getRangeAt(0).getBoundingClientRect(); } catch { return; }
     if (!rect || (!rect.width && !rect.height)) { this.removeSelPill(); return; }
-    if (sourceWin.frameElement && sourceWin.frameElement.ownerDocument === overlayDoc) {
-      const frameRect = sourceWin.frameElement.getBoundingClientRect();
-      rect = { left: rect.left + frameRect.left, right: rect.right + frameRect.left, top: rect.top + frameRect.top, bottom: rect.bottom + frameRect.top, width: rect.width, height: rect.height };
-    }
+    rect = readerRectInDocument(rect, sourceDoc, overlayDoc);
     this.removeSelPill();
     const known = this.index.has(this.resolveIndexKey(text));
     const selectedSourceFile = this.app.workspace.getActiveFile();

@@ -13,6 +13,8 @@ import { resolveEntryColorToken } from "./entry-colors";
 import { automaticHighlighting } from "./highlight-mode";
 
 type HighlightStyleOptions = { external?: boolean; pdf?: boolean };
+// Foreign EPUB documents provide native DOM APIs, not Obsidian's global extensions.
+type NativeTextDocument = Pick<Document, "createTreeWalker" | "createDocumentFragment" | "createTextNode" | "createElement">;
 type HighlightPage = { leaf: WorkspaceLeaf; container: HTMLElement; key: string };
 type HighlightPageState = { key: string; hidden: boolean };
 type TranslationVars = Record<string, string | number | boolean>;
@@ -258,7 +260,7 @@ function createHighlightEngine({ Notice, boundedSource, compactMixedScriptSpacin
   // excludeKeys:命中这些 key 时只留纯文本不高亮(词条笔记里不高亮自己的标题/别名,但别的词照常高亮)。
   wrapMatchesInElement(el: HTMLElement, rejectSelector: string, styleOpts: HighlightStyleOptions = {}, excludeKeys: Set<string> | null = null): void {
     if (!this._pattern || !this.index.size) return;
-    const doc = el.ownerDocument || document;
+    const doc: NativeTextDocument = el.ownerDocument;
     const regex = new RegExp(this._pattern, "gi");
     const walker = doc.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
       acceptNode: (node) => {
@@ -276,7 +278,7 @@ function createHighlightEngine({ Notice, boundedSource, compactMixedScriptSpacin
       regex.lastIndex = 0;
       if (!regex.test(text)) continue;
       regex.lastIndex = 0;
-      const frag = createFragment();
+      const frag = doc.createDocumentFragment();
       let last = 0;
       let m: RegExpExecArray | null;
       while ((m = regex.exec(text))) {
@@ -289,7 +291,7 @@ function createHighlightEngine({ Notice, boundedSource, compactMixedScriptSpacin
           continue;
         }
         const entry = this.index.get(key);
-        const span = doc.body.createSpan();
+        const span = doc.createElement("span");
         span.className = "lexis-hl";
         span.textContent = m[0];
         span.dataset.lexisKey = key;

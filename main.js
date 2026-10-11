@@ -4134,7 +4134,7 @@ function createHighlightEngine({ Notice: Notice9, boundedSource: boundedSource2,
     // excludeKeys:命中这些 key 时只留纯文本不高亮(词条笔记里不高亮自己的标题/别名,但别的词照常高亮)。
     wrapMatchesInElement(el, rejectSelector, styleOpts = {}, excludeKeys = null) {
       if (!this._pattern || !this.index.size) return;
-      const doc = el.ownerDocument || document;
+      const doc = el.ownerDocument;
       const regex = new RegExp(this._pattern, "gi");
       const walker = doc.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
         acceptNode: (node) => {
@@ -4152,7 +4152,7 @@ function createHighlightEngine({ Notice: Notice9, boundedSource: boundedSource2,
         regex.lastIndex = 0;
         if (!regex.test(text)) continue;
         regex.lastIndex = 0;
-        const frag = createFragment();
+        const frag = doc.createDocumentFragment();
         let last = 0;
         let m;
         while (m = regex.exec(text)) {
@@ -4165,7 +4165,7 @@ function createHighlightEngine({ Notice: Notice9, boundedSource: boundedSource2,
             continue;
           }
           const entry = this.index.get(key);
-          const span = doc.body.createSpan();
+          const span = doc.createElement("span");
           span.className = "lexis-hl";
           span.textContent = m[0];
           span.dataset.lexisKey = key;
@@ -4263,81 +4263,336 @@ function pdfHighlightAt(event) {
   return null;
 }
 
+// src/reader-frame-geometry.ts
+function overlayAnchorFor(element) {
+  let anchor = element;
+  while (anchor.ownerDocument.defaultView?.frameElement) {
+    anchor = anchor.ownerDocument.defaultView.frameElement;
+  }
+  return anchor;
+}
+function overlayDocumentFor(element) {
+  return overlayAnchorFor(element).ownerDocument;
+}
+function readerRectInDocument(rect, source, destination) {
+  let result = rect;
+  let current = source;
+  while (current !== destination) {
+    const frame = current.defaultView?.frameElement;
+    if (!frame) break;
+    const bounds = frame.getBoundingClientRect();
+    const scaleX = frame.offsetWidth ? bounds.width / frame.offsetWidth : 1;
+    const scaleY = frame.offsetHeight ? bounds.height / frame.offsetHeight : 1;
+    const left = bounds.left + (frame.clientLeft + result.left) * scaleX;
+    const top = bounds.top + (frame.clientTop + result.top) * scaleY;
+    const width = result.width * scaleX, height = result.height * scaleY;
+    result = { left, top, width, height, right: left + width, bottom: top + height };
+    current = frame.ownerDocument;
+  }
+  return result;
+}
+function frameBelongsToDocument(frame, root) {
+  let current = frame;
+  while (current) {
+    if (!current.isConnected) return false;
+    const owner = current.ownerDocument;
+    if (owner === root) return true;
+    const parent = owner.defaultView?.frameElement;
+    if (!parent || parent.contentDocument !== owner) return false;
+    current = parent;
+  }
+  return false;
+}
+
+// src/epub-surfaces.ts
+var EPUB_FRAMES = "iframe[enable-annotation], .epub-reader-area iframe, .epub-container iframe, .epub-view iframe";
+var ANNOTATOR_SHELLS = '.workspace-leaf-content[data-type="pdf-annotator"] iframe';
+var ANNOTATOR_EPUB_PROXY = 'iframe[patched-src*="/demos/epub/epub.js/"]';
+var EpubSurfaces = class {
+  constructor(root, onChapter, onPrune) {
+    this.root = root;
+    this.onChapter = onChapter;
+    this.onPrune = onPrune;
+    this.documents = /* @__PURE__ */ new Map();
+    this.shells = /* @__PURE__ */ new Map();
+    this.foliate = /* @__PURE__ */ new Map();
+    this.chapters = /* @__PURE__ */ new Set();
+    this.foliateChapters = /* @__PURE__ */ new Map();
+  }
+  start() {
+    this.watchDocument(this.root);
+  }
+  ownsChapter(frame) {
+    return this.chapters.has(frame);
+  }
+  watchDocument(document2) {
+    if (!document2.body || this.documents.get(document2)?.body === document2.body) return;
+    this.documents.get(document2)?.observer.disconnect();
+    const Constructor = document2.defaultView.MutationObserver;
+    const observer = new Constructor((mutations) => {
+      if (mutations.some((mutation) => mutation.removedNodes.length)) this.prune();
+      for (const mutation of mutations) for (const node of mutation.addedNodes) {
+        if (node.nodeType === 1) this.scanNode(node, document2 !== this.root);
+      }
+    });
+    this.documents.set(document2, { body: document2.body, observer });
+    observer.observe(document2.body, { childList: true, subtree: true });
+    this.scanNode(document2.body, document2 !== this.root);
+  }
+  scanNode(node, inShell) {
+    const selector = `${EPUB_FRAMES},${ANNOTATOR_SHELLS},foliate-view${inShell ? `,${ANNOTATOR_EPUB_PROXY},#viewer iframe` : ""}`;
+    const candidates = [...node.matches(selector) ? [node] : [], ...node.querySelectorAll(selector)];
+    for (const candidate of candidates) {
+      if (candidate.tagName.toLowerCase() === "foliate-view") this.observeFoliate(candidate);
+      else if (candidate.matches(EPUB_FRAMES) || inShell && candidate.matches("#viewer iframe")) {
+        const frame = candidate;
+        this.chapters.add(frame);
+        this.onChapter(frame);
+      } else this.observeShell(candidate);
+    }
+  }
+  observeShell(frame) {
+    if (!this.shells.has(frame)) {
+      const load = () => this.scanShell(frame);
+      this.shells.set(frame, { load, document: null });
+      frame.addEventListener("load", load);
+    }
+    this.scanShell(frame);
+  }
+  scanShell(frame) {
+    const state = this.shells.get(frame);
+    if (!state || !frameBelongsToDocument(frame, this.root)) return;
+    let document2;
+    try {
+      document2 = frame.contentDocument;
+    } catch {
+      return;
+    }
+    if (state.document !== document2) {
+      if (state.document) {
+        this.documents.get(state.document)?.observer.disconnect();
+        this.documents.delete(state.document);
+      }
+      state.document = document2;
+      this.prune();
+    }
+    if (document2?.body) {
+      this.watchDocument(document2);
+    }
+  }
+  observeFoliate(view) {
+    if (!this.foliate.has(view)) {
+      const update = () => this.scanFoliate(view);
+      this.foliate.set(view, update);
+      view.addEventListener("load", update);
+      view.addEventListener("relocate", update);
+    }
+    this.scanFoliate(view);
+  }
+  scanFoliate(view) {
+    const active = /* @__PURE__ */ new Map();
+    for (const { doc } of view.renderer?.getContents() || []) {
+      const frame = doc?.defaultView?.frameElement;
+      if (frame && frameBelongsToDocument(frame, this.root)) {
+        active.set(frame, doc);
+        this.chapters.add(frame);
+        if (this.foliateChapters.get(view)?.get(frame) !== doc) this.onChapter(frame);
+      }
+    }
+    for (const frame of this.foliateChapters.get(view)?.keys() || []) if (!active.has(frame)) this.chapters.delete(frame);
+    this.foliateChapters.set(view, active);
+    this.onPrune();
+  }
+  prune() {
+    for (const [frame, state] of this.shells) if (!frameBelongsToDocument(frame, this.root)) {
+      frame.removeEventListener("load", state.load);
+      if (state.document) {
+        this.documents.get(state.document)?.observer.disconnect();
+        this.documents.delete(state.document);
+      }
+      this.shells.delete(frame);
+    }
+    for (const [view, update] of this.foliate) if (!view.isConnected) {
+      view.removeEventListener("load", update);
+      view.removeEventListener("relocate", update);
+      for (const frame of this.foliateChapters.get(view)?.keys() || []) this.chapters.delete(frame);
+      this.foliateChapters.delete(view);
+      this.foliate.delete(view);
+    }
+    for (const frame of this.chapters) if (!frameBelongsToDocument(frame, this.root)) this.chapters.delete(frame);
+    this.onPrune();
+  }
+  rescan() {
+    this.prune();
+    for (const document2 of this.documents.keys()) this.scanNode(document2.body, document2 !== this.root);
+    for (const view of this.foliate.keys()) {
+      this.scanFoliate(view);
+      for (const frame of this.foliateChapters.get(view)?.keys() || []) this.onChapter(frame);
+    }
+  }
+  dispose() {
+    for (const { observer } of this.documents.values()) observer.disconnect();
+    for (const [frame, state] of this.shells) frame.removeEventListener("load", state.load);
+    for (const [view, update] of this.foliate) {
+      view.removeEventListener("load", update);
+      view.removeEventListener("relocate", update);
+    }
+    this.documents.clear();
+    this.shells.clear();
+    this.foliate.clear();
+    this.foliateChapters.clear();
+    this.chapters.clear();
+  }
+};
+
+// src/epub-document-events.ts
+function epubDocumentEvents(document2, host) {
+  const window2 = document2.defaultView ? overlayDocumentFor(document2.body).defaultView : null;
+  let timer = null;
+  let previous = null;
+  let dragging = false;
+  const cancel = () => {
+    if (timer !== null) window2?.clearTimeout(timer);
+    timer = null;
+  };
+  const remember = () => {
+    const selection = document2.defaultView?.getSelection();
+    previous = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
+  };
+  const schedule = () => {
+    cancel();
+    if (dragging || !window2) return;
+    timer = window2.setTimeout(() => {
+      timer = null;
+      const selection = document2.defaultView?.getSelection();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+      if (range && previous && range.startContainer === previous.startContainer && range.startOffset === previous.startOffset && range.endContainer === previous.endContainer && range.endOffset === previous.endOffset) return;
+      host.maybeShowSelPill({ target: selection?.anchorNode || document2.body }, true);
+      remember();
+    }, 180);
+  };
+  const hooks = {
+    mouseover: (event) => host.onMouseOver(event),
+    mouseout: (event) => host.onMouseOut(event),
+    click: (event) => host.onClick(event),
+    mouseup: (event) => {
+      dragging = false;
+      cancel();
+      host.maybeShowSelPill(event, true);
+      remember();
+    },
+    pointerdown: (event) => {
+      dragging = true;
+      previous = null;
+      cancel();
+      host.onPointerDown(event);
+    },
+    pointermove: (event) => host.onPointerMove(event),
+    pointerup: (event) => {
+      dragging = false;
+      host.onPointerUp(event);
+      schedule();
+    },
+    pointercancel: () => {
+      dragging = false;
+      cancel();
+      host.onPointerCancel();
+    },
+    touchstart: () => {
+      dragging = true;
+      previous = null;
+      cancel();
+    },
+    touchend: () => {
+      dragging = false;
+      schedule();
+    },
+    selectionchange: schedule,
+    keyup: schedule
+  };
+  return {
+    hooks,
+    bind: () => {
+      for (const [event, hook] of Object.entries(hooks)) document2.addEventListener(event, hook, { capture: true });
+    },
+    dispose: () => {
+      cancel();
+      for (const [event, hook] of Object.entries(hooks)) document2.removeEventListener(event, hook, { capture: true });
+    }
+  };
+}
+
 // src/epub-highlights.ts
+function unbindEpubDocument(state) {
+  state.events?.dispose();
+  state.document = null;
+  state.hooks = null;
+  state.events = null;
+}
 function createEpubHighlights() {
   class EpubHighlights {
     isEpubIframe(frame) {
-      return frame.tagName === "IFRAME" && (frame.hasAttribute("enable-annotation") || frame.matches?.(".epub-reader-area iframe, .epub-container iframe, .epub-view iframe") || frame.closest(".epub-reader-area, .epub-container, .epub-view")) != null;
+      return frame.tagName === "IFRAME" && (frame.matches(EPUB_FRAMES) || frame.hasAttribute("enable-annotation") || !!this._epubSurfaces?.ownsChapter(frame));
     }
     setupEpubIframeHighlight(document2 = this._epubHostDocument || this.app.workspace.containerEl.ownerDocument) {
       this.teardownEpubIframeHighlight();
       this._epubHostDocument = document2;
-      this._epubIframeFrames = /* @__PURE__ */ new WeakSet();
-      this._epubIframeDocs = /* @__PURE__ */ new Map();
-      const MutationObserverConstructor = document2.defaultView?.MutationObserver || MutationObserver;
-      this._epubIframeObserver = new MutationObserverConstructor((muts) => {
-        for (const mu of muts) for (const node of mu.addedNodes) {
-          if (node.nodeType !== 1) continue;
-          const element = node;
-          if (this.isEpubIframe(element)) this.observeEpubIframe(element);
-          element.querySelectorAll("iframe[enable-annotation], .epub-reader-area iframe, .epub-container iframe, .epub-view iframe").forEach((frame) => this.observeEpubIframe(frame));
-        }
-      });
-      this._epubIframeObserver.observe(document2.body, { childList: true, subtree: true });
-      this.rescanEpubIframes();
+      this._epubIframeFrames = /* @__PURE__ */ new Map();
+      this._epubSurfaces = new EpubSurfaces(document2, (frame) => this.observeEpubIframe(frame), () => this.pruneEpubIframes());
+      this._epubSurfaces.start();
     }
     observeEpubIframe(frame) {
-      if (!this.isEpubIframe(frame)) return;
+      if (!this._epubIframeFrames || !frame.isConnected || !this.isEpubIframe(frame)) return;
       if (!this._epubIframeFrames.has(frame)) {
-        this._epubIframeFrames.add(frame);
-        frame.addEventListener("load", () => this.scanEpubIframe(frame));
+        const load = () => this.scanEpubIframe(frame);
+        this._epubIframeFrames.set(frame, { load, document: null, hooks: null, events: null });
+        frame.addEventListener("load", load);
       }
       this.scanEpubIframe(frame);
     }
     scanEpubIframe(frame) {
-      if (!automaticHighlighting(this.settings) || !this.isEpubIframe(frame)) return;
+      const state = this._epubIframeFrames?.get(frame);
+      if (!state || !frame.isConnected || !this.isEpubIframe(frame)) return;
       let doc;
       try {
         doc = frame.contentDocument;
       } catch {
+        unbindEpubDocument(state);
         return;
       }
+      if (state.document !== doc) unbindEpubDocument(state);
       if (!doc?.body) return;
-      doc.querySelectorAll(".lexis-hl").forEach((span) => {
-        const textNode = doc.createTextNode(span.textContent || "");
-        span.parentNode?.replaceChild(textNode, span);
+      if (!state.document) {
+        const events = epubDocumentEvents(doc, this);
+        state.document = doc;
+        state.hooks = events.hooks;
+        state.events = events;
+      }
+      state.events.bind();
+      refreshReadingHighlightsInPlace(doc.body, (root) => {
+        if (automaticHighlighting(this.settings)) {
+          this.wrapMatchesInElement(root, "script,style,code,pre,.lexis-hl,.lexis-popover", { external: true });
+        }
       });
-      doc.body.normalize();
-      this.wrapMatchesInElement(doc.body, "script,style,code,pre,.lexis-hl,.lexis-popover", { external: true });
-      if (this._epubIframeDocs.has(doc)) return;
-      const over = (event) => this.onMouseOver(event);
-      const out = (event) => this.onMouseOut(event);
-      const click = (event) => this.onClick(event);
-      const mouseup = (event) => this.maybeShowSelPill(event, true);
-      doc.addEventListener("mouseover", over);
-      doc.addEventListener("mouseout", out);
-      doc.addEventListener("click", click);
-      doc.addEventListener("mouseup", mouseup);
-      this._epubIframeDocs.set(doc, { over, out, click, mouseup });
+    }
+    pruneEpubIframes() {
+      for (const [frame, state] of this._epubIframeFrames || []) {
+        if (frameBelongsToDocument(frame, this._epubHostDocument) && (!this._epubSurfaces || this._epubSurfaces.ownsChapter(frame))) continue;
+        frame.removeEventListener("load", state.load);
+        unbindEpubDocument(state);
+        this._epubIframeFrames.delete(frame);
+      }
     }
     rescanEpubIframes() {
-      const document2 = this._epubHostDocument || this.app.workspace.containerEl.ownerDocument;
-      document2.querySelectorAll("iframe[enable-annotation], .epub-reader-area iframe, .epub-container iframe, .epub-view iframe").forEach((frame) => this.observeEpubIframe(frame));
+      this._epubSurfaces?.rescan();
     }
     teardownEpubIframeHighlight() {
-      if (this._epubIframeObserver) {
-        this._epubIframeObserver.disconnect();
-        this._epubIframeObserver = null;
+      this._epubSurfaces?.dispose();
+      this._epubSurfaces = null;
+      for (const [frame, state] of this._epubIframeFrames || []) {
+        frame.removeEventListener("load", state.load);
+        unbindEpubDocument(state);
       }
-      if (this._epubIframeDocs) {
-        for (const [doc, hooks] of this._epubIframeDocs) {
-          doc.removeEventListener("mouseover", hooks.over);
-          doc.removeEventListener("mouseout", hooks.out);
-          doc.removeEventListener("click", hooks.click);
-          doc.removeEventListener("mouseup", hooks.mouseup);
-        }
-      }
-      this._epubIframeDocs = null;
       this._epubIframeFrames = null;
       this._epubHostDocument = null;
     }
@@ -5026,10 +5281,6 @@ function eventElement2(target) {
 function closestHighlight(target) {
   return eventElement2(target)?.closest(".lexis-hl,.lexis-pdf-hl") || null;
 }
-function overlayDocumentFor(element) {
-  const sourceDocument = element.ownerDocument;
-  return sourceDocument.defaultView?.frameElement?.ownerDocument || sourceDocument;
-}
 function hasExpandedSelection(element) {
   const selection = element.ownerDocument.defaultView?.getSelection();
   return !!selection && !selection.isCollapsed && selection.rangeCount > 0;
@@ -5312,10 +5563,7 @@ function createReaderInteractions() {
         this.removeSelPill();
         return;
       }
-      if (sourceWin.frameElement && sourceWin.frameElement.ownerDocument === overlayDoc) {
-        const frameRect = sourceWin.frameElement.getBoundingClientRect();
-        rect = { left: rect.left + frameRect.left, right: rect.right + frameRect.left, top: rect.top + frameRect.top, bottom: rect.bottom + frameRect.top, width: rect.width, height: rect.height };
-      }
+      rect = readerRectInDocument(rect, sourceDoc, overlayDoc);
       this.removeSelPill();
       const known = this.index.has(this.resolveIndexKey(text));
       const selectedSourceFile = this.app.workspace.getActiveFile();
@@ -6199,8 +6447,7 @@ ${line}---` + data.slice(fm.index + fm[0].length);
     highlightSource(span) {
       if (span === this._manualLookupAnchor && this._manualLookupSource) return this._manualLookupSource;
       const sourceDocument = span.ownerDocument;
-      const frame = sourceDocument.defaultView?.frameElement;
-      const locatedNode = frame || span;
+      const locatedNode = overlayAnchorFor(span);
       let file = null;
       this.app.workspace.iterateAllLeaves((leaf) => {
         const view = leaf.view;
@@ -6358,15 +6605,13 @@ ${line}---` + data.slice(fm.index + fm[0].length);
       }
     }
     positionPopover(pop, spanEl) {
-      const r = spanEl.getBoundingClientRect();
+      const r = readerRectInDocument(spanEl.getBoundingClientRect(), spanEl.ownerDocument, pop.ownerDocument);
       const pr = pop.getBoundingClientRect();
-      const ownerWin = spanEl.ownerDocument?.defaultView;
       const hostWin = pop.ownerDocument.defaultView || window;
-      const frameRect = ownerWin?.frameElement?.ownerDocument === pop.ownerDocument ? ownerWin.frameElement.getBoundingClientRect() : null;
-      let left = r.left + (frameRect ? frameRect.left : 0), top = r.bottom + (frameRect ? frameRect.top : 0) + 6;
+      let left = r.left, top = r.bottom + 6;
       if (left + pr.width > hostWin.innerWidth - 10) left = hostWin.innerWidth - pr.width - 10;
       if (left < 10) left = 10;
-      if (top + pr.height > hostWin.innerHeight - 10) top = r.top + (frameRect ? frameRect.top : 0) - pr.height - 6;
+      if (top + pr.height > hostWin.innerHeight - 10) top = r.top - pr.height - 6;
       if (top < 10) top = 10;
       pop.setCssStyles({ left: left + "px", top: top + "px" });
     }

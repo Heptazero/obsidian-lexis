@@ -3,99 +3,106 @@
 import type { App } from "obsidian";
 import type { LexisSettings } from "./types";
 import { automaticHighlighting } from "./highlight-mode";
+import { refreshReadingHighlightsInPlace } from "./reading-highlights";
+import { EpubSurfaces, EPUB_FRAMES } from "./epub-surfaces";
+import { epubDocumentEvents } from "./epub-document-events";
+import { frameBelongsToDocument } from "./reader-frame-geometry";
 
-type EpubHooks = { over: (event: MouseEvent) => void; out: (event: MouseEvent) => void; click: (event: MouseEvent) => void; mouseup: (event: MouseEvent) => void };
-type ObserverWindow = Window & { MutationObserver: typeof MutationObserver };
+type DocumentEvents = ReturnType<typeof epubDocumentEvents>;
+type EpubFrame = { load: () => void; document: Document | null; hooks: DocumentEvents["hooks"] | null; events: DocumentEvents | null };
 type HighlightStyleOptions = { external?: boolean; pdf?: boolean };
+
+function unbindEpubDocument(state: EpubFrame): void {
+  state.events?.dispose();
+  state.document = null;
+  state.hooks = null;
+  state.events = null;
+}
 
 function createEpubHighlights(): PropertyDescriptorMap {
   class EpubHighlights {
     declare app: App;
     declare settings: LexisSettings;
-    declare _epubIframeObserver: MutationObserver | null;
+    declare _epubSurfaces: EpubSurfaces | null;
     declare _epubHostDocument: Document | null;
-    declare _epubIframeFrames: WeakSet<HTMLIFrameElement> | null;
-    declare _epubIframeDocs: Map<Document, EpubHooks> | null;
+    declare _epubIframeFrames: Map<HTMLIFrameElement, EpubFrame> | null;
     declare wrapMatchesInElement: (element: HTMLElement, rejectSelector: string, styleOptions?: HighlightStyleOptions, excludeKeys?: Set<string> | null) => void;
-    declare maybeShowSelPill: (event: MouseEvent, fromEpubIframe?: boolean) => void;
+    declare maybeShowSelPill: (event: Pick<MouseEvent, "target">, fromEpubIframe?: boolean) => void;
+    declare onPointerDown: (event: PointerEvent) => void;
+    declare onPointerMove: (event: PointerEvent) => void;
+    declare onPointerUp: (event: PointerEvent) => void;
+    declare onPointerCancel: () => void;
     declare onClick: (event: MouseEvent) => void;
     declare onMouseOut: (event: MouseEvent) => void;
     declare onMouseOver: (event: MouseEvent) => void;
 
     isEpubIframe(frame: Element): frame is HTMLIFrameElement {
-      return frame.tagName === "IFRAME" && (
-        frame.hasAttribute("enable-annotation") ||
-        frame.matches?.(".epub-reader-area iframe, .epub-container iframe, .epub-view iframe") ||
-        frame.closest(".epub-reader-area, .epub-container, .epub-view")
-      ) != null;
+      return frame.tagName === "IFRAME" && (frame.matches(EPUB_FRAMES)
+        || frame.hasAttribute("enable-annotation") || !!this._epubSurfaces?.ownsChapter(frame as HTMLIFrameElement));
     }
 
     setupEpubIframeHighlight(document: Document = this._epubHostDocument || this.app.workspace.containerEl.ownerDocument) {
       this.teardownEpubIframeHighlight();
       this._epubHostDocument = document;
-      this._epubIframeFrames = new WeakSet();
-      this._epubIframeDocs = new Map();
-      const MutationObserverConstructor = (document.defaultView as ObserverWindow | null)?.MutationObserver || MutationObserver;
-      this._epubIframeObserver = new MutationObserverConstructor((muts) => {
-        for (const mu of muts) for (const node of mu.addedNodes) {
-          if (node.nodeType !== 1) continue;
-          const element = node as Element;
-          if (this.isEpubIframe(element)) this.observeEpubIframe(element);
-          element.querySelectorAll<HTMLIFrameElement>("iframe[enable-annotation], .epub-reader-area iframe, .epub-container iframe, .epub-view iframe").forEach((frame) => this.observeEpubIframe(frame));
-        }
-      });
-      this._epubIframeObserver.observe(document.body, { childList: true, subtree: true });
-      this.rescanEpubIframes();
+      this._epubIframeFrames = new Map();
+      this._epubSurfaces = new EpubSurfaces(document, (frame) => this.observeEpubIframe(frame), () => this.pruneEpubIframes());
+      this._epubSurfaces.start();
     }
 
     observeEpubIframe(frame: HTMLIFrameElement): void {
-      if (!this.isEpubIframe(frame)) return;
+      if (!this._epubIframeFrames || !frame.isConnected || !this.isEpubIframe(frame)) return;
       if (!this._epubIframeFrames.has(frame)) {
-        this._epubIframeFrames.add(frame);
-        frame.addEventListener("load", () => this.scanEpubIframe(frame));
+        const load = () => this.scanEpubIframe(frame);
+        this._epubIframeFrames.set(frame, { load, document: null, hooks: null, events: null });
+        frame.addEventListener("load", load);
       }
       this.scanEpubIframe(frame);
     }
 
     scanEpubIframe(frame: HTMLIFrameElement): void {
-      if (!automaticHighlighting(this.settings) || !this.isEpubIframe(frame)) return;
+      const state = this._epubIframeFrames?.get(frame);
+      if (!state || !frame.isConnected || !this.isEpubIframe(frame)) return;
       let doc: Document | null;
-      try { doc = frame.contentDocument; } catch { return; }
+      try { doc = frame.contentDocument; } catch { unbindEpubDocument(state); return; }
+      if (state.document !== doc) unbindEpubDocument(state);
       if (!doc?.body) return;
-      doc.querySelectorAll(".lexis-hl").forEach((span) => {
-        const textNode = doc.createTextNode(span.textContent || "");
-        span.parentNode?.replaceChild(textNode, span);
+      // Selection works independently of automatic highlighting and is bound first.
+      if (!state.document) {
+        const events = epubDocumentEvents(doc, this);
+        state.document = doc;
+        state.hooks = events.hooks;
+        state.events = events;
+      }
+      // document.open() can clear listeners without replacing the Document object.
+      // Re-adding the same callbacks is idempotent for ordinary rescans.
+      state.events.bind();
+      refreshReadingHighlightsInPlace(doc.body, (root) => {
+        if (automaticHighlighting(this.settings)) {
+          this.wrapMatchesInElement(root, "script,style,code,pre,.lexis-hl,.lexis-popover", { external: true });
+        }
       });
-      doc.body.normalize();
-      this.wrapMatchesInElement(doc.body, "script,style,code,pre,.lexis-hl,.lexis-popover", { external: true });
-      if (this._epubIframeDocs.has(doc)) return;
-      const over = (event: MouseEvent) => this.onMouseOver(event);
-      const out = (event: MouseEvent) => this.onMouseOut(event);
-      const click = (event: MouseEvent) => this.onClick(event);
-      const mouseup = (event: MouseEvent) => this.maybeShowSelPill(event, true);
-      doc.addEventListener("mouseover", over);
-      doc.addEventListener("mouseout", out);
-      doc.addEventListener("click", click);
-      doc.addEventListener("mouseup", mouseup);
-      this._epubIframeDocs.set(doc, { over, out, click, mouseup });
+    }
+
+    pruneEpubIframes(): void {
+      for (const [frame, state] of this._epubIframeFrames || []) {
+        if (frameBelongsToDocument(frame, this._epubHostDocument)
+          && (!this._epubSurfaces || this._epubSurfaces.ownsChapter(frame))) continue;
+        frame.removeEventListener("load", state.load);
+        unbindEpubDocument(state);
+        this._epubIframeFrames.delete(frame);
+      }
     }
 
     rescanEpubIframes() {
-      const document = this._epubHostDocument || this.app.workspace.containerEl.ownerDocument;
-      document.querySelectorAll<HTMLIFrameElement>("iframe[enable-annotation], .epub-reader-area iframe, .epub-container iframe, .epub-view iframe").forEach((frame) => this.observeEpubIframe(frame));
+      this._epubSurfaces?.rescan();
     }
 
     teardownEpubIframeHighlight() {
-      if (this._epubIframeObserver) { this._epubIframeObserver.disconnect(); this._epubIframeObserver = null; }
-      if (this._epubIframeDocs) {
-        for (const [doc, hooks] of this._epubIframeDocs) {
-          doc.removeEventListener("mouseover", hooks.over);
-          doc.removeEventListener("mouseout", hooks.out);
-          doc.removeEventListener("click", hooks.click);
-          doc.removeEventListener("mouseup", hooks.mouseup);
-        }
+      this._epubSurfaces?.dispose(); this._epubSurfaces = null;
+      for (const [frame, state] of this._epubIframeFrames || []) {
+        frame.removeEventListener("load", state.load);
+        unbindEpubDocument(state);
       }
-      this._epubIframeDocs = null;
       this._epubIframeFrames = null;
       this._epubHostDocument = null;
     }

@@ -1,12 +1,13 @@
 {
   "name": "obsidian-lexis",
-  "version": "1.17.22",
+  "version": "1.17.23",
   "private": true,
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "test": "node --test tests/*.test.mjs",
     "test:pdf-layout": "node tests/pdf-layout.browser.mjs",
     "test:popover-editor": "node tests/popover-editor.browser.mjs",
+    "test:epub": "node tests/epub-selection.browser.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "build": "tsc --noEmit && node esbuild.config.mjs production"
