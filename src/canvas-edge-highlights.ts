@@ -1,5 +1,6 @@
 import type { LexisEntry, LexisSettings } from "./types";
 import { textHighlightMatches } from "./text-highlight-matches";
+import { automaticHighlighting } from "./highlight-mode";
 
 interface CanvasEdgeHighlightHost {
   settings: LexisSettings;
@@ -101,7 +102,7 @@ export class CanvasEdgeHighlights {
   private renderLabel(wrapper: HTMLElement): void {
     const textarea = wrapper.querySelector<HTMLTextAreaElement>("textarea");
     let layer = wrapper.querySelector<HTMLElement>(":scope > .lexis-canvas-edge-hl-layer");
-    const active = this.host.settings.enableHighlight && this.host._pattern && this.host.index.size;
+    const active = automaticHighlighting(this.host.settings) && this.host._pattern && this.host.index.size;
     const matches = active
       ? edgeLabelMatches(textarea?.value || "", this.host._pattern, (value) => this.host.resolveMatchKey(value), this.host.index)
       : [];

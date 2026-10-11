@@ -1,4 +1,5 @@
 "use strict";
+import { attachPopoverEditor } from "./popover-editor";
 
 import * as obsidian from "obsidian";
 import type { App, Component as ObsidianComponent, Editor, MarkdownPostProcessorContext, Notice as ObsidianNotice, TFile as ObsidianTFile, WorkspaceLeaf } from "obsidian";
@@ -47,6 +48,8 @@ function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, da
   declare _hideTimer: number;
   declare _popover: HTMLElement | null;
   declare _popoverComp: ObsidianComponent | null;
+  declare _manualLookupAnchor: HTMLElement | null;
+  declare _manualLookupSource: HighlightSource | null;
   declare _occLeaf: WorkspaceLeaf | null;
   declare readCard: (file: ObsidianTFile) => CurveCard;
   declare renderDerivedWords: (element: HTMLElement, file: ObsidianTFile) => Promise<void>;
@@ -212,6 +215,7 @@ function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, da
     this.removePopover();
   }
   highlightSource(span: HTMLElement): HighlightSource {
+    if (span === this._manualLookupAnchor && this._manualLookupSource) return this._manualLookupSource;
     const sourceDocument = span.ownerDocument;
     const frame = sourceDocument.defaultView?.frameElement;
     const locatedNode = frame || span;
@@ -254,6 +258,7 @@ function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, da
     const entry = this.index.get(key);
     if (!entry) return;
     if (this._popover && this._popover.dataset.lexisKey === key) { window.clearTimeout(this._hideTimer); return; }
+    if (this._popover?.dataset.lexisEditing === "1") return;
     if (!entry.inline) { this.recordEncounter(entry.file, "hover"); void this.hoverFeedback(entry.file); }
     this.removePopover();
     const pop = overlayDocumentFor(spanEl).body.createDiv({ cls: "lexis-popover" });
@@ -299,6 +304,12 @@ function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, da
       const contentEl = body.createDiv();
       if (entry.inline) await this.renderInlineEntryInto(contentEl, entry, comp);
       else await this.renderNoteInto(contentEl, entry.file, comp);
+      if (this._popover !== pop) return;
+      if (!entry.inline) attachPopoverEditor({
+        app: this.app, file: entry.file, popover: pop, corner, content: contentEl, component: comp,
+        mode: () => this.settings.popoverEditMode || "inline", t: (key, vars) => this.t(key, vars),
+        render: async () => { contentEl.empty(); await this.renderNoteInto(contentEl, entry.file, comp); },
+      });
       if (!entry.inline && this.settings.showRelated) {
         const div = body.createDiv({ cls: "lexis-divider" });
         const n = await this.renderTypedRelations(body, entry.file);

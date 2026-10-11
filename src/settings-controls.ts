@@ -1,4 +1,5 @@
 "use strict";
+import { addCurrentChoice } from "./settings-choice";
 
 import type { App } from "obsidian";
 import type { HighlightStyle } from "./types";
@@ -229,14 +230,10 @@ function addAppearanceButton({ app, obsidian, parent, title, state, onChange, on
       new obsidian.Setting(modal.contentEl).setName(labels.opacity)
         .addSlider((slider) => slider.setLimits(0.1, 1, 0.05).setValue(state().opacity).onChange((opacity) => { void onChange({ opacity }); }));
       if (allowStyle) {
-        new obsidian.Setting(modal.contentEl).setName(labels.style)
-          .addDropdown((dropdown) => dropdown
-            .addOption("", labels.defaultStyle)
-            .addOption("wavy", labels.wavy)
-            .addOption("underline", labels.underline)
-            .addOption("background", labels.background)
-            .setValue(state().style || "")
-            .onChange((style) => { void onChange({ style: style as HighlightStyle | "" }); }));
+        addCurrentChoice(new obsidian.Setting(modal.contentEl).setName(labels.style), [
+          { value: "", label: labels.defaultStyle }, { value: "wavy", label: labels.wavy },
+          { value: "underline", label: labels.underline }, { value: "background", label: labels.background },
+        ], state().style || "", async (style) => { await onChange({ style }); });
       }
       new obsidian.Setting(modal.contentEl)
         .addButton((reset) => reset.setButtonText(labels.reset).onClick(() => { void Promise.resolve(onReset()).then(() => { refreshButton(); modal.close(); }); }))

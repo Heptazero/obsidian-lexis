@@ -1,6 +1,7 @@
 import type { App, Plugin, View } from "obsidian";
 import type { LexisEntry, LexisSettings } from "./types";
 import { textHighlightMatches, type TextHighlightMatch } from "./text-highlight-matches";
+import { automaticHighlighting } from "./highlight-mode";
 
 interface SceneElement {
   id: string;
@@ -232,8 +233,8 @@ export class ExcalidrawHighlights {
     if (!api) return;
     viewState.api = api;
     const appState = api.getAppState();
-    const inactiveSignature = `inactive:${Number(this.host.settings.enableHighlight)}:${this.host._indexBuildId || 0}`;
-    if (!this.host.settings.enableHighlight || !this.host._pattern || !this.host.index.size) {
+    const inactiveSignature = `inactive:${Number(automaticHighlighting(this.host.settings))}:${this.host._indexBuildId || 0}`;
+    if (!automaticHighlighting(this.host.settings) || !this.host._pattern || !this.host.index.size) {
       if (viewState.signature !== inactiveSignature) {
         viewState.signature = inactiveSignature;
         viewState.anchors = [];

@@ -18,6 +18,8 @@ interface ReaderPopoverHost {
   highlightSource(span: HTMLElement): HighlightSource;
   addExampleToWord(wordFile: ObsidianTFile, sentence: string, sourceFile?: ObsidianTFile | null, page?: number): Promise<boolean>;
   collectVocabTags(): string[];
+  rebuildIndex(notify: boolean): Promise<unknown>;
+  showPopover(target: HTMLElement): Promise<void>;
   removePopover(): void;
 }
 
@@ -87,7 +89,8 @@ export function renderReaderPopoverControls(
       occurrenceBtn.removeAttribute("title");
     } else occurrenceBtn.disabled = false;
   })(); });
-  const noteBtn = corner.createEl("button", { cls: "lexis-popover-action", text: "✎" });
+  const noteBtn = corner.createEl("button", { cls: "lexis-popover-action", attr: { type: "button" } });
+  obsidian.setIcon(noteBtn, "message-square-plus");
   noteBtn.setAttribute("title", this.t("popover.addNote"));
   noteBtn.addEventListener("click", (ev) => {
     ev.preventDefault(); ev.stopPropagation();

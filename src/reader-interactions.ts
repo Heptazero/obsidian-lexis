@@ -9,6 +9,8 @@ import { pdfHighlightAt } from "./pdf-highlight-targets";
 import { positionSelectionPill } from "./selection-pill-position";
 import { canvasHighlightAt } from "./canvas-highlight-target";
 import type { ExcalidrawHighlights } from "./excalidraw-highlights";
+import { manualLookupEnabled } from "./highlight-mode";
+import { finishPopoverEdit } from "./popover-edit-lifecycle";
 
 type AddWordOptions = {
   openExisting?: boolean;
@@ -18,6 +20,7 @@ type AddWordOptions = {
   page?: number;
 };
 type TranslationVars = Record<string, string | number | boolean>;
+type ManualLookupSource = { file: ObsidianTFile | null; sentence: string; page?: number };
 
 function eventElement(target: EventTarget | null): HTMLElement | null {
   if (!target || typeof target !== "object" || !("nodeType" in target)) return null;
@@ -57,6 +60,8 @@ function createReaderInteractions(): PropertyDescriptorMap {
   declare _popover: HTMLElement | null;
   declare _popoverComp: ObsidianComponent | null;
   declare _selPill: HTMLElement | null;
+  declare _manualLookupAnchor: HTMLElement | null;
+  declare _manualLookupSource: ManualLookupSource | null;
   declare _aliasSearch: AliasComboboxController | null;
   declare _mobileTapStart: { pointerId: number; x: number; y: number; time: number; target: HTMLElement } | null;
   declare _mobileTapClick: { x: number; y: number; time: number } | null;
@@ -168,7 +173,44 @@ function createReaderInteractions(): PropertyDescriptorMap {
       this.removePopover();
     }
   }
+  showManualLookup(key: string, rect: Pick<DOMRect, "left" | "top" | "width" | "height">, overlayDoc: Document, source: ManualLookupSource): boolean {
+    if (!this.index.has(key)) return false;
+    this.removeSelPill();
+    this.removePopover();
+    const anchor = overlayDoc.body.createDiv({ cls: "lexis-manual-lookup-anchor" });
+    anchor.dataset.lexisKey = key;
+    anchor.setCssStyles({ left: `${rect.left}px`, top: `${rect.top}px`, width: `${Math.max(1, rect.width)}px`, height: `${Math.max(1, rect.height)}px` });
+    void this.showPopover(anchor);
+    this._manualLookupAnchor = anchor;
+    this._manualLookupSource = source;
+    return true;
+  }
+  manualLookupFromClick(event: MouseEvent): boolean {
+    if (!manualLookupEnabled(this.settings) || event.detail < 2) return false;
+    const target = eventElement(event.target);
+    if (!target || target.closest(".lexis-popover,.lexis-sel-pill,code,pre,a,input,textarea,[contenteditable=true]")) return false;
+    if (!target.closest(".markdown-reading-view,.markdown-preview-view")) return false;
+    const sourceDoc = target.ownerDocument;
+    const selection = sourceDoc.defaultView?.getSelection();
+    if (!selection || selection.isCollapsed || selection.rangeCount < 1) return false;
+    const text = selection.toString().trim();
+    if (!text || text.length > 60 || /[\n\r]/.test(text)) return false;
+    const key = this.resolveIndexKey(text);
+    if (!this.index.has(key)) return false;
+    const range = selection.getRangeAt(0);
+    const rect = range.getBoundingClientRect();
+    if (!rect.width && !rect.height) return false;
+    const node = selection.anchorNode;
+    const sentence = node ? this.extractSentence(node.textContent || "", selection.anchorOffset || 0) : text;
+    const page = Number(target.closest("[data-page-number]")?.getAttribute("data-page-number")) || undefined;
+    return this.showManualLookup(key, rect, sourceDoc, { file: this.app.workspace.getActiveFile(), sentence, page });
+  }
   onClick(e: MouseEvent): void {
+    if (!obsidian.Platform.isMobile && this.manualLookupFromClick(e)) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     const recentTap = this._mobileTapClick;
     if (recentTap && Date.now() - recentTap.time < 700
       && Math.hypot(e.clientX - recentTap.x, e.clientY - recentTap.y) < 20
@@ -191,15 +233,22 @@ function createReaderInteractions(): PropertyDescriptorMap {
   scheduleHide() {
     window.clearTimeout(this._hideTimer);
     this._hideTimer = window.setTimeout(() => {
-      if (this._popover?.dataset.lexisResizing !== "1") this.removePopover();
+      if (this._popover?.dataset.lexisResizing !== "1" && this._popover?.dataset.lexisEditing !== "1") this.removePopover();
     }, 220);
   }
   removePopover() {
+    const editing = this._popover;
+    if (editing?.dataset.lexisEditing === "1") {
+      void finishPopoverEdit(editing).then((saved) => { if (saved && this._popover === editing) this.removePopover(); });
+      return;
+    }
     window.clearTimeout(this._showTimer);
     this._showTimer = null;
     this._showTarget = null;
     if (this._popoverComp) { this._popoverComp.unload(); this._popoverComp = null; }
     if (this._popover) { this._popover.remove(); this._popover = null; }
+    if (this._manualLookupAnchor) { this._manualLookupAnchor.remove(); this._manualLookupAnchor = null; }
+    this._manualLookupSource = null;
   }
   attachPopoverResize(popover: HTMLElement, target: HTMLElement): void {
     const hostWindow = popover.ownerDocument.defaultView || window;
@@ -291,8 +340,13 @@ function createReaderInteractions(): PropertyDescriptorMap {
     // 阻止 mousedown 收起选区/夺焦(事件冒泡到 pill 即可覆盖子按钮)
     pill.addEventListener("mousedown", (ev) => ev.preventDefault());
     if (known) {
-      const b = pill.createSpan({ cls: "lexis-sel-pill-btn", text: `📖 ${this.t("selection.openExisting")}` });
-      b.addEventListener("click", (ev) => { ev.preventDefault(); ev.stopPropagation(); void this.addFromPill(text, undefined, { openExisting: true }); });
+      const manual = manualLookupEnabled(this.settings);
+      const b = pill.createSpan({ cls: "lexis-sel-pill-btn", text: `📖 ${this.t(manual ? "selection.lookupExisting" : "selection.openExisting")}` });
+      b.addEventListener("click", (ev) => {
+        ev.preventDefault(); ev.stopPropagation();
+        if (manual) this.showManualLookup(this.resolveIndexKey(text), rect, overlayDoc, { file: selectedSourceFile, sentence: selectedSentence, page: selectedPage || undefined });
+        else void this.addFromPill(text, undefined, { openExisting: true });
+      });
     } else {
       const dicts = this.dictFolders();
       let selectedFolder = this.preferredSelectionFolder();

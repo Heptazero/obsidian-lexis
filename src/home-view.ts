@@ -1,6 +1,7 @@
 import { Component, ItemView, Setting, TFile, type WorkspaceLeaf } from "obsidian";
 import { LEXIS_HOME_VIEW } from "./constants";
 import { FolderSuggest } from "./folder-suggest";
+import { addCurrentChoice } from "./settings-choice";
 import type { TranslationVars } from "./i18n";
 import { MarkdownFileSuggest } from "./markdown-file-suggest";
 import { mountReviewDashboard, type DashboardViewHost } from "./review-dashboard-view";
@@ -95,13 +96,8 @@ export class LexisHomeView extends ItemView {
       container.scrollTop = scrollTop;
       container.ownerDocument.defaultView?.requestAnimationFrame(() => { container.scrollTop = scrollTop; });
     };
-    const addSegments = <T extends string>(setting: Setting, options: Array<[T, string]>, value: T, select: (next: T) => void) => {
-      const group = setting.controlEl.createDiv({ cls: "lexis-segments" });
-      for (const [key, label] of options) {
-        const button = group.createEl("button", { cls: `lexis-segment${key === value ? " is-active" : ""}`, text: label, attr: { type: "button" } });
-        button.addEventListener("click", () => select(key));
-      }
-    };
+    const addChoice = <T extends string>(setting: Setting, options: Array<[T, string]>, value: T, select: (next: T) => void) =>
+      addCurrentChoice(setting, options.map(([value, label]) => ({ value, label })), value, select);
     renderControls = () => {
       this.fileSuggest?.close();
       this.fileSuggest = null;
@@ -109,23 +105,14 @@ export class LexisHomeView extends ItemView {
       this.folderSuggest = null;
       controls.empty();
       let updateStartState = () => {};
-      new Setting(controls).setName(this.plugin.t("home.reviewScope")).addDropdown((dropdown) => dropdown
-        .addOption("vocab", this.plugin.t("home.scopeVocab"))
-        .addOption("folder", this.plugin.t("home.scopeFolder"))
-        .addOption("links", this.plugin.t("home.scopeLinks"))
-        .addOption("tag", this.plugin.t("home.scopeTag"))
-        .addOption("current", this.plugin.t("home.scopeCurrent"))
-        .setValue(selectedScope)
-        .onChange((value) => {
-          if (["vocab", "folder", "links", "tag", "current"].includes(value)) selectedScope = value as ReviewScopeMode;
-          rerenderControls();
-        }));
+      addChoice(new Setting(controls).setName(this.plugin.t("home.reviewScope")), [
+        ["vocab", this.plugin.t("home.scopeVocab")], ["folder", this.plugin.t("home.scopeFolder")],
+        ["links", this.plugin.t("home.scopeLinks")], ["tag", this.plugin.t("home.scopeTag")], ["current", this.plugin.t("home.scopeCurrent")],
+      ], selectedScope, (value) => { selectedScope = value; rerenderControls(); });
       if (selectedScope === "vocab") {
-        new Setting(controls).setName(this.plugin.t("home.reviewDictionary")).addDropdown((dropdown) => {
-          dropdown.addOption("", this.plugin.t("home.scopeAllDictionaries"));
-          for (const dictionary of dictionaries) dropdown.addOption(dictionary, dictionary);
-          dropdown.setValue(selectedDictionary).onChange((value) => { selectedDictionary = value; });
-        });
+        addChoice(new Setting(controls).setName(this.plugin.t("home.reviewDictionary")), [
+          ["", this.plugin.t("home.scopeAllDictionaries")], ...dictionaries.map((dictionary): [string, string] => [dictionary, dictionary]),
+        ], selectedDictionary, (value) => { selectedDictionary = value; });
       }
       if (selectedScope === "folder") {
         new Setting(controls).setName(this.plugin.t("home.reviewFolder")).addSearch((search) => {
@@ -156,39 +143,28 @@ export class LexisHomeView extends ItemView {
         });
       }
       if (selectedScope === "tag") {
-        new Setting(controls).setName(this.plugin.t("home.reviewTag")).addDropdown((dropdown) => {
-          dropdown.addOption("", this.plugin.t("home.chooseTag"));
-          for (const tag of tags) dropdown.addOption(tag, `#${tag}`);
-          dropdown.setValue(selectedTag).onChange((value) => { selectedTag = value; updateStartState(); });
-        });
+        addChoice(new Setting(controls).setName(this.plugin.t("home.reviewTag")), [
+          ["", this.plugin.t("home.chooseTag")], ...tags.map((tag): [string, string] => [tag, `#${tag}`]),
+        ], selectedTag, (value) => { selectedTag = value; updateStartState(); });
       }
       if (selectedScope === "current") {
         new Setting(controls).setName(this.plugin.t("home.currentNote")).setDesc(currentFile?.path || this.plugin.t("home.noCurrentNote"));
       }
       const contentSetting = new Setting(controls).setName(this.plugin.t("home.reviewContent"));
-      addSegments(contentSetting, [
+      addChoice(contentSetting, [
         ["notes", this.plugin.t("home.contentNotes")],
         ["context", this.plugin.t("home.contentContext")],
         ["syntax", this.plugin.t("home.contentSyntax")],
         ["both", this.plugin.t("home.contentBoth")],
       ], selectedContent, (value) => { selectedContent = value; rerenderControls(); });
-      new Setting(controls).setName(this.plugin.t("home.sortBy")).addDropdown((dropdown) => {
-        dropdown
-          .addOption("due", this.plugin.t("home.sortDue"))
-          .addOption("wordCount", this.plugin.t("home.sortWordCount"))
-          .addOption("modified", this.plugin.t("home.sortModified"))
-          .addOption("created", this.plugin.t("home.sortCreated"))
-          .addOption("frequency", this.plugin.t("home.frequency"))
-          .addOption("random", this.plugin.t("home.random"))
-          .setValue(selectedSort);
-        dropdown.onChange((value) => {
-          if (["due", "wordCount", "modified", "created", "frequency", "random"].includes(value)) selectedSort = value as ReviewSortKey;
-          rerenderControls();
-        });
-      });
+      addChoice(new Setting(controls).setName(this.plugin.t("home.sortBy")), [
+        ["due", this.plugin.t("home.sortDue")], ["wordCount", this.plugin.t("home.sortWordCount")],
+        ["modified", this.plugin.t("home.sortModified")], ["created", this.plugin.t("home.sortCreated")],
+        ["frequency", this.plugin.t("home.frequency")], ["random", this.plugin.t("home.random")],
+      ], selectedSort, (value) => { selectedSort = value; rerenderControls(); });
       if (selectedSort !== "random") {
         const directionSetting = new Setting(controls).setName(this.plugin.t("home.sortDirection"));
-        addSegments(directionSetting, [
+        addChoice(directionSetting, [
           ["asc", this.plugin.t("home.ascending")],
           ["desc", this.plugin.t("home.descending")],
         ], selectedDirection, (value) => { selectedDirection = value; rerenderControls(); });

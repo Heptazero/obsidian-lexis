@@ -4,6 +4,7 @@ import type { App } from "obsidian";
 import type { HighlightStyle, LexisEntry, LexisSettings } from "./types";
 import { setPdfTargets } from "./pdf-highlight-targets";
 import { createEpubHighlights } from "./epub-highlights";
+import { automaticHighlighting } from "./highlight-mode";
 
 type HighlightStyleOptions = { external?: boolean; pdf?: boolean };
 type PdfPart = { node: Text; text: string; rect: DOMRect };
@@ -245,7 +246,7 @@ function createDocumentHighlights(): PropertyDescriptorMap {
     this._pdfObservedLayers = new WeakSet();
     this._pdfObservedSizes = new WeakMap();
     const MutationObserverConstructor = observerWindow.MutationObserver;
-    if (!this.settings.enableHighlight || !this.settings.enablePdfHighlight || !MutationObserverConstructor) return;
+    if (!automaticHighlighting(this.settings) || !this.settings.enablePdfHighlight || !MutationObserverConstructor) return;
     this._pdfPending = new Set();
     const flush = () => {
       this._pdfRaf = 0;
@@ -362,7 +363,7 @@ function createDocumentHighlights(): PropertyDescriptorMap {
     return selectionTouchesLayer(layer, this._pdfWindow?.getSelection() || null);
   }
   scanPdfLayer(layer: HTMLElement): void {
-    if (!this.settings.enablePdfHighlight || !this.settings.enableHighlight) return;
+    if (!this.settings.enablePdfHighlight || !automaticHighlighting(this.settings)) return;
     this.observePdfLayer(layer);
     // PDF.js measures text without view-local typography. Themes that add spacing to the
     // transparent text layer make proportional Latin text drift away from the canvas.

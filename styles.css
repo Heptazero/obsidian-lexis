@@ -141,6 +141,7 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     padding-left: 14px;
     border-left: 1px solid var(--background-modifier-border);
 }
+.lexis-settings-subgroup.is-disabled { opacity: .5; }
 .lexis-settings-subheading {
     padding: 6px 0 2px;
     color: var(--text-muted);
@@ -548,6 +549,12 @@ button.lexis-missing-entry-color {
     font-size: var(--lexis-popover-font-size, 14px);
     line-height: 1.5;
 }
+.lexis-manual-lookup-anchor {
+    position: fixed;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0;
+}
 .lexis-popover-scroll {
     position: relative;
     box-sizing: border-box;
@@ -626,7 +633,7 @@ button.lexis-missing-entry-color {
     margin: 0 0 7px;
 }
 .lexis-popover-meta:empty { display: none; }
-.lexis-popover.has-corner-actions .lexis-popover-title { padding-right: 62px; }
+.lexis-popover.has-corner-actions .lexis-popover-title { padding-right: 96px; }
 .lexis-popover-corner {
     position: absolute;
     top: 9px;
@@ -737,6 +744,70 @@ button.lexis-missing-entry-color {
     height: auto;
     margin: 6px 0;
     border-radius: 6px;
+}
+.modal.lexis-quick-edit-modal {
+    width: min(720px, calc(100vw - 32px));
+    max-height: calc(100dvh - 32px);
+}
+.lexis-quick-edit-modal .modal-content {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: auto;
+}
+.lexis-quick-edit-hint {
+    margin-bottom: 8px;
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+}
+.lexis-quick-edit-textarea {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: min(48vh, 480px);
+    resize: vertical;
+    border: 1px solid var(--background-modifier-border);
+    font-family: var(--font-text);
+    font-size: var(--font-text-size);
+    line-height: 1.55;
+}
+.lexis-popover textarea.lexis-popover-editor {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 100px;
+    padding: 4px 0;
+    border: none;
+    box-shadow: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    line-height: 1.6;
+    resize: none;
+}
+.lexis-popover-edit-status {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    margin: 6px 0;
+}
+.lexis-current-choice {
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    max-width: 100%;
+}
+.lexis-current-choice > span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.lexis-current-choice-icon {
+    display: flex;
+    flex-shrink: 0;
+}
+.lexis-current-choice-icon svg {
+    width: 16px;
+    height: 16px;
 }
 
 .lexis-divider {

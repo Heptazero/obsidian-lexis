@@ -1,7 +1,7 @@
 "use strict";
+import { addCurrentChoice } from "./settings-choice";
 
 import type { App } from "obsidian";
-import type { LexisSettings } from "./types";
 import type { SettingsRuntime } from "./settings-tab";
 import type { PathSuggestConstructor } from "./settings-suggest";
 
@@ -61,12 +61,9 @@ export function renderStorageSettings(this: StorageSettingsHost, context: Storag
     .setDesc(t("settings.pluginDataPathDesc", { path: `${this.app.vault.configDir}/plugins/${this.plugin.manifest.id}/data.json` }));
 
   const mobileSection = topSection("mobile", t("settings.mobileInteractions"), { desc: t("settings.mobileSectionDesc") });
-  new Setting(mobileSection).setName(t("settings.mobileTapAction")).setDesc(t("settings.mobileTapDesc"))
-    .addDropdown((dropdown) => dropdown
-      .addOption("popover", t("settings.mobileTapPopover"))
-      .addOption("open", t("settings.mobileTapOpen"))
-      .setValue(this.plugin.settings.mobileTapAction)
-      .onChange(async (value) => { this.plugin.settings.mobileTapAction = value as LexisSettings["mobileTapAction"]; await save(); }));
+  addCurrentChoice(new Setting(mobileSection).setName(t("settings.mobileTapAction")).setDesc(t("settings.mobileTapDesc")), [
+    { value: "popover", label: t("settings.mobileTapPopover") }, { value: "open", label: t("settings.mobileTapOpen") },
+  ], this.plugin.settings.mobileTapAction, async (value) => { this.plugin.settings.mobileTapAction = value; await save(); });
   new Setting(mobileSection).setName(t("settings.ratingOffset")).setDesc(t("settings.ratingOffsetDesc"))
     .addSlider((s) => s
       .setLimits(0, 200, 5)

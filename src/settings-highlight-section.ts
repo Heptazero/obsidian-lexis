@@ -1,7 +1,7 @@
 "use strict";
 
 import type { App, ColorComponent } from "obsidian";
-import type { HighlightStyle } from "./types";
+import { addCurrentChoice } from "./settings-choice";
 import type { SettingsRuntime } from "./settings-tab";
 import type { PathSuggestConstructor } from "./settings-suggest";
 
@@ -44,9 +44,15 @@ export function renderHighlightSettings(this: HighlightSettingsHost, context: Hi
   const hlSection = topSection("highlight", t("settings.highlight"));
   const highlightSwitch = new Setting(hlSection).setName(t("settings.enableHighlight")).setDesc(t("settings.enableHighlightDesc"));
   const highlightOptions = hlSection.createEl("fieldset", { cls: "lexis-highlight-options" });
+  let automaticGroups: HTMLElement[] = [];
   const syncHighlightOptions = () => {
     highlightOptions.disabled = !this.plugin.settings.enableHighlight;
     highlightOptions.toggleClass("is-disabled", !this.plugin.settings.enableHighlight);
+    const automatic = this.plugin.settings.enableHighlight && this.plugin.settings.highlightMode !== "manual";
+    for (const group of automaticGroups) {
+      group.toggleClass("is-disabled", !automatic);
+      group.toggleAttribute("inert", !automatic);
+    }
   };
   syncHighlightOptions();
   highlightSwitch.addToggle((toggle) => toggle.setValue(this.plugin.settings.enableHighlight).onChange(async (v) => {
@@ -65,12 +71,24 @@ export function renderHighlightSettings(this: HighlightSettingsHost, context: Hi
     .addToggle((t) => t.setValue(this.plugin.settings.enablePdfHighlight).onChange(async (v) => { this.plugin.settings.enablePdfHighlight = v; await save(); if (v) this.plugin.setupPdfHighlight(); else { this.plugin.teardownPdfHighlight(); this.plugin.rescanPdfLayers(); } }));
   const interactionGroup = highlightOptions.createDiv({ cls: "lexis-settings-subgroup" });
   interactionGroup.createDiv({ cls: "lexis-settings-subheading", text: t("settings.highlightInteraction") });
+  const modeSetting = new Setting(interactionGroup).setName(t("settings.highlightMode")).setDesc(t("settings.highlightModeDesc"));
+  addCurrentChoice(modeSetting, [
+    { value: "automatic", label: t("settings.highlightAutomatic") },
+    { value: "manual", label: t("settings.highlightManual") },
+  ], this.plugin.settings.highlightMode, async (mode) => {
+    this.plugin.settings.highlightMode = mode;
+    syncHighlightOptions();
+    if (mode === "automatic" && this.plugin.settings.enablePdfHighlight) this.plugin.setupPdfHighlight();
+    else this.plugin.teardownPdfHighlight();
+    await save(); refresh();
+  });
   new Setting(interactionGroup).setName(t("settings.clickHighlightToOpen")).setDesc(t("settings.clickHighlightToOpenDesc"))
     .addToggle((toggle) => toggle.setValue(this.plugin.settings.clickHighlightToOpen !== false).onChange(async (value) => { this.plugin.settings.clickHighlightToOpen = value; await save(); }));
   const styleGroup = highlightOptions.createDiv({ cls: "lexis-settings-subgroup" });
   styleGroup.createDiv({ cls: "lexis-settings-subheading", text: t("settings.highlightAppearance") });
-  new Setting(styleGroup).setName(t("settings.highlightStyle"))
-    .addDropdown((dd) => dd.addOption("wavy", t("settings.wavy")).addOption("underline", t("settings.underline")).addOption("background", t("settings.background")).setValue(this.plugin.settings.highlightStyle).onChange(async (v) => { this.plugin.settings.highlightStyle = ["wavy", "underline", "background"].includes(v) ? v as HighlightStyle : "wavy"; await save(); refresh(); }));
+  addCurrentChoice(new Setting(styleGroup).setName(t("settings.highlightStyle")), [
+    { value: "wavy", label: t("settings.wavy") }, { value: "underline", label: t("settings.underline") }, { value: "background", label: t("settings.background") },
+  ], this.plugin.settings.highlightStyle, async (value) => { this.plugin.settings.highlightStyle = value; await save(); refresh(); });
   new Setting(styleGroup).setName(t("settings.highlightColor"))
     .addColorPicker((cp) => { this._colorComp = cp; cp.setValue(this.plugin.settings.highlightColor || accentHex).onChange(async (v) => { this.plugin.settings.highlightColor = v; await save(); refresh(); }); })
     .addExtraButton((b) => b.setIcon("reset").setTooltip(t("settings.resetTheme")).onClick(async () => { this.plugin.settings.highlightColor = ""; this._colorComp?.setValue(accentHex); await save(); refresh(); }));
@@ -165,4 +183,6 @@ export function renderHighlightSettings(this: HighlightSettingsHost, context: Hi
     addRule.addEventListener("click", () => { void (async () => { this.plugin.settings.tagRules.push({ tag: "", color: accentHex, style: "" }); await save(); renderRules(); })(); });
   };
   renderRules();
+  automaticGroups = [scopeGroup, styleGroup];
+  syncHighlightOptions();
 }

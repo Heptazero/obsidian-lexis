@@ -2,6 +2,7 @@
 
 import type { App } from "obsidian";
 import type { LexisSettings } from "./types";
+import { automaticHighlighting } from "./highlight-mode";
 
 type EpubHooks = { over: (event: MouseEvent) => void; out: (event: MouseEvent) => void; click: (event: MouseEvent) => void; mouseup: (event: MouseEvent) => void };
 type ObserverWindow = Window & { MutationObserver: typeof MutationObserver };
@@ -57,7 +58,7 @@ function createEpubHighlights(): PropertyDescriptorMap {
     }
 
     scanEpubIframe(frame: HTMLIFrameElement): void {
-      if (!this.settings.enableHighlight || !this.isEpubIframe(frame)) return;
+      if (!automaticHighlighting(this.settings) || !this.isEpubIframe(frame)) return;
       let doc: Document | null;
       try { doc = frame.contentDocument; } catch { return; }
       if (!doc?.body) return;

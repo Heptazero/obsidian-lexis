@@ -108,7 +108,8 @@ class LexisPlugin extends LexisPluginBase {
     this._popover = null;
     this._popoverComp = null;
     this._selPill = null;
-    this._hideTimer = null;
+    this._manualLookupAnchor = null;
+    this._manualLookupSource = null; this._hideTimer = null;
     this._showTimer = null;
     this._showTarget = null;
     this._mobileTapStart = null;
@@ -376,6 +377,7 @@ class LexisPlugin extends LexisPluginBase {
     const stored = entryColorMigration.settings;
     if (entryColorMigration.migrated) await this.saveData(stored);
     this.settings = Object.assign({}, DEFAULT_SETTINGS, stored) as LexisSettings;
+    if (!["automatic", "manual"].includes(this.settings.highlightMode)) this.settings.highlightMode = "automatic";
     if ((!this.settings.tagRules || !this.settings.tagRules.length) && this.settings.tagRulesText) {
       this.settings.tagRules = this.parseTagRulesText(this.settings.tagRulesText);
       delete this.settings.tagRulesText;

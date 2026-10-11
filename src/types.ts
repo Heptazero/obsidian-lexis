@@ -2,6 +2,7 @@ import type { TFile } from "obsidian";
 
 export type Language = "zh" | "en";
 export type HighlightStyle = "wavy" | "underline" | "background";
+export type HighlightMode = "automatic" | "manual";
 export type InlineClassificationMode = "heading" | "file";
 export type InlineHeadingLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 export type EmptyNotePreset = "blank" | "occ";
@@ -171,6 +172,7 @@ export interface LexisSettings {
   inlineCategoryOrderByParent: Record<string, string[]>;
   settingsSectionOrder: string[];
   enableHighlight: boolean;
+  highlightMode: HighlightMode;
   enableLivePreview: boolean;
   highlightStyle: HighlightStyle;
   highlightColor: string;
@@ -178,6 +180,7 @@ export interface LexisSettings {
   popoverWidth: number;
   popoverMaxHeight: number;
   popoverFontSize: number;
+  popoverEditMode: "inline" | "window";
   hoverDelayMs: number;
   clickHighlightToOpen: boolean;
   mobileTapAction: "popover" | "open";

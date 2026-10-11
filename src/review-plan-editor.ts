@@ -1,4 +1,5 @@
-import { AbstractInputSuggest, Menu, Modal, Notice, prepareFuzzySearch, Setting, type App } from "obsidian";
+import { AbstractInputSuggest, Modal, Notice, prepareFuzzySearch, Setting, type App } from "obsidian";
+import { addCurrentChoice } from "./settings-choice";
 import type { TranslationVars } from "./i18n";
 import type { LexisSettings, ReviewPlan, ReviewSource } from "./types";
 import type { ReviewDashboard } from "./review-dashboard";
@@ -49,13 +50,8 @@ export class ReviewPlanEditor extends Modal {
     const t = (key: string) => this.plugin.t(key);
     new Setting(root).setName(t("dashboard.planName")).addText((input) => input.setValue(this.plan.name).onChange((value) => { this.plan.name = value; }));
     const source = new Setting(root).setName(t("dashboard.source")).setDesc(t("dashboard.sources"));
-    source.addButton((button) => button.setButtonText(t(scopeLabel[this.sourceScope])).onClick((event) => {
-      const menu = new Menu();
-      for (const [scope, label] of Object.entries(scopeLabel)) menu.addItem((item) => item.setTitle(t(label)).setChecked(this.sourceScope === scope).onClick(() => {
-        this.sourceScope = scope as ReviewSource["scope"]; this.render();
-      }));
-      menu.showAtMouseEvent(event);
-    }));
+    addCurrentChoice(source, Object.entries(scopeLabel).map(([value, label]) => ({ value: value as ReviewSource["scope"], label: t(label) })),
+      this.sourceScope, (value) => { this.sourceScope = value; this.render(); });
     const values = () => {
       if (this.sourceScope === "folder") return this.plugin.collectReviewFolders();
       if (this.sourceScope === "vocab") return [t("home.scopeAllDictionaries"), ...this.plugin.dictFolders()];
@@ -80,11 +76,8 @@ export class ReviewPlanEditor extends Modal {
       remove.onclick = () => { this.plan.sources.splice(index, 1); this.render(); };
     });
     const content = new Setting(root).setName(t("home.reviewContent"));
-    const choices = content.controlEl.createDiv({ cls: "lexis-segments" });
-    for (const [key, label] of [["notes", "home.contentNotes"], ["context", "home.contentContext"], ["syntax", "home.contentSyntax"], ["both", "home.contentBoth"]] as const) {
-      const button = choices.createEl("button", { text: t(label), cls: `lexis-segment${this.plan.content === key ? " is-active" : ""}`, attr: { type: "button", "aria-pressed": String(this.plan.content === key) } });
-      button.onclick = () => { this.plan.content = key; this.render(); };
-    }
+    addCurrentChoice(content, ([ ["notes", "home.contentNotes"], ["context", "home.contentContext"], ["syntax", "home.contentSyntax"], ["both", "home.contentBoth"] ] as const)
+      .map(([value, label]) => ({ value, label: t(label) })), this.plan.content, (value) => { this.plan.content = value; });
     new Setting(root).addButton((button) => button.setButtonText(t("dashboard.save")).setCta().setDisabled(!this.plan.sources.length).onClick(async () => {
       const name = this.plan.name.trim() || this.plan.sources[0]?.value || t("home.scopeAllDictionaries");
       const index = this.plugin.settings.reviewPlans.findIndex((plan) => plan.id === this.plan.id);

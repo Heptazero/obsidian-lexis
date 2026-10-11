@@ -10,6 +10,7 @@ import type { DictionarySetting, InlineCategoryOccurrence, LexisEntry, LexisSett
 import { createHighlightIndex } from "./highlight-index";
 import type { CanvasEdgeHighlights } from "./canvas-edge-highlights";
 import { resolveEntryColorToken } from "./entry-colors";
+import { automaticHighlighting } from "./highlight-mode";
 
 type HighlightStyleOptions = { external?: boolean; pdf?: boolean };
 type HighlightPage = { leaf: WorkspaceLeaf; container: HTMLElement; key: string };
@@ -225,7 +226,7 @@ function createHighlightEngine({ Notice, boundedSource, compactMixedScriptSpacin
       const pm = view.previewMode;
       if (pm?.containerEl) {
         refreshReadingHighlightsInPlace(pm.containerEl, (root) => {
-          if (!this.settings.enableHighlight || !this._pattern || !this.index.size) return;
+          if (!automaticHighlighting(this.settings) || !this._pattern || !this.index.size) return;
           const selfKeys = this.selfKeysFor(view.file?.path || "");
           const sections = Array.from(root.querySelectorAll<HTMLElement>(".markdown-preview-section"));
           const targets = sections.length ? sections.filter((section) => !section.parentElement?.closest(".markdown-preview-section")) : [root];
@@ -247,7 +248,7 @@ function createHighlightEngine({ Notice, boundedSource, compactMixedScriptSpacin
 
   // ---------- 阅读模式高亮 ----------
   highlightElement(el: HTMLElement, ctx: MarkdownPostProcessorContext): void {
-    if (!this.settings.enableHighlight || !this._pattern || !this.index.size) return;
+    if (!automaticHighlighting(this.settings) || !this._pattern || !this.index.size) return;
     if (el.closest && el.closest(".lexis-popover")) return;
     const selfKeys = ctx && ctx.sourcePath ? this.selfKeysFor(ctx.sourcePath) : null;
     this.wrapMatchesInElement(el, "code,pre,a,.lexis-hl,.lexis-popover,.math,.tag", {}, selfKeys);
@@ -311,7 +312,7 @@ function createHighlightEngine({ Notice, boundedSource, compactMixedScriptSpacin
       this._liveRefreshEffect = refreshEffect;
       const buildDecorations = (view: EditorView): DecorationSet => {
         const builder = new RangeSetBuilder<Decoration>();
-        if (!this.settings.enableHighlight || !this.settings.enableLivePreview || !this._pattern) return builder.finish();
+        if (!automaticHighlighting(this.settings) || !this.settings.enableLivePreview || !this._pattern) return builder.finish();
         let selfKeys: Set<string> | null = null;
         if (editorInfoField) {
           try {

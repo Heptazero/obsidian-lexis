@@ -11,6 +11,7 @@ import { renderStorageSettings } from "./settings-storage-section";
 import { addSelectionPillPosition } from "./settings-selection-pill";
 import { orderedSectionKeys } from "./settings-section-order";
 import { renderReviewGoalSettings } from "./settings-review-goals";
+import { addCurrentChoice } from "./settings-choice";
 
 export interface SettingsRuntime extends Plugin {
   settings: LexisSettings;
@@ -126,8 +127,9 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       };
       new Setting(containerEl).setName(t("settings.title")).setHeading();
 
-      new Setting(containerEl).setName(t("language.name"))
-        .addDropdown((dd) => dd.addOption("zh", t("language.zh")).addOption("en", t("language.en")).setValue(this.plugin.settings.language || "zh").onChange(async (value) => {
+      addCurrentChoice(new Setting(containerEl).setName(t("language.name")), [
+        { value: "zh", label: t("language.zh") }, { value: "en", label: t("language.en") },
+      ], this.plugin.settings.language || "zh", async (value) => {
           this.plugin.settings.language = value === "en" ? "en" : "zh";
           await save();
           this.plugin.refreshAllViews();
@@ -137,7 +139,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
           });
           new Notice(t("language.reload"));
           this.rerender();
-        }));
+        });
 
       new Setting(containerEl).setName(t("settings.statusBar")).setDesc(t("settings.statusBarDesc"))
         .addToggle((toggle) => toggle.setValue(this.plugin.settings.statusBarVisible !== false).onChange((value) => this.plugin.statusBar.setVisible(value)));
@@ -298,6 +300,9 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
         doc.querySelectorAll<HTMLElement>(".lexis-popover:not(.lexis-popover-preview)").forEach((el) => this.plugin.applyPopoverAppearance(el));
       };
       updateCards();
+      addCurrentChoice(new Setting(cardSection).setName(t("settings.popoverEditMode")), [
+        { value: "inline", label: t("settings.popoverEditInline") }, { value: "window", label: t("settings.popoverEditWindow") },
+      ], this.plugin.settings.popoverEditMode || "inline", async (value) => { this.plugin.settings.popoverEditMode = value; await save(); });
       new Setting(cardSection).setName(t("settings.popoverFont"))
         .addSlider((s) => s.setLimits(11, 24, 1).setValue(this.plugin.settings.popoverFontSize).onChange(async (v) => { this.plugin.settings.popoverFontSize = v; updateCards(); await save(); }));
       new Setting(cardSection).setName(t("settings.hoverDelay")).setDesc(t("settings.hoverDelayDesc"))
@@ -315,12 +320,9 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       new Setting(addSection).setName(t("settings.selectionPill"))
         .addToggle((toggle) => toggle.setValue(this.plugin.settings.selectionPill).onChange(async (v) => { this.plugin.settings.selectionPill = v; await save(); if (!v) this.plugin.removeSelPill(); }));
       addSelectionPillPosition(addSection, { Setting, settings: this.plugin.settings, t, save });
-      new Setting(addSection).setName(t("settings.emptyNotePreset")).setDesc(t("settings.emptyNotePresetDesc"))
-        .addDropdown((dropdown) => dropdown
-          .addOption("blank", t("settings.emptyNoteBlank"))
-          .addOption("occ", t("settings.emptyNoteOccurrences"))
-          .setValue(this.plugin.settings.emptyNotePreset || "blank")
-          .onChange(async (value) => { this.plugin.settings.emptyNotePreset = value === "occ" ? "occ" : "blank"; await save(); }));
+      addCurrentChoice(new Setting(addSection).setName(t("settings.emptyNotePreset")).setDesc(t("settings.emptyNotePresetDesc")), [
+        { value: "blank", label: t("settings.emptyNoteBlank") }, { value: "occ", label: t("settings.emptyNoteOccurrences") },
+      ], this.plugin.settings.emptyNotePreset || "blank", async (value) => { this.plugin.settings.emptyNotePreset = value; await save(); });
       new Setting(addSection).setName(t("settings.defaultTemplate")).setDesc(t("settings.defaultTemplateDesc"))
         .addText((input) => {
           input.setPlaceholder("template/word.md").setValue(this.plugin.settings.newWordTemplate);
@@ -338,16 +340,13 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       if (occurrenceTextarea) occurrenceTextarea.rows = 4;
       new Setting(addSection).setName(t("settings.annotationHeading")).setDesc(t("settings.annotationHeadingDesc"))
         .addText((input) => input.setPlaceholder("#### 批注").setValue(this.plugin.settings.annotationHeading).onChange(async (value) => { this.plugin.settings.annotationHeading = value; await save(); }));
-      new Setting(addSection).setName(t("settings.annotationImageLocation")).setDesc(t("settings.annotationImageLocationDesc"))
-        .addDropdown((dropdown) => dropdown
-          .addOption("obsidian", t("settings.annotationImageObsidian"))
-          .addOption("custom", t("settings.annotationImageCustom"))
-          .setValue(this.plugin.settings.annotationImageLocation || "obsidian")
-          .onChange(async (value) => {
-            this.plugin.settings.annotationImageLocation = value === "custom" ? "custom" : "obsidian";
-            await save();
-            this.rerender();
-          }));
+      addCurrentChoice(new Setting(addSection).setName(t("settings.annotationImageLocation")).setDesc(t("settings.annotationImageLocationDesc")), [
+        { value: "obsidian", label: t("settings.annotationImageObsidian") }, { value: "custom", label: t("settings.annotationImageCustom") },
+      ], this.plugin.settings.annotationImageLocation || "obsidian", async (value) => {
+        this.plugin.settings.annotationImageLocation = value;
+        await save();
+        this.rerender();
+      });
       if (this.plugin.settings.annotationImageLocation === "custom") {
         new Setting(addSection).setName(t("settings.annotationImageFolder")).setDesc(t("settings.annotationImageFolderDesc"))
           .addText((input) => {
@@ -397,8 +396,9 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
             new Notice(t("settings.suspendedRestored"));
             this.rerender();
           }));
-      new Setting(fsrsSection).setName(t("settings.cardFront")).setDesc(t("settings.cardFrontDesc"))
-        .addDropdown((dd) => dd.addOption("note", t("settings.noteCard")).addOption("cloze", t("settings.clozeCard")).setValue(this.plugin.settings.cardFront).onChange(async (v) => { this.plugin.settings.cardFront = v === "cloze" ? "cloze" : "note"; await save(); }));
+      addCurrentChoice(new Setting(fsrsSection).setName(t("settings.cardFront")).setDesc(t("settings.cardFrontDesc")), [
+        { value: "note", label: t("settings.noteCard") }, { value: "cloze", label: t("settings.clozeCard") },
+      ], this.plugin.settings.cardFront, async (value) => { this.plugin.settings.cardFront = value; await save(); });
       new Setting(fsrsSection).setName(t("settings.showReviewMetadata")).setDesc(t("settings.showReviewMetadataDesc"))
         .addToggle((toggle) => toggle.setValue(!!this.plugin.settings.showReviewMetadata).onChange(async (value) => {
           this.plugin.settings.showReviewMetadata = value;

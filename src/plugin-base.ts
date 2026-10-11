@@ -68,6 +68,8 @@ export class LexisPluginBase extends Plugin {
   declare _excalidrawHighlights: ExcalidrawHighlights;
   declare _canvasEdgeHighlights: CanvasEdgeHighlights;
   declare _selPill: HTMLElement | null;
+  declare _manualLookupAnchor: HTMLElement | null;
+  declare _manualLookupSource: { file: TFile | null; sentence: string; page?: number } | null;
   declare _mobileTapStart: { pointerId: number; x: number; y: number; time: number; target: HTMLElement } | null;
   declare _mobileTapClick: { x: number; y: number; time: number } | null;
   declare highlightElement: (el: HTMLElement, ctx: obsidian.MarkdownPostProcessorContext) => void;
