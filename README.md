@@ -2,7 +2,9 @@
 
 [简体中文](./README.zh-CN.md)
 
-**Lexis is an Obsidian personal dictionary, glossary, and word-bank plugin built on ordinary Markdown notes.** It automatically highlights known terms across your vault, shows their notes on hover, captures selected text from Markdown, PDF, EPUB, browser, and Zotero reading, and schedules optional FSRS spaced-repetition review.
+**Lexis is an Obsidian personal dictionary, glossary, and word-bank plugin built on ordinary Markdown notes.** It automatically highlights known terms across your vault and shows their original notes on hover. Use it as a lightweight character glossary while reading novels, a terminology layer for papers and technical notes, or an optional FSRS review system.
+
+For fiction, one Markdown note can hold many characters, aliases, places, objects, and factions. Their names are highlighted automatically in Markdown, PDF, and supported EPUB readers; hovering shows the short explanation without leaving the page. Flashcards and review metadata are not required.
 
 Your vault remains the database. Lexis needs no account, hosted service, or proprietary dictionary format.
 
@@ -10,6 +12,7 @@ Your vault remains the database. Lexis needs no account, hosted service, or prop
 
 | If you want… | Lexis provides… |
 | --- | --- |
+| A character and worldbuilding glossary for novels | Keep recurring names, aliases, places, and factions in ordinary notes or one compact cast list; highlight them automatically and read their explanations on hover |
 | A pure-Markdown personal dictionary | One note per entry, several entries in one note, aliases, folders, tags, and index-note links |
 | Automatic highlighting and hover definitions | Matching terms are highlighted throughout supported Obsidian reading surfaces; hover opens the original Markdown note |
 | A vocabulary or terminology review system | The same entries become FSRS cards without copying them into a second database |
@@ -24,6 +27,10 @@ Yes. A dictionary can be a folder of ordinary notes, a tag, an individual note, 
 ### Can Obsidian automatically highlight every occurrence of my dictionary terms?
 
 Yes. Lexis matches titles and aliases across supported views, highlights them in context, and opens the source note in a hover card. Each dictionary can be shown or hidden independently.
+
+### Can Obsidian highlight character names and show character notes while I read a novel?
+
+Yes. Put one character in each Markdown note, or keep an entire cast in one inline-entry note. Lexis recognizes names and aliases, highlights them in Markdown, selectable PDFs, and compatible EPUB readers, and shows the entry on hover. You can keep different novels in separate dictionaries and enable only the dictionaries you currently need. Spaced repetition is optional.
 
 ### Can I use the same Obsidian dictionary in PDFs, EPUBs, websites, and Zotero?
 
