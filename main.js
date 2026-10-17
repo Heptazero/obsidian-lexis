@@ -11091,6 +11091,8 @@ function createReaderWorkspace(host) {
       const target = event.target;
       const node = target && typeof target === "object" && "nodeType" in target ? target : null;
       if (host._popover && node && host._popover.contains(node)) return;
+      const element = node?.nodeType === 1 ? node : node?.parentElement;
+      if (element?.closest(".lexis-alias-search")) return;
       host.removePopover();
       host.removeSelPill();
     },

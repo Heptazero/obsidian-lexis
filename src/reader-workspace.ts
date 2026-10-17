@@ -34,6 +34,8 @@ export function createReaderWorkspace(host: ReaderWorkspaceHost): WorkspaceDocum
       const target = event.target;
       const node = target && typeof target === "object" && "nodeType" in target ? target as Node : null;
       if (host._popover && node && host._popover.contains(node)) return;
+      const element = node?.nodeType === 1 ? node as Element : node?.parentElement;
+      if (element?.closest(".lexis-alias-search")) return;
       host.removePopover();
       host.removeSelPill();
     },

@@ -9,6 +9,12 @@ function hideSelBtn() {
   selectionPillAnchor = null;
   document.querySelectorAll(".lexis-web-folderlist,.lexis-web-alias-results").forEach((element) => element.remove());
 }
+function isSelectionUiTarget(target) {
+  if (!target) return false;
+  if (selBtn && selBtn.contains(target)) return true;
+  const element = target.nodeType === Node.ELEMENT_NODE ? target : target.parentElement;
+  return !!element?.closest(".lexis-web-folderlist,.lexis-web-alias-results");
+}
 function positionSelBtn() {
   if (!selBtn || !selectionPillAnchor) return;
   const position = LexisPillPosition.positionBrowserSelectionPill(selectionPillAnchor,
@@ -302,14 +308,17 @@ function handleSelectionChange() {
 document.addEventListener("selectionchange", handleSelectionChange);
 document.addEventListener("mousedown", (e) => {
   const insidePopover = !!(popHost && e.composedPath().includes(popHost));
-  if (e.button === 0 && !(selBtn && selBtn.contains(e.target))) {
+  const insideSelectionUi = isSelectionUiTarget(e.target);
+  if (e.button === 0 && !insideSelectionUi) {
     pointerSelecting = true;
     if (!insidePopover) removePop();
   }
-  if (selBtn && !selBtn.contains(e.target)) hideSelBtn();
+  if (selBtn && !insideSelectionUi) hideSelBtn();
 });
 window.addEventListener("blur", () => { pointerSelecting = false; });
-document.addEventListener("scroll", hideSelBtn, { capture: true, passive: true });
+document.addEventListener("scroll", (event) => {
+  if (!isSelectionUiTarget(event.target)) hideSelBtn();
+}, { capture: true, passive: true });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "lexis-page-context") sendResponse({ site: currentSite });

@@ -65,6 +65,14 @@ async function run(): Promise<void> {
     return { list: document.querySelector<HTMLElement>(".lexis-web-alias-results")!, input: document.querySelector<HTMLInputElement>(".lexis-web-selinput")! };
   };
   let web = webOpen(); assertList(web.list, web.input, "Browser");
+  web.list.scrollTop = 40;
+  web.list.dispatchEvent(new Event("scroll"));
+  check(web.list.isConnected && web.input.isConnected, "Browser scrolling results keeps alias picker open");
+  web.list.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
+  check(web.list.isConnected && web.input.isConnected, "Browser scrollbar interaction keeps alias picker open");
+  document.dispatchEvent(new Event("scroll"));
+  check(!web.list.isConnected, "Browser page scrolling still closes alias picker");
+  web = webOpen();
   const webRow = web.list.children[2] as HTMLElement;
   webRow.dispatchEvent(new MouseEvent("mouseenter")); key(web.input, "ArrowDown");
   check(web.list.children[2] === webRow, "Browser navigation keeps DOM");

@@ -87,7 +87,7 @@ test("plugin cleanup releases all workspace subscriptions and document listeners
   readers.dispose();
 });
 
-test("scrolling the card preserves it while page scrolling cancels touch and closes overlays", () => {
+test("scrolling the card or alias picker preserves overlays while page scrolling closes them", () => {
   const { document, readers, calls, host } = fixture();
   readers.start();
   const content = { nodeType: 1 };
@@ -97,6 +97,12 @@ test("scrolling the card preserves it while page scrolling cancels touch and clo
   document.defaultView.dispatchEvent(inside);
   assert.equal(calls.at(-1)[0], "cancel-touch");
   assert.ok(!calls.some(([kind]) => kind === "remove-card"));
+  const aliasList = { nodeType: 1, closest: (selector) => selector === ".lexis-alias-search" ? aliasList : null };
+  const aliasScroll = new Event("scroll");
+  Object.defineProperty(aliasScroll, "target", { value: aliasList });
+  document.defaultView.dispatchEvent(aliasScroll);
+  assert.equal(calls.at(-1)[0], "cancel-touch");
+  assert.ok(!calls.some(([kind]) => kind === "remove-pill"));
   document.defaultView.dispatchEvent(new Event("scroll"));
   assert.deepEqual(calls.slice(-3).map(([kind]) => kind), ["cancel-touch", "remove-card", "remove-pill"]);
   readers.dispose();
