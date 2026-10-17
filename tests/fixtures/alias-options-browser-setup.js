@@ -12,7 +12,7 @@ const LexisWebDom = { ignored: () => false, activeElement: () => document.active
 const LexisWebSource = { capture: () => ({ url: "https://example.com", title: "fixture" }) };
 const chrome = {
   runtime: { onMessage: { addListener() {} }, async sendMessage() { return { ok: true }; } },
-  storage: { local: { async get() { return { words: fixtureWords }; }, async set() {} }, onChanged: { addListener() {} } },
+  storage: { local: { async get() { return { words: fixtureWords, styleConfig: { dicts: ["Words", "Other"], selectionPillOrder: "add-dictionary-alias" } }; }, async set() {} }, onChanged: { addListener() {} } },
 };
 function applyTheme() { document.documentElement.style.setProperty("--lexis-web-color", cfg.color); }
 function build(words) { allWords = words; }
@@ -28,12 +28,22 @@ function sentenceFromSelection(selection) { return selection.toString(); }
 function textColorFor() { return "#fff"; }
 async function doAdd(...args) { fixtureAdds.push(args); }
 globalThis.aliasFixture = {
-  open() {
+  showPill() {
     const range = document.createRange(); range.selectNodeContents(document.getElementById("source"));
     window.getSelection().removeAllRanges(); window.getSelection().addRange(range);
-    onSelect(); document.querySelector(".lexis-web-selpill button:last-child").click();
+    onSelect();
+  },
+  open() {
+    this.showPill(); document.querySelector(".lexis-web-selalias").click();
   },
   close() { hideSelBtn(); },
   adds: fixtureAdds,
   color(value) { cfg.color = value; applyTheme(); },
+  order(value) { styleCfg.selectionPillOrder = value; },
+  dictionaries(value) { styleCfg.dicts = value; },
+  pillOrder() {
+    return [...document.querySelectorAll(".lexis-web-selpill > button")].map((button) =>
+      button.classList.contains("lexis-web-selfolder") ? "dictionary"
+        : button.classList.contains("lexis-web-selalias") ? "alias" : "add");
+  },
 };

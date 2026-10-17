@@ -356,6 +356,7 @@ const MESSAGES: Record<string, TranslationPair> = {
   "settings.livePreview": { zh: "实时预览也高亮", en: "Highlight in Live Preview" },
   "settings.unsupported": { zh: "当前环境不支持。", en: "Not supported in this environment." },
   "settings.selectionPill": { zh: "划词显示「加入词库」", en: "Show Add to Lexis on selection" },
+  "settings.selectionPillOrder": { zh: "弹丸顺序", en: "Selection pill order" },
   "settings.pdfHighlight": { zh: "PDF 里也高亮", en: "Highlight in PDFs" },
   "settings.pdfHighlightDesc": { zh: "扫描版 PDF 不支持。", en: "Scanned PDFs are not supported." },
   "settings.highlightStyle": { zh: "默认高亮线型", en: "Default highlight style" },

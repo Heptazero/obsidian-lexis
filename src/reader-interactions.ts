@@ -7,6 +7,7 @@ import { collectAliasTargets } from "./alias-search";
 import type { LexisEntry, LexisSettings } from "./types";
 import { pdfHighlightAt } from "./pdf-highlight-targets";
 import { positionSelectionPill } from "./selection-pill-position";
+import { selectionPillActions } from "./selection-pill-order";
 import { canvasHighlightAt } from "./canvas-highlight-target";
 import type { ExcalidrawHighlights } from "./excalidraw-highlights";
 import { manualLookupEnabled } from "./highlight-mode";
@@ -325,15 +326,17 @@ function createReaderInteractions(): PropertyDescriptorMap {
         ev.preventDefault(); ev.stopPropagation();
         void this.addFromPill(text, selectedFolder);
       });
+      let folderB: HTMLElement | null = null;
       if (dicts.length > 1) {
-        const folderB = pill.createSpan({ cls: "lexis-sel-pill-btn lexis-sel-pill-folder", text: `📁 ${folderLabel(selectedFolder)}` });
+        folderB = pill.createSpan({ cls: "lexis-sel-pill-btn lexis-sel-pill-folder", text: folderLabel(selectedFolder) });
         folderB.setAttribute("title", this.t("selection.chooseDictionary"));
+        folderB.setAttribute("aria-label", this.t("selection.chooseDictionary"));
         folderB.addEventListener("click", (ev) => {
           ev.preventDefault(); ev.stopPropagation();
           const menu = new obsidian.Menu();
           for (const f of dicts) menu.addItem((it) => it.setTitle(f || this.t("common.root")).setIcon(f === selectedFolder ? "check" : "folder").onClick(() => {
             selectedFolder = f;
-            folderB.setText(`📁 ${folderLabel(f)}`);
+            folderB?.setText(folderLabel(f));
             void this.rememberSelectionFolder(f);
           }));
           menu.showAtPosition({ x: ev.clientX, y: ev.clientY });
@@ -348,7 +351,7 @@ function createReaderInteractions(): PropertyDescriptorMap {
         this._aliasSearch?.close();
         this._aliasSearch = openAliasCombobox({
           document: overlayDoc,
-          anchor: aliasB,
+          anchor: pill,
           targets: collectAliasTargets(this.index),
           initialValue: text,
           placeholder: this.t("selection.aliasSearch"),
@@ -368,6 +371,11 @@ function createReaderInteractions(): PropertyDescriptorMap {
           onClose: () => { this._aliasSearch = null; },
         });
       });
+      const actions = { add: addB, dictionary: folderB, alias: aliasB };
+      for (const action of selectionPillActions(this.settings.selectionPillOrder)) {
+        const element = actions[action];
+        if (element) pill.appendChild(element);
+      }
     }
     const { top, left } = positionSelectionPill(rect,
       { width: pill.offsetWidth, height: pill.offsetHeight },

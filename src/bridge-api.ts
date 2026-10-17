@@ -449,6 +449,7 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, recentR
         popoverMaxHeight: this.settings.popoverMaxHeight,
         popoverFontSize: this.settings.popoverFontSize,
         hoverDelayMs: this.settings.hoverDelayMs,
+        selectionPillOrder: this.settings.selectionPillOrder,
       },
     };
   }

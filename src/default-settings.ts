@@ -105,6 +105,7 @@ export const DEFAULT_SETTINGS: DefaultLexisSettings = {
   bridgePort: LEXIS_BRIDGE_DEFAULT_PORT,
   bridgeToken: "",
   selectionPill: true,
+  selectionPillOrder: "add-dictionary-alias",
   selectionPillOffsetX: 0,
   selectionPillOffsetY: 0,
   lastSelectionFolder: "",

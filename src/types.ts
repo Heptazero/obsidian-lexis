@@ -12,6 +12,14 @@ export type ReviewContentMode = "notes" | "context" | "syntax" | "both";
 export type ReviewScopeMode = "vocab" | "folder" | "links" | "tag" | "current";
 export type ReviewSortKey = "due" | "wordCount" | "modified" | "created" | "frequency" | "random";
 export type ReviewSortDirection = "asc" | "desc";
+export type SelectionPillAction = "add" | "dictionary" | "alias";
+export type SelectionPillOrder =
+  | "add-dictionary-alias"
+  | "add-alias-dictionary"
+  | "dictionary-add-alias"
+  | "dictionary-alias-add"
+  | "alias-add-dictionary"
+  | "alias-dictionary-add";
 
 export interface ReviewCardState {
   s?: number | null;
@@ -258,6 +266,7 @@ export interface LexisSettings {
   bridgePort: number;
   bridgeToken: string;
   selectionPill: boolean;
+  selectionPillOrder: SelectionPillOrder;
   selectionPillOffsetX: number;
   selectionPillOffsetY: number;
   lastSelectionFolder: string;

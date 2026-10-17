@@ -64,7 +64,25 @@ async function run(): Promise<void> {
     browser.open();
     return { list: document.querySelector<HTMLElement>(".lexis-web-alias-results")!, input: document.querySelector<HTMLInputElement>(".lexis-web-selinput")! };
   };
+  for (const order of [
+    "add-dictionary-alias", "add-alias-dictionary", "dictionary-add-alias",
+    "dictionary-alias-add", "alias-add-dictionary", "alias-dictionary-add",
+  ]) {
+    browser.order(order); browser.showPill();
+    check(browser.pillOrder().join("-") === order, `Browser selection pill supports ${order}`);
+    check(!document.querySelector<HTMLElement>(".lexis-web-selfolder")!.textContent!.includes("📁"), "Browser dictionary action has no leading icon");
+    browser.close();
+  }
+  browser.order("add-dictionary-alias");
+  browser.dictionaries(["Words"]); browser.showPill();
+  check(!document.querySelector(".lexis-web-selfolder"), "Browser hides dictionary action when only one dictionary exists");
+  browser.close(); browser.dictionaries(["Words", "Other"]);
   let web = webOpen(); assertList(web.list, web.input, "Browser");
+  const pill = document.querySelector<HTMLElement>(".lexis-web-selpill")!;
+  check(!!pill.querySelector(".lexis-web-selfolder"), "Browser shows dictionary picker for multiple dictionaries");
+  const pillRect = pill.getBoundingClientRect(), listRect = web.list.getBoundingClientRect();
+  const expectedLeft = Math.max(8, Math.min(pillRect.left, document.documentElement.clientWidth - listRect.width - 8));
+  check(Math.abs(listRect.left - expectedLeft) <= 1 && listRect.top >= pillRect.bottom, "Browser alias results align with the whole selection pill");
   web.list.scrollTop = 40;
   web.list.dispatchEvent(new Event("scroll"));
   check(web.list.isConnected && web.input.isConnected, "Browser scrolling results keeps alias picker open");

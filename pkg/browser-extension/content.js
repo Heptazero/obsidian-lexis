@@ -97,11 +97,12 @@ function onSelect() {
   });
   pill.appendChild(addBtn);
 
-  // 文件夹/词典选择段(需在设置里开启,且有多个词典)
+  // 文件夹/词典选择段:只有多个词典时才出现。
+  let folderBtn = null;
   if (dicts.length > 1) {
-    const folderBtn = document.createElement("button");
+    folderBtn = document.createElement("button");
     folderBtn.className = "lexis-web-selbtn-pill lexis-web-selfolder";
-    folderBtn.textContent = "📁 " + fname(selFolder);
+    folderBtn.textContent = fname(selFolder);
     folderBtn.title = "选择加到哪个词典(文件夹)";
     folderBtn.addEventListener("mousedown", (e) => e.preventDefault());
     let flist = null;
@@ -122,7 +123,7 @@ function onSelect() {
           selFolder = f;
           lastSelectionFolder = f;
           void chrome.storage.local.set({ lastSelectionFolder: f });
-          folderBtn.textContent = "📁 " + fname(f); closeFList();
+          folderBtn.textContent = fname(f); closeFList();
         });
         flist.appendChild(it);
       });
@@ -136,7 +137,7 @@ function onSelect() {
   }
 
   const aliasBtn = document.createElement("button");
-  aliasBtn.className = "lexis-web-selbtn-pill";
+  aliasBtn.className = "lexis-web-selbtn-pill lexis-web-selalias";
   aliasBtn.textContent = "🔗";
   aliasBtn.title = "把选中词作为别名,归入另一个词";
   aliasBtn.addEventListener("mousedown", (e) => e.preventDefault());
@@ -181,7 +182,7 @@ function onSelect() {
     };
 
     const placeResults = () => {
-      const rect = input.getBoundingClientRect();
+      const rect = pill.getBoundingClientRect();
       const width = Math.min(280, Math.max(220, document.documentElement.clientWidth - 16));
       results.style.width = width + "px";
       results.style.left = Math.max(8, Math.min(rect.left + window.scrollX, window.scrollX + document.documentElement.clientWidth - width - 8)) + "px";
@@ -282,6 +283,12 @@ function onSelect() {
     input.select();
   });
   pill.appendChild(aliasBtn);
+
+  const actions = { add: addBtn, dictionary: folderBtn, alias: aliasBtn };
+  const requestedOrder = String(styleCfg?.selectionPillOrder || "add-dictionary-alias").split("-");
+  const actionOrder = requestedOrder.length === 3 && new Set(requestedOrder).size === 3
+    ? requestedOrder : ["add", "dictionary", "alias"];
+  actionOrder.forEach((action) => { if (actions[action]) pill.appendChild(actions[action]); });
 
   document.body.appendChild(pill);
   const tc = textColorFor(getComputedStyle(pill).backgroundColor);

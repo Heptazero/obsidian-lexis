@@ -4,6 +4,7 @@ import type { PathSuggestConstructor } from "./settings-suggest";
 import { addCurrentChoice } from "./settings-choice";
 import { addSelectionPillPosition } from "./settings-selection-pill";
 import { DEFAULT_SETTINGS } from "./default-settings";
+import type { SelectionPillOrder } from "./types";
 
 interface ReaderSettingsContext {
   plugin: SettingsRuntime;
@@ -26,6 +27,17 @@ export function renderReaderSettings({ plugin, topSection, PathSuggest, mdFiles,
   new Setting(card).setName(t("settings.showRelated")).addToggle((toggle) => toggle.setValue(plugin.settings.showRelated).onChange(async (value) => { plugin.settings.showRelated = value; await save(); }));
   new Setting(card).setName(t("settings.selectionPill"))
     .addToggle((toggle) => toggle.setValue(plugin.settings.selectionPill).onChange(async (value) => { plugin.settings.selectionPill = value; await save(); if (!value) plugin.removeSelPill(); }));
+  const dictionary = t("home.reviewDictionary");
+  addCurrentChoice(new Setting(card).setName(t("settings.selectionPillOrder")), [
+    { value: "add-dictionary-alias", label: `＋ · ${dictionary} · 🔗` },
+    { value: "add-alias-dictionary", label: `＋ · 🔗 · ${dictionary}` },
+    { value: "dictionary-add-alias", label: `${dictionary} · ＋ · 🔗` },
+    { value: "dictionary-alias-add", label: `${dictionary} · 🔗 · ＋` },
+    { value: "alias-add-dictionary", label: `🔗 · ＋ · ${dictionary}` },
+    { value: "alias-dictionary-add", label: `🔗 · ${dictionary} · ＋` },
+  ] as const, plugin.settings.selectionPillOrder, async (value: SelectionPillOrder) => {
+    plugin.settings.selectionPillOrder = value; await save(); plugin.removeSelPill();
+  });
   addSelectionPillPosition(card, { Setting, settings: plugin.settings, t, save });
 
   const templates = topSection("templates", t("settings.newEntry"));

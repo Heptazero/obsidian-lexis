@@ -230,6 +230,7 @@ var DEFAULT_SETTINGS = {
   bridgePort: LEXIS_BRIDGE_DEFAULT_PORT,
   bridgeToken: "",
   selectionPill: true,
+  selectionPillOrder: "add-dictionary-alias",
   selectionPillOffsetX: 0,
   selectionPillOffsetY: 0,
   lastSelectionFolder: "",
@@ -1823,6 +1824,7 @@ var MESSAGES = {
   "settings.livePreview": { zh: "\u5B9E\u65F6\u9884\u89C8\u4E5F\u9AD8\u4EAE", en: "Highlight in Live Preview" },
   "settings.unsupported": { zh: "\u5F53\u524D\u73AF\u5883\u4E0D\u652F\u6301\u3002", en: "Not supported in this environment." },
   "settings.selectionPill": { zh: "\u5212\u8BCD\u663E\u793A\u300C\u52A0\u5165\u8BCD\u5E93\u300D", en: "Show Add to Lexis on selection" },
+  "settings.selectionPillOrder": { zh: "\u5F39\u4E38\u987A\u5E8F", en: "Selection pill order" },
   "settings.pdfHighlight": { zh: "PDF \u91CC\u4E5F\u9AD8\u4EAE", en: "Highlight in PDFs" },
   "settings.pdfHighlightDesc": { zh: "\u626B\u63CF\u7248 PDF \u4E0D\u652F\u6301\u3002", en: "Scanned PDFs are not supported." },
   "settings.highlightStyle": { zh: "\u9ED8\u8BA4\u9AD8\u4EAE\u7EBF\u578B", en: "Default highlight style" },
@@ -4977,7 +4979,8 @@ ${line}`);
           popoverWidth: this.settings.popoverWidth,
           popoverMaxHeight: this.settings.popoverMaxHeight,
           popoverFontSize: this.settings.popoverFontSize,
-          hoverDelayMs: this.settings.hoverDelayMs
+          hoverDelayMs: this.settings.hoverDelayMs,
+          selectionPillOrder: this.settings.selectionPillOrder
         }
       };
     }
@@ -6289,6 +6292,20 @@ function positionSelectionPill(anchor, pill, viewport, offset) {
   };
 }
 
+// src/selection-pill-order.ts
+var SELECTION_PILL_ORDERS = [
+  "add-dictionary-alias",
+  "add-alias-dictionary",
+  "dictionary-add-alias",
+  "dictionary-alias-add",
+  "alias-add-dictionary",
+  "alias-dictionary-add"
+];
+function selectionPillActions(order) {
+  const value = order && SELECTION_PILL_ORDERS.includes(order) ? order : "add-dictionary-alias";
+  return value.split("-");
+}
+
 // src/canvas-highlight-target.ts
 function eventElement(target) {
   if (!target || typeof target !== "object" || !("nodeType" in target)) return null;
@@ -6664,16 +6681,18 @@ function createReaderInteractions() {
           ev.stopPropagation();
           void this.addFromPill(text, selectedFolder);
         });
+        let folderB = null;
         if (dicts.length > 1) {
-          const folderB = pill.createSpan({ cls: "lexis-sel-pill-btn lexis-sel-pill-folder", text: `\u{1F4C1} ${folderLabel(selectedFolder)}` });
+          folderB = pill.createSpan({ cls: "lexis-sel-pill-btn lexis-sel-pill-folder", text: folderLabel(selectedFolder) });
           folderB.setAttribute("title", this.t("selection.chooseDictionary"));
+          folderB.setAttribute("aria-label", this.t("selection.chooseDictionary"));
           folderB.addEventListener("click", (ev) => {
             ev.preventDefault();
             ev.stopPropagation();
             const menu = new obsidian2.Menu();
             for (const f of dicts) menu.addItem((it) => it.setTitle(f || this.t("common.root")).setIcon(f === selectedFolder ? "check" : "folder").onClick(() => {
               selectedFolder = f;
-              folderB.setText(`\u{1F4C1} ${folderLabel(f)}`);
+              folderB?.setText(folderLabel(f));
               void this.rememberSelectionFolder(f);
             }));
             menu.showAtPosition({ x: ev.clientX, y: ev.clientY });
@@ -6688,7 +6707,7 @@ function createReaderInteractions() {
           this._aliasSearch?.close();
           this._aliasSearch = openAliasCombobox({
             document: overlayDoc,
-            anchor: aliasB,
+            anchor: pill,
             targets: collectAliasTargets(this.index),
             initialValue: text,
             placeholder: this.t("selection.aliasSearch"),
@@ -6713,6 +6732,11 @@ function createReaderInteractions() {
             }
           });
         });
+        const actions = { add: addB, dictionary: folderB, alias: aliasB };
+        for (const action of selectionPillActions(this.settings.selectionPillOrder)) {
+          const element = actions[action];
+          if (element) pill.appendChild(element);
+        }
       }
       const { top, left } = positionSelectionPill(
         rect,
@@ -8804,6 +8828,19 @@ function renderReaderSettings({ plugin, topSection, PathSuggest, mdFiles, hasSug
     await save();
     if (!value) plugin.removeSelPill();
   }));
+  const dictionary = t("home.reviewDictionary");
+  addCurrentChoice(new import_obsidian19.Setting(card).setName(t("settings.selectionPillOrder")), [
+    { value: "add-dictionary-alias", label: `\uFF0B \xB7 ${dictionary} \xB7 \u{1F517}` },
+    { value: "add-alias-dictionary", label: `\uFF0B \xB7 \u{1F517} \xB7 ${dictionary}` },
+    { value: "dictionary-add-alias", label: `${dictionary} \xB7 \uFF0B \xB7 \u{1F517}` },
+    { value: "dictionary-alias-add", label: `${dictionary} \xB7 \u{1F517} \xB7 \uFF0B` },
+    { value: "alias-add-dictionary", label: `\u{1F517} \xB7 \uFF0B \xB7 ${dictionary}` },
+    { value: "alias-dictionary-add", label: `\u{1F517} \xB7 ${dictionary} \xB7 \uFF0B` }
+  ], plugin.settings.selectionPillOrder, async (value) => {
+    plugin.settings.selectionPillOrder = value;
+    await save();
+    plugin.removeSelPill();
+  });
   addSelectionPillPosition(card, { Setting: import_obsidian19.Setting, settings: plugin.settings, t, save });
   const templates = topSection("templates", t("settings.newEntry"));
   addCurrentChoice(new import_obsidian19.Setting(templates).setName(t("settings.emptyNotePreset")).setDesc(t("settings.emptyNotePresetDesc")), [
