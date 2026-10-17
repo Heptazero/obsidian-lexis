@@ -1,34 +1,40 @@
-# Lexis — Markdown Reading Glossary and Automatic Highlighter for Obsidian
+# Lexis — Atomic-note Glossary and Automatic Term Highlighter for Obsidian
 
 [简体中文](./README.zh-CN.md)
 
-**Lexis turns ordinary Markdown notes into a personal reading glossary for Obsidian.** Build a dictionary of characters, aliases, places, terminology, or any names you want to recognize while reading. Lexis highlights them automatically and shows the original note on hover.
+**Lexis turns ordinary Markdown atomic notes into a personal glossary that appears where you read.** A note title and its aliases become terms. When one of those terms appears again, Lexis highlights it automatically, shows the original note on hover, and can open that note for the full context.
 
-Novel reading is the clearest example: one Markdown note can hold a whole cast, including aliases, places, objects, and factions. Their names are highlighted in Markdown, PDF, and supported EPUB readers; hovering shows the short explanation without leaving the page. The same mechanism works for papers, technical notes, and any personal terminology.
+The main workflow is simple: write an atomic note for a concept, person, method, or name once; recognize it everywhere afterwards. This works in Markdown, PDF, supported EPUB readers, browser pages, and Zotero. Your notes remain the source of truth.
+
+When a term does not deserve its own note, one Markdown file can also hold many lightweight inline entries. A novel cast, abbreviations, or a small project glossary are examples of this secondary storage form.
 
 If some entries later need deliberate memorization, the same notes can optionally become FSRS cards. Review is a secondary layer, not a requirement for using the dictionary, highlights, or hover cards.
 
 Your vault remains the database. Lexis needs no account, hosted service, or proprietary dictionary format.
 
-## One Markdown glossary for everyday reading
+## A glossary made from your own notes
 
 | If you want… | Lexis provides… |
 | --- | --- |
-| A character and worldbuilding glossary for novels | Keep recurring names, aliases, places, and factions in ordinary notes or one compact cast list; highlight them automatically and read their explanations on hover |
-| A pure-Markdown personal dictionary | One note per entry, several entries in one note, aliases, folders, tags, and index-note links |
-| Automatic highlighting and hover definitions | Matching terms are highlighted throughout supported Obsidian reading surfaces; hover opens the original Markdown note |
+| Recognize a term you have already noted | Highlight its title or alias automatically; hover to read the atomic note and click to open it |
+| A pure-Markdown personal glossary | Use one atomic note per entry, with aliases, folders, tags, and index-note links |
+| Several lightweight entries in one file | Keep compact lists such as novel characters, abbreviations, or project terms without creating many small notes |
 | The same dictionary while reading elsewhere | PDF, EPUB, browser, Zotero, Canvas, and Excalidraw integrations use the Obsidian vault as their source of truth |
 | Optional review after reading | Reuse selected entries as FSRS cards without copying them into a second database |
 
 ## Common questions
 
-### Can Obsidian highlight character names and show character notes while I read a novel?
+### Can Obsidian show my atomic note whenever I encounter its term again?
 
-Yes. Put one character in each Markdown note, or keep an entire cast in one inline-entry note. Lexis recognizes names and aliases, highlights them in Markdown, selectable PDFs, and compatible EPUB readers, and shows the entry on hover. You can keep different novels in separate dictionaries and enable only the dictionaries you currently need. Spaced repetition is optional.
+Yes. Lexis indexes note titles and aliases as terms. When a term appears in a supported reading surface, it is highlighted automatically; hover shows the source note, and click can open that note. The explanation stays in the Markdown atomic note instead of being copied into a separate plugin database.
 
 ### Can I build a personal dictionary in Obsidian using only Markdown?
 
 Yes. A dictionary can be a folder of ordinary notes, a tag, an individual note, an index note's direct links, or several inline entries inside one note. Lexis does not lock definitions into JSON or a proprietary database.
+
+### Can one Markdown file hold several glossary entries?
+
+Yes. Inline entries are the compact alternative to atomic notes. They are useful for a novel cast, abbreviations, or other small terms that do not need separate files. Titles, aliases, categories, and entry colors remain available.
 
 ### Can Obsidian automatically highlight every occurrence of my dictionary terms?
 
@@ -44,10 +50,13 @@ Yes. Lexis includes FSRS review for whole notes, question-and-answer syntax, and
 
 ## Core workflows
 
-### Store entries as files or inside a note
+### Use atomic notes as dictionary entries
 
-- **One file per entry.** Point Lexis at one or more folders. Each note title becomes an entry; frontmatter aliases are indexed too.
-- **Many entries in one file.** Mark a note with `lexis-inline: true`, then write `Name / Alias=> annotation`. Spaces around `/` are optional, the delimiter is configurable, and `\/` writes a literal slash. Inline entries take precedence when a legacy delimiter still matches flashcard syntax. This is useful for recurring characters, places, objects, and factions in a novel without creating hundreds of tiny files.
+Point Lexis at one or more folders, tags, individual files, or index-note links. Each atomic note title becomes an entry, frontmatter aliases become additional matching terms, and the note body remains its explanation. This is the default workflow: encounter the term, see the note, and open it when more context is needed.
+
+### Keep lightweight entries in one file
+
+Mark a note with `lexis-inline: true`, then write `Name / Alias=> annotation`. Spaces around `/` are optional, the delimiter is configurable, and `\/` writes a literal slash. Inline entries take precedence when a legacy delimiter still matches flashcard syntax. This is useful for recurring characters, abbreviations, places, objects, and other entries that do not need separate atomic notes.
 
 ```md
 ---
