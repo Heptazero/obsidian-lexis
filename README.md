@@ -1,24 +1,30 @@
-# Lexis — Markdown Personal Dictionary and Automatic Highlighter for Obsidian
+# Lexis — Markdown Reading Glossary and Automatic Highlighter for Obsidian
 
 [简体中文](./README.zh-CN.md)
 
-**Lexis is an Obsidian personal dictionary, glossary, and word-bank plugin built on ordinary Markdown notes.** It automatically highlights known terms across your vault and shows their original notes on hover. Use it as a lightweight character glossary while reading novels, a terminology layer for papers and technical notes, or an optional FSRS review system.
+**Lexis turns ordinary Markdown notes into a personal reading glossary for Obsidian.** Build a dictionary of characters, aliases, places, terminology, or any names you want to recognize while reading. Lexis highlights them automatically and shows the original note on hover.
 
-For fiction, one Markdown note can hold many characters, aliases, places, objects, and factions. Their names are highlighted automatically in Markdown, PDF, and supported EPUB readers; hovering shows the short explanation without leaving the page. Flashcards and review metadata are not required.
+Novel reading is the clearest example: one Markdown note can hold a whole cast, including aliases, places, objects, and factions. Their names are highlighted in Markdown, PDF, and supported EPUB readers; hovering shows the short explanation without leaving the page. The same mechanism works for papers, technical notes, and any personal terminology.
+
+If some entries later need deliberate memorization, the same notes can optionally become FSRS cards. Review is a secondary layer, not a requirement for using the dictionary, highlights, or hover cards.
 
 Your vault remains the database. Lexis needs no account, hosted service, or proprietary dictionary format.
 
-## One plugin for the workflows usually split across several plugins
+## One Markdown glossary for everyday reading
 
 | If you want… | Lexis provides… |
 | --- | --- |
 | A character and worldbuilding glossary for novels | Keep recurring names, aliases, places, and factions in ordinary notes or one compact cast list; highlight them automatically and read their explanations on hover |
 | A pure-Markdown personal dictionary | One note per entry, several entries in one note, aliases, folders, tags, and index-note links |
 | Automatic highlighting and hover definitions | Matching terms are highlighted throughout supported Obsidian reading surfaces; hover opens the original Markdown note |
-| A vocabulary or terminology review system | The same entries become FSRS cards without copying them into a second database |
 | The same dictionary while reading elsewhere | PDF, EPUB, browser, Zotero, Canvas, and Excalidraw integrations use the Obsidian vault as their source of truth |
+| Optional review after reading | Reuse selected entries as FSRS cards without copying them into a second database |
 
 ## Common questions
+
+### Can Obsidian highlight character names and show character notes while I read a novel?
+
+Yes. Put one character in each Markdown note, or keep an entire cast in one inline-entry note. Lexis recognizes names and aliases, highlights them in Markdown, selectable PDFs, and compatible EPUB readers, and shows the entry on hover. You can keep different novels in separate dictionaries and enable only the dictionaries you currently need. Spaced repetition is optional.
 
 ### Can I build a personal dictionary in Obsidian using only Markdown?
 
@@ -27,10 +33,6 @@ Yes. A dictionary can be a folder of ordinary notes, a tag, an individual note, 
 ### Can Obsidian automatically highlight every occurrence of my dictionary terms?
 
 Yes. Lexis matches titles and aliases across supported views, highlights them in context, and opens the source note in a hover card. Each dictionary can be shown or hidden independently.
-
-### Can Obsidian highlight character names and show character notes while I read a novel?
-
-Yes. Put one character in each Markdown note, or keep an entire cast in one inline-entry note. Lexis recognizes names and aliases, highlights them in Markdown, selectable PDFs, and compatible EPUB readers, and shows the entry on hover. You can keep different novels in separate dictionaries and enable only the dictionaries you currently need. Spaced repetition is optional.
 
 ### Can I use the same Obsidian dictionary in PDFs, EPUBs, websites, and Zotero?
 
@@ -75,7 +77,12 @@ Selected text can be added to a dictionary, saved as an occurrence, or attached 
 Each Obsidian dictionary has its own highlight switch. Lexis Web keeps a separate visibility profile for each website: open the extension popup to show or hide dictionaries on the current site. Browser choices do not overwrite Obsidian settings, and the current page updates immediately.
 <img width="727" height="465" alt="image" src="https://github.com/user-attachments/assets/d274dd14-7bd7-4003-9da6-3a7f8db02b06" />
 
-### Review what still needs memory
+### Optional: review selected entries
+
+Lexis works as a complete reading glossary without review. If a few entries are worth deliberate practice, they can reuse the same Markdown notes and dictionary structure:
+
+<details>
+<summary>Review features</summary>
 
 - FSRS spaced repetition with note and occurrence-cloze cards
 - dictionaries combine folders, tags, individual files, and an index file's direct valid links; choose whole notes, syntax cards, or both
@@ -88,6 +95,8 @@ Each Obsidian dictionary has its own highlight switch. Lexis Web keeps a separat
 - highlights that fade as memory stability grows
 - real reading encounters that can pull a distant review closer
 - retirement candidates based on long absence, with the final decision always left to you
+
+</details>
 
 ## Install
 
@@ -116,7 +125,7 @@ After the first manual installation, Zotero can update the add-on from its updat
 1. In *Settings → Lexis*, add one or more dictionary folders.
 2. Read a Markdown, PDF, or EPUB document. Matching entries are highlighted; hover to open the card.
 3. Select unfamiliar text and add it to a dictionary. Lexis can save the surrounding sentence as an occurrence.
-4. Open **Lexis Home** to review due entries or inspect retirement candidates.
+4. Keep reading. Open **Lexis Home** only if you want to review selected entries or inspect long-unseen ones.
 
 The interface language can be switched between Chinese and English in Lexis settings. Translations are kept together by message key in `src/i18n.ts`, so adding another language does not require searching through the UI code.
 
