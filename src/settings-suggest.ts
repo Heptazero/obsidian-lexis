@@ -3,6 +3,7 @@
 import type { App } from "obsidian";
 
 export interface SuggestOptions {
+  fuzzy?: boolean;
   multi?: boolean;
   sep?: string;
 }
@@ -22,6 +23,7 @@ export function createPathSuggest(obsidian: typeof import("obsidian")): PathSugg
     multi: boolean;
     sep: string;
     inputEl: HTMLInputElement;
+    fuzzy: boolean;
 
     constructor(app: App, inputEl: HTMLInputElement, getItems: () => string[], onPick: (value: string) => void, options: SuggestOptions = {}) {
       super(app, inputEl);
@@ -29,6 +31,7 @@ export function createPathSuggest(obsidian: typeof import("obsidian")): PathSugg
       this.getItems = getItems;
       this.onPick = onPick;
       this.multi = !!options.multi;
+      this.fuzzy = !!options.fuzzy;
       this.sep = options.sep || " ";
     }
 
@@ -48,7 +51,8 @@ export function createPathSuggest(obsidian: typeof import("obsidian")): PathSugg
         const chosen = new Set((this.inputEl?.value || "").toLowerCase().split(/[\s,，;；]+/).filter(Boolean));
         items = items.filter((item) => item.toLowerCase() === normalizedQuery || !chosen.has(item.toLowerCase()));
       } else normalizedQuery = (query || "").toLowerCase();
-      return items.filter((item) => item.toLowerCase().includes(normalizedQuery)).slice(0, 50);
+      const match = this.fuzzy && normalizedQuery ? obsidian.prepareFuzzySearch(normalizedQuery) : null;
+      return items.filter((item) => match ? !!match(item) : item.toLowerCase().includes(normalizedQuery)).slice(0, 50);
     }
 
     renderSuggestion(value: string, element: HTMLElement): void { element.setText(value); }

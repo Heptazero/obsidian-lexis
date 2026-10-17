@@ -2,6 +2,10 @@
 
 import type { Language } from "./types";
 import { dashboardMessages } from "./review-dashboard-i18n";
+import { marginNoteMessages } from "./marginnote-i18n";
+import { settingsMessages } from "./settings-i18n";
+import { reviewLibraryMessages } from "./review-library-i18n";
+import { dictionaryMessages } from "./dictionary-i18n";
 
 interface TranslationPair {
   zh: string;
@@ -12,7 +16,11 @@ export type TranslationVars = Record<string, string | number | boolean | null | 
 
 // Keep both translations beside each other. UI code refers only to semantic keys.
 const MESSAGES: Record<string, TranslationPair> = {
+  ...dictionaryMessages,
   ...dashboardMessages,
+  ...marginNoteMessages,
+  ...settingsMessages,
+  ...reviewLibraryMessages,
   "language.name": { zh: "界面语言", en: "Interface language" },
   "language.zh": { zh: "中文", en: "中文" },
   "language.en": { zh: "English", en: "English" },
@@ -271,6 +279,16 @@ const MESSAGES: Record<string, TranslationPair> = {
   "restore.resetDone": { zh: "Lexis：「{word}」已恢复为新词", en: "Lexis: restored “{word}” as new" },
 
   "settings.title": { zh: "Lexis 设置", en: "Lexis settings" },
+  "settings.search": { zh: "搜索所有设置", en: "Search all settings" },
+  "settings.clearSearch": { zh: "清除搜索", en: "Clear search" },
+  "settings.noSearchResults": { zh: "没有匹配的设置", en: "No matching settings" },
+  "settings.moveToTab": { zh: "移至「{tab}」", en: "Move to {tab}" },
+  "settings.reorderMenu": { zh: "点击菜单；拖动排序，触屏长按", en: "Click for menu; drag to reorder, long-press on touch" },
+  "settings.tabGeneral": { zh: "常规", en: "General" },
+  "settings.tabVocabulary": { zh: "词库", en: "Vocabulary" },
+  "settings.tabReading": { zh: "阅读", en: "Reading" },
+  "settings.tabReview": { zh: "复习", en: "Review" },
+  "settings.tabIntegrations": { zh: "联动", en: "Integrations" },
   "settings.statusBar": { zh: "显示状态栏入口", en: "Show status bar item" },
   "settings.statusBarDesc": { zh: "平时只显示图标，点击可展开或收起统计。隐藏后可用命令面板恢复。", en: "Shows an icon by default; click it to expand or collapse statistics. Restore it from the command palette after hiding it." },
   "settings.dictionary": { zh: "词典与词库来源", en: "Dictionaries and sources" },
@@ -300,7 +318,6 @@ const MESSAGES: Record<string, TranslationPair> = {
   "settings.enableInline": { zh: "启用内联条目", en: "Enable inline entries" },
   "settings.enableInlineDesc": { zh: "笔记需设置 lexis-inline: true 或 #lexis-inline。", en: "Notes require lexis-inline: true or #lexis-inline." },
   "settings.inlineDelimiter": { zh: "内联条目分隔符", en: "Inline delimiter" },
-  "settings.inlineDelimiterDesc": { zh: "格式：主词 / 别名::批注。", en: "Format: entry / alias:: annotation." },
   "settings.inlineAliasDelimiter": { zh: "内联别名分隔符", en: "Inline alias delimiter" },
   "settings.inlineAliasDelimiterDesc": { zh: "默认 /；前后空格可省略，\\/ 表示字面斜杠。受“别名也算词条”控制。", en: "Defaults to /; surrounding spaces are optional, and \\/ means a literal slash. Controlled by Include aliases." },
   "settings.noInlineCategories": { zh: "暂无内联分类。", en: "No inline categories." },

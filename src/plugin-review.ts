@@ -149,6 +149,16 @@ export class LexisPluginReview extends LexisPluginDictionary {
     });
     return this._encWriting;
   }
+
+  async prepareReload(): Promise<void> {
+    if (this._encRelocating) throw new Error(this.t("maintenance.pendingData"));
+    await this.reviewCatalog.flush();
+    if (this._encSaveTimer) window.clearTimeout(this._encSaveTimer);
+    await this.saveEncounters();
+    if (this._encRelocating || this._encPending.length) throw new Error(this.t("maintenance.pendingData"));
+    if (this._encSaveTimer) window.clearTimeout(this._encSaveTimer);
+    this._encSaveTimer = 0;
+  }
   // 悬停 = 一次失败的提取(没想起来才要查)。这个词的到期日如果还很远,说明"排期偏晚了",拉近一点提醒尽快复习——
   // 只挪 lexis-due,绝不碰 stability/difficulty,也不伪造一次复习评分(FSRS 内部状态只能由真实复习事件驱动)。
   async hoverFeedback(file: TFile): Promise<void> {

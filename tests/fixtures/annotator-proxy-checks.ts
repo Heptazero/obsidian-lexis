@@ -11,7 +11,7 @@ export async function annotatorProxyChecks(host: any, { check, tick, chapter, se
   pane.className = "workspace-leaf-content";
   pane.dataset.type = "pdf-annotator";
   document.body.appendChild(pane);
-  host.setupEpubIframeHighlight(document);
+  host.epubHighlights.start(document);
   const outer = document.createElement("iframe");
   const loaded = new Promise((resolve) => outer.addEventListener("load", resolve, { once: true }));
   outer.srcdoc = '<iframe patched-src="https://cdn.hypothes.is/demos/epub/epub.js/index.html"></iframe>';
@@ -30,7 +30,9 @@ export async function annotatorProxyChecks(host: any, { check, tick, chapter, se
   check(selected === "known", "Annotator proxy selection still reaches the actual host pill");
   const sidebar = proxyDocument.querySelector('iframe[patched-src="https://hypothes.is/app.html"]') as HTMLIFrameElement;
   sidebar.contentDocument!.body.innerHTML = "<p>known</p>";
-  check(!host._epubIframeFrames.has(sidebar), "the offline annotation sidebar is not treated as an EPUB proxy");
+  const sidebarCalls = host.selectionCalls;
+  sidebar.contentDocument!.querySelector("p")!.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  check(host.selectionCalls === sidebarCalls, "the offline annotation sidebar is not treated as an EPUB proxy");
 
   let ownAnnotationCalls = 0;
   const ownAnnotation = (event: MouseEvent) => {
@@ -59,8 +61,10 @@ export async function annotatorProxyChecks(host: any, { check, tick, chapter, se
   await proxyLoaded; await tick();
   const reloadedFrame = await chapter(proxy.contentDocument!.querySelector("#viewer")!, "known");
   select(host, reloadedFrame);
-  check(host._epubIframeFrames.size === 1, "navigation in the middle offline frame rebinds only the new chapter");
+  const reloadedDoc = reloadedFrame.contentDocument!;
+  const closeCalls = host.selectionCalls;
   pane.remove(); await tick();
-  check(host._epubIframeFrames.size === 0, "closing a three-layer Annotator reader releases its chapters");
-  host.teardownEpubIframeHighlight(); host.removeSelPill();
+  reloadedDoc.querySelector("p")!.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  check(host.selectionCalls === closeCalls, "closing a three-layer Annotator reader releases its chapters");
+  host.epubHighlights.dispose(); host.removeSelPill();
 }

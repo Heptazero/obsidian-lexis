@@ -11,11 +11,14 @@ import * as obsidian from "obsidian";
 import { PluginSettingTab, Setting, Notice, Platform, TFolder, TFile, Component, finishRenderMath } from "obsidian";
 import { LEXIS_HOME_VIEW, LEXIS_REVIEW_VIEW, LEXIS_LOG_VIEW } from "./constants";
 import { DEFAULT_SETTINGS } from "./default-settings";
+import { migrateDictionaryCollections } from "./dictionary-migration";
+import { renameDictionaryPaths } from "./dictionary-sources";
 import { FSRS } from "./fsrs";
 import { LexisHomeView } from "./home-view";
 import { createI18n } from "./i18n";
 import { buildCurveSVG, recentReviewDates } from "./curve";
 import { LexisLogView } from "./review-log-view";
+import { ReviewCatalog } from "./review-catalog";
 import { migrateReviewEvents } from "./review-log-data";
 import { createOccurrenceSearch } from "./occurrence-search";
 import { EncounterStore, encounterFolder } from "./encounter-store";
@@ -33,13 +36,17 @@ import { createReviewQueue } from "./review-queue";
 import { relationBlockSource } from "./relation-sections";
 import { repairReviewHistory } from "./review-scheduler";
 import { migrateEntryColors, migrateLegacySettings, pluginFolderName, type StoredSettings } from "./settings-migration";
-import { WorkspaceDocuments } from "./workspace-documents";
+import { createReaderWorkspace } from "./reader-workspace";
+import { EpubHighlights } from "./epub-highlights";
+import { ReaderHover } from "./reader-hover";
 import { ExcalidrawHighlights } from "./excalidraw-highlights";
 import { CanvasEdgeHighlights } from "./canvas-edge-highlights";
 import { InlineHeadingSuggest } from "./inline-heading-suggest";
 import { InlineColorSuggest } from "./inline-color-suggest";
 import { LexisStatusBar } from "./status-bar";
 import { ReviewDashboard } from "./review-dashboard";
+import { MarginNoteExport } from "./marginnote-export";
+import { registerMarginNoteCapture } from "./marginnote-capture";
 import { LexisRestoreModal } from "./restore-modal";
 import { LexisPluginBase } from "./plugin-base";
 import { pluginDictionaryDescriptors } from "./plugin-dictionary";
@@ -84,6 +91,9 @@ const LexisBridge = createBridgeServer({ Notice, Platform });
 /* eslint-disable @typescript-eslint/no-unsafe-declaration-merging -- Standard typing pattern for runtime-composed method modules. */
 interface LexisPlugin extends LexisPluginDictionary, LexisPluginReview, LexisPluginEntry {}
 class LexisPlugin extends LexisPluginBase {
+  readerHover = new ReaderHover(this);
+  reviewCatalog = new ReviewCatalog(this);
+
   async onload() {
     await this.loadSettings();
     this.i18n = createI18n(() => this.settings.language);
@@ -100,6 +110,7 @@ class LexisPlugin extends LexisPluginBase {
     this.vocabPaths = new Set();
     this.stats = { words: 0, aliases: 0, inlineEntries: 0, due: 0 };
     this.reviewDashboard = new ReviewDashboard(this);
+    this.marginNoteExport = new MarginNoteExport(this);
     this.inlineColorTokenUsages = [];
     this._pattern = null;
     this._indexKeysByCompact = new Map();
@@ -109,9 +120,7 @@ class LexisPlugin extends LexisPluginBase {
     this._popoverComp = null;
     this._selPill = null;
     this._manualLookupAnchor = null;
-    this._manualLookupSource = null; this._hideTimer = null;
-    this._showTimer = null;
-    this._showTarget = null;
+    this._manualLookupSource = null;
     this._mobileTapStart = null;
     this._mobileTapClick = null;
     this._occCache = new Map();
@@ -125,8 +134,6 @@ class LexisPlugin extends LexisPluginBase {
     });
     this.liveAvailable = false;
     this._encounters = {};
-    this._encSaveTimer = 0;
-    this._encPending = [];
     this._encWriting = null;
     this._encRevision = 0;
     this._encRelocating = false;
@@ -241,40 +248,8 @@ class LexisPlugin extends LexisPluginBase {
     this.registerMarkdownCodeBlockProcessor("lexis-heatmap", (src, el) => this.renderHeatmap(el));
     this.registerMarkdownCodeBlockProcessor("lexis-home", (src, el, ctx) => this.renderHomeBlock(el, src, ctx));
     this.setupLiveExtension();
-    this._workspaceDocuments = new WorkspaceDocuments(this, {
-      mousemove: (event) => this.onMouseMove(event),
-      mouseover: (event) => this.onMouseOver(event),
-      mouseout: (event) => this.onMouseOut(event),
-      click: (event) => this.onClick(event),
-      pointerdown: (event) => this.onPointerDown(event),
-      pointermove: (event) => this.onPointerMove(event),
-      pointerup: (event) => this.onPointerUp(event),
-      pointercancel: () => this.onPointerCancel(),
-      mouseup: (event) => this.maybeShowSelPill(event),
-      escape: () => this.removeSelPill(),
-      scroll: (event) => {
-        this._mobileTapStart = null;
-        const target = event.target;
-        const node = target && typeof target === "object" && "nodeType" in target ? target as Node : null;
-        if (this._popover && node && this._popover.contains(node)) return;
-        this.removePopover();
-        this.removeSelPill();
-      },
-      activate: (document, documentChanged) => {
-        this._canvasEdgeHighlights.activate(document);
-        if (documentChanged) {
-          this.setupPdfHighlight(document);
-          this.setupEpubIframeHighlight(document);
-        }
-        this.applyReviewMetadataVisibility();
-        this.syncActivePageHighlightState();
-      },
-      close: (document) => {
-        this._canvasEdgeHighlights.close(document);
-        if (this._popover?.ownerDocument === document) this.removePopover();
-        if (this._selPill?.ownerDocument === document) this.removeSelPill();
-      },
-    });
+    this.epubHighlights = new EpubHighlights(this);
+    this._workspaceDocuments = createReaderWorkspace(this);
     this._canvasEdgeHighlights = new CanvasEdgeHighlights(this);
     this._workspaceDocuments.start();
     this._excalidrawHighlights = new ExcalidrawHighlights(this);
@@ -283,6 +258,7 @@ class LexisPlugin extends LexisPluginBase {
     this.app.workspace.onLayoutReady(() => {
       this._workspaceDocuments.activateLeaf(this.app.workspace.getMostRecentLeaf());
       void this.rebuildIndex(false);
+      void this.reviewCatalog.start();
       this.syncActivePageHighlightState();
     });
     this.registerEvent(this.app.vault.on("create", (f) => { if (f instanceof TFile) this.maybeRebuild(f); }));
@@ -292,6 +268,7 @@ class LexisPlugin extends LexisPluginBase {
       this.maybeRebuild(f);
     }));
     this.registerEvent(this.app.vault.on("rename", (f, old) => {
+      if (renameDictionaryPaths(this.settings.dicts, old, f.path)) { void this.saveSettings(); this.scheduleRebuild(); }
       if (f instanceof TFile) {
         this.renameEncounterPath(old, f.path);
         this.maybeRebuild(f, old);
@@ -306,7 +283,7 @@ class LexisPlugin extends LexisPluginBase {
     // 词条元数据变化会影响别名、排除标签、配色和生命周期；无论是否启用“按标签收录”都要重建。
     // 同时保留未收录文件的判断，让它能因新增收录标签进入词库。
     this.registerEvent(this.app.metadataCache.on("changed", (file) => {
-      if (this.vocabPaths.has(file.path) || this.isVocabFile(file) || this.isInlineSourceFile(file) || this.inlineSourcePaths?.has(file?.path)) this.scheduleRebuild();
+      this.maybeRebuild(file);
     }));
 
     // 划词添加(右键菜单)
@@ -340,21 +317,22 @@ class LexisPlugin extends LexisPluginBase {
       if (!this.settings.bridgeToken) { this.settings.bridgeToken = this.bridge.generateToken(); await this.saveSettings(); }
       this.bridge.start();
     }
+    registerMarginNoteCapture(this);
   }
 
   onunload() {
     window.clearTimeout(this._rebuildTimer);
-    window.clearTimeout(this._hideTimer);
-    window.clearTimeout(this._showTimer);
+    this.readerHover?.dispose();
     if (this._encSaveTimer || this._encPending.length) { window.clearTimeout(this._encSaveTimer); void this.saveEncounters(); }
     this.removePopover();
     this.removeSelPill();
     this.teardownPdfHighlight();
-    this.teardownEpubIframeHighlight();
+    this.epubHighlights?.dispose();
     this._excalidrawHighlights?.destroy();
     this._canvasEdgeHighlights?.destroy();
     this.bridge?.stop();
     this._workspaceDocuments?.forEach((document) => document.body?.classList.remove("lexis-show-review-metadata"));
+    this._workspaceDocuments?.dispose();
   }
 
   async loadStoredSettings(): Promise<StoredSettings> {
@@ -377,6 +355,8 @@ class LexisPlugin extends LexisPluginBase {
     const stored = entryColorMigration.settings;
     if (entryColorMigration.migrated) await this.saveData(stored);
     this.settings = Object.assign({}, DEFAULT_SETTINGS, stored) as LexisSettings;
+    this.settings.reviewCardMeta = { ...this.settings.reviewCardMeta };
+    this.settings.reviewPriorities = { ...this.settings.reviewPriorities };
     if (!["automatic", "manual"].includes(this.settings.highlightMode)) this.settings.highlightMode = "automatic";
     if ((!this.settings.tagRules || !this.settings.tagRules.length) && this.settings.tagRulesText) {
       this.settings.tagRules = this.parseTagRulesText(this.settings.tagRulesText);
@@ -414,20 +394,7 @@ class LexisPlugin extends LexisPluginBase {
     if (!Array.isArray(this.settings.dicts)) {
       this.settings.dicts = this.parseFolders(this.settings.vocabFolders).map((f) => ({ folder: f, template: "" }));
     }
-    const legacyTags = this.parseTags(this.settings.vocabTags);
-    const configuredTags = new Set(this.settings.dicts.map((item) => this.parseTags(item.tag || "")).flat());
-    let migratedTags = false;
-    for (const tag of legacyTags) {
-      if (configuredTags.has(tag)) continue;
-      this.settings.dicts.push({ folder: "", template: "", tag });
-      configuredTags.add(tag);
-      migratedTags = true;
-    }
-    if (legacyTags.length) {
-      this.settings.vocabTags = "";
-      migratedTags = true;
-    }
-    if (migratedTags) await this.saveData(this.settings);
+    if (migrateDictionaryCollections(this.settings)) await this.saveData(this.settings);
   }
 
 

@@ -7,12 +7,17 @@ import type { InlineCategoryOccurrence, InlineColorTokenUsage, LexisEntry, Lexis
 import type { EncounterMutation, EncounterSummary, EncounterStore } from "./encounter-store";
 import type { ReviewSchedule } from "./review-scheduler";
 import type { WorkspaceDocuments } from "./workspace-documents";
+import type { EpubHighlights } from "./epub-highlights";
+import type { ReaderHover } from "./reader-hover";
 import type { createI18n } from "./i18n";
 import type { createTemplateProvider } from "./template-provider";
 import type { ExcalidrawHighlights } from "./excalidraw-highlights";
 import type { CanvasEdgeHighlights } from "./canvas-edge-highlights";
 import type { LexisStatusBar } from "./status-bar";
 import type { ReviewDashboard } from "./review-dashboard";
+import type { ReviewCatalog } from "./review-catalog";
+import type { MarginNoteExport } from "./marginnote-export";
+import type { resolveDictionaries } from "./dictionary-sources";
 
 export type TranslationVars = Record<string, string | number | boolean | null | undefined>;
 export type ReviewCard = ReviewCardState & { history?: ReviewHistoryEvent[] };
@@ -21,13 +26,14 @@ export type Lifecycle = { archived: boolean; retired: boolean; pinned: boolean }
 export type Relation = { path: string; basename: string };
 export type RelationBag = Record<string, Relation[]>;
 export type BridgeRuntime = { running: boolean; generateToken(): string; start(): void; stop(): void; restart(): void };
-export type AddSelectionOptions = { openExisting?: boolean; alias?: string; sentence?: string; sourceFile?: TFile | null; page?: number };
+export type AddSelectionOptions = { openExisting?: boolean; alias?: string; sentence?: string; sourceFile?: TFile | null; source?: string; page?: number };
 export type HighlightPage = { leaf: obsidian.WorkspaceLeaf; container: HTMLElement; key: string };
 export type HomeOpenLocation = "center" | "sidebar";
 
 export const errorMessage = (error: unknown): string => error instanceof Error ? error.message : typeof error === "string" ? error : "Unknown error";
 
 export class LexisPluginBase extends Plugin {
+  declare _dictionaryScopes: ReturnType<typeof resolveDictionaries> | null;
   declare settings: LexisSettings;
   declare index: Map<string, LexisEntry>;
   declare stats: LexisStats;
@@ -43,6 +49,8 @@ export class LexisPluginBase extends Plugin {
   declare liveAvailable: boolean;
   declare statusBar: LexisStatusBar;
   declare reviewDashboard: ReviewDashboard;
+  declare reviewCatalog: ReviewCatalog;
+  declare marginNoteExport: MarginNoteExport;
   declare _pattern: string | null;
   declare _indexBuildId: number;
   declare _indexKeysByCompact: Map<string, string>;
@@ -50,21 +58,20 @@ export class LexisPluginBase extends Plugin {
   declare _rebuildTimer: number | null;
   declare _popover: HTMLElement | null;
   declare _popoverComp: Component | null;
-  declare _hideTimer: number | null;
-  declare _showTimer: number | null;
-  declare _showTarget: HTMLElement | null;
+  declare readerHover: ReaderHover;
   declare _occCache: Map<string, Occurrence[]>;
   declare _encounters: Record<string, EncounterSummary>;
   declare _encounterStore: EncounterStore;
-  declare _encPending: EncounterMutation[];
+  _encPending: EncounterMutation[] = [];
   declare _encWriting: Promise<void> | null;
   declare _encRevision: number;
   declare _encRelocating: boolean;
-  declare _encSaveTimer: number;
+  _encSaveTimer = 0;
   declare _encounterDedup: Record<string, number>;
   declare _pageHighlightState: WeakMap<obsidian.WorkspaceLeaf, { key: string; hidden: boolean }>;
   declare _reviewSessions: WeakMap<object, unknown>;
   declare _workspaceDocuments: WorkspaceDocuments;
+  declare epubHighlights: EpubHighlights;
   declare _excalidrawHighlights: ExcalidrawHighlights;
   declare _canvasEdgeHighlights: CanvasEdgeHighlights;
   declare _selPill: HTMLElement | null;
@@ -75,12 +82,11 @@ export class LexisPluginBase extends Plugin {
   declare highlightElement: (el: HTMLElement, ctx: obsidian.MarkdownPostProcessorContext) => void;
   declare renderLexisBlock: (el: HTMLElement, ctx: obsidian.MarkdownPostProcessorContext, src: string) => Promise<void>;
   declare renderHeatmap: (el: HTMLElement) => void;
+  declare buildCurveSVG: (card: ReviewCardState, limit?: number) => string | null;
   declare renderHomeBlock: (el: HTMLElement, source?: string, context?: obsidian.MarkdownPostProcessorContext) => void;
   declare setupLiveExtension: () => void;
   declare setupPdfHighlight: (document?: Document) => void;
-  declare setupEpubIframeHighlight: (document?: Document) => void;
   declare teardownPdfHighlight: () => void;
-  declare teardownEpubIframeHighlight: () => void;
   declare onMouseOver: (event: MouseEvent) => void;
   declare onMouseMove: (event: MouseEvent) => void;
   declare onMouseOut: (event: MouseEvent) => void;
@@ -91,7 +97,10 @@ export class LexisPluginBase extends Plugin {
   declare onPointerCancel: () => void;
   declare maybeShowSelPill: (event: MouseEvent) => void;
   declare removePopover: () => void;
+  declare showPopover: (target: HTMLElement) => Promise<void>;
+  declare wrapMatchesInElement: (element: HTMLElement, rejectSelector: string, options?: { external?: boolean; pdf?: boolean }, excludeKeys?: Set<string> | null) => void;
   declare removeSelPill: () => void;
+  declare rememberSelectionFolder: (folder: string) => Promise<void>;
   declare currentHighlightPage: () => HighlightPage | null;
   declare toggleCurrentPageHighlights: (page: HighlightPage) => void;
   declare syncActivePageHighlightState: (leaf?: obsidian.WorkspaceLeaf | null) => void;

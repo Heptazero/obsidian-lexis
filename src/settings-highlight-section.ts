@@ -2,6 +2,7 @@
 
 import type { App, ColorComponent } from "obsidian";
 import { addCurrentChoice } from "./settings-choice";
+import { createSettingsSection } from "./settings-section";
 import type { SettingsRuntime } from "./settings-tab";
 import type { PathSuggestConstructor } from "./settings-suggest";
 
@@ -9,7 +10,6 @@ interface HighlightSettingsHost {
   app: App;
   plugin: SettingsRuntime;
   _colorComp: ColorComponent | null;
-  section(containerEl: HTMLElement, title: string, options?: { open?: boolean; desc?: string }): HTMLElement;
 }
 
 interface HighlightSectionContext {
@@ -40,7 +40,7 @@ interface HighlightSectionContext {
 }
 
 export function renderHighlightSettings(this: HighlightSettingsHost, context: HighlightSectionContext): void {
-  const { obsidian, Setting, PathSuggest, topSection, t, save, refresh, accentHex, allTags, hasSuggest, appearanceLabels, createReorderController, moveItem, addAppearanceButton } = context;
+  const { Setting, topSection, t, save, refresh, accentHex } = context;
   const hlSection = topSection("highlight", t("settings.highlight"));
   const highlightSwitch = new Setting(hlSection).setName(t("settings.enableHighlight")).setDesc(t("settings.enableHighlightDesc"));
   const highlightOptions = hlSection.createEl("fieldset", { cls: "lexis-highlight-options" });
@@ -63,14 +63,13 @@ export function renderHighlightSettings(this: HighlightSettingsHost, context: Hi
     await save();
     refresh();
   }));
-  const scopeGroup = highlightOptions.createDiv({ cls: "lexis-settings-subgroup" });
-  scopeGroup.createDiv({ cls: "lexis-settings-subheading", text: t("settings.highlightScope") });
+  const scopeSection = createSettingsSection(highlightOptions, t("settings.highlightScope"), { key: "scope", collapsible: false });
+  const scopeGroup = scopeSection.body;
   new Setting(scopeGroup).setName(t("settings.livePreview")).setDesc(this.plugin.liveAvailable ? "" : t("settings.unsupported"))
     .addToggle((t) => t.setValue(this.plugin.settings.enableLivePreview).setDisabled(!this.plugin.liveAvailable).onChange(async (v) => { this.plugin.settings.enableLivePreview = v; await save(); refresh(); }));
   new Setting(scopeGroup).setName(t("settings.pdfHighlight")).setDesc(t("settings.pdfHighlightDesc"))
     .addToggle((t) => t.setValue(this.plugin.settings.enablePdfHighlight).onChange(async (v) => { this.plugin.settings.enablePdfHighlight = v; await save(); if (v) this.plugin.setupPdfHighlight(); else { this.plugin.teardownPdfHighlight(); this.plugin.rescanPdfLayers(); } }));
-  const interactionGroup = highlightOptions.createDiv({ cls: "lexis-settings-subgroup" });
-  interactionGroup.createDiv({ cls: "lexis-settings-subheading", text: t("settings.highlightInteraction") });
+  const interactionGroup = createSettingsSection(highlightOptions, t("settings.highlightInteraction"), { key: "interaction", collapsible: false }).body;
   const modeSetting = new Setting(interactionGroup).setName(t("settings.highlightMode")).setDesc(t("settings.highlightModeDesc"));
   addCurrentChoice(modeSetting, [
     { value: "automatic", label: t("settings.highlightAutomatic") },
@@ -82,10 +81,8 @@ export function renderHighlightSettings(this: HighlightSettingsHost, context: Hi
     else this.plugin.teardownPdfHighlight();
     await save(); refresh();
   });
-  new Setting(interactionGroup).setName(t("settings.clickHighlightToOpen")).setDesc(t("settings.clickHighlightToOpenDesc"))
-    .addToggle((toggle) => toggle.setValue(this.plugin.settings.clickHighlightToOpen !== false).onChange(async (value) => { this.plugin.settings.clickHighlightToOpen = value; await save(); }));
-  const styleGroup = highlightOptions.createDiv({ cls: "lexis-settings-subgroup" });
-  styleGroup.createDiv({ cls: "lexis-settings-subheading", text: t("settings.highlightAppearance") });
+  const styleSection = createSettingsSection(highlightOptions, t("settings.highlightAppearance"), { key: "style", collapsible: false });
+  const styleGroup = styleSection.body;
   addCurrentChoice(new Setting(styleGroup).setName(t("settings.highlightStyle")), [
     { value: "wavy", label: t("settings.wavy") }, { value: "underline", label: t("settings.underline") }, { value: "background", label: t("settings.background") },
   ], this.plugin.settings.highlightStyle, async (value) => { this.plugin.settings.highlightStyle = value; await save(); refresh(); });
@@ -98,8 +95,13 @@ export function renderHighlightSettings(this: HighlightSettingsHost, context: Hi
     .addToggle((t) => t.setValue(this.plugin.settings.fadeByMemory).onChange(async (v) => { this.plugin.settings.fadeByMemory = v; await save(); refresh(); }));
   new Setting(styleGroup).setName(t("settings.fadeFloor"))
     .addSlider((s) => s.setLimits(0, 0.9, 0.05).setValue(this.plugin.settings.fadeFloor).onChange(async (v) => { this.plugin.settings.fadeFloor = v; await save(); refresh(); }));
-  const rulesGroup = highlightOptions.createDiv({ cls: "lexis-settings-subgroup" });
-  rulesGroup.createDiv({ cls: "lexis-settings-subheading", text: t("settings.highlightRules") });
+  automaticGroups = [scopeSection.element, styleSection.element];
+  syncHighlightOptions();
+}
+
+export function renderVocabularyRules(this: HighlightSettingsHost, context: HighlightSectionContext): void {
+  const { obsidian, Setting, PathSuggest, topSection, t, save, refresh, accentHex, allTags, hasSuggest, appearanceLabels, createReorderController, moveItem, addAppearanceButton } = context;
+  const rulesGroup = topSection("vocabulary-rules", t("settings.vocabularyRules"));
   const excludeSetting = new Setting(rulesGroup).setName(t("settings.excludeTags")).setDesc(t("settings.excludeTagsDesc"));
   excludeSetting.settingEl.addClass("lexis-tags-setting");
   const excludeEditor = excludeSetting.controlEl.createDiv({ cls: "lexis-tag-editor" });
@@ -142,7 +144,7 @@ export function renderHighlightSettings(this: HighlightSettingsHost, context: Hi
   if (hasSuggest) new PathSuggest(this.app, excludeInput.inputEl, () => allTags.filter((tag) => !excludedTags().includes(tag)), (value) => { void addExcludedTags(value); });
   renderExcludedTags();
 
-  const tagColorSection = this.section(rulesGroup, t("settings.tagColors"));
+  const tagColorSection = createSettingsSection(rulesGroup, t("settings.tagColors"), { key: "tag-colors", collapsible: false }).body;
   const rulesWrap = tagColorSection.createDiv();
   const renderRules = () => {
     rulesWrap.empty();
@@ -183,6 +185,4 @@ export function renderHighlightSettings(this: HighlightSettingsHost, context: Hi
     addRule.addEventListener("click", () => { void (async () => { this.plugin.settings.tagRules.push({ tag: "", color: accentHex, style: "" }); await save(); renderRules(); })(); });
   };
   renderRules();
-  automaticGroups = [scopeGroup, styleGroup];
-  syncHighlightOptions();
 }

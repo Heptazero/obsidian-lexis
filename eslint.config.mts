@@ -8,6 +8,7 @@ export default defineConfig(
     "dist",
     "pkg/browser-extension",
     "pkg/zotero-extension",
+    "pkg/marginnote-extension",
     "scripts",
     "tests",
     "esbuild.config.mjs",

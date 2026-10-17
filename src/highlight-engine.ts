@@ -11,6 +11,8 @@ import { createHighlightIndex } from "./highlight-index";
 import type { CanvasEdgeHighlights } from "./canvas-edge-highlights";
 import { resolveEntryColorToken } from "./entry-colors";
 import { automaticHighlighting } from "./highlight-mode";
+import type { EpubHighlights } from "./epub-highlights";
+import { preferredDictionary, type resolveDictionaries } from "./dictionary-sources";
 
 type HighlightStyleOptions = { external?: boolean; pdf?: boolean };
 // Foreign EPUB documents provide native DOM APIs, not Obsidian's global extensions.
@@ -51,13 +53,14 @@ function createHighlightEngine({ Notice, boundedSource, compactMixedScriptSpacin
   declare _pageHighlightState: WeakMap<WorkspaceLeaf, HighlightPageState>;
   declare _canvasEdgeHighlights: CanvasEdgeHighlights;
   declare rescanPdfLayers: () => void;
-  declare rescanEpubIframes: () => void;
+  declare epubHighlights: Pick<EpubHighlights, "rescan">;
   declare occurrenceSearch: OccurrenceSearch;
   declare saveSettings: () => Promise<void>;
   declare isVocabFile: (file: TFile | null | undefined) => boolean;
   declare inFolderScope: (path: string) => boolean;
   declare excludeTagSet: () => Set<string>;
   declare dictFolders: () => string[];
+  declare dictionaryScopes: () => ReturnType<typeof resolveDictionaries>;
   declare vocabTagSet: () => Set<string>;
   declare t: (key: string, vars?: TranslationVars) => string;
   declare effectiveHighlightColor: () => string;
@@ -143,17 +146,7 @@ function createHighlightEngine({ Notice, boundedSource, compactMixedScriptSpacin
     return Math.max(0.1, Math.min(1, Number(row.opacity)));
   }
   dictSettingForFile(file: TFile | null | undefined): DictionarySetting | null {
-    const path = file && file.path;
-    if (!path) return null;
-    const i = path.lastIndexOf("/");
-    const wf = i > 0 ? path.slice(0, i) : "";
-    if (!wf) return null;
-    let best: DictionarySetting | null = null, bestLen = -1;
-    for (const row of this.settings.dicts || []) {
-      const folder = this.normalizeFolder(row?.folder);
-      if (folder && (wf === folder || wf.startsWith(folder + "/")) && folder.length > bestLen) { best = row; bestLen = folder.length; }
-    }
-    return best;
+    return file?.path ? preferredDictionary(this.dictionaryScopes(), file.path) : null;
   }
   inlineStyleForEntry(entry: LexisEntry | undefined, opts: HighlightStyleOptions = {}): string {
     // EPUB 内容在独立 iframe 中，读不到 Obsidian 主文档的 --text-accent；跨文档时必须注入解析后的实际颜色。
@@ -244,14 +237,14 @@ function createHighlightEngine({ Notice, boundedSource, compactMixedScriptSpacin
     });
     if (this.liveAvailable) this.app.workspace.updateOptions();
     this.rescanPdfLayers();
-    this.rescanEpubIframes();
+    this.epubHighlights.rescan();
     this._canvasEdgeHighlights?.refresh();
   }
 
   // ---------- 阅读模式高亮 ----------
   highlightElement(el: HTMLElement, ctx: MarkdownPostProcessorContext): void {
     if (!automaticHighlighting(this.settings) || !this._pattern || !this.index.size) return;
-    if (el.closest && el.closest(".lexis-popover")) return;
+    if (el.closest && el.closest(".lexis-popover,.lexis-library-preview,.lexis-log-row-content")) return;
     const selfKeys = ctx && ctx.sourcePath ? this.selfKeysFor(ctx.sourcePath) : null;
     this.wrapMatchesInElement(el, "code,pre,a,.lexis-hl,.lexis-popover,.math,.tag", {}, selfKeys);
   }

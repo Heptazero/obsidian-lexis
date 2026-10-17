@@ -44,7 +44,7 @@ export class ReviewDashboard {
     const plans = await Promise.all(settings.reviewPlans.map(async (plan) => ({ plan, items: await this.plugin.collectReviewItems(planOptions(plan), true) })));
     const globalItems = plans.length ? mergeReviewItems(plans.map((plan) => plan.items)) : await this.plugin.collectReviewItems(planOptions(), true);
     const globalOptions: ReviewOptions = plans.length
-      ? { sources: plans.flatMap(({ plan }) => plan.sources), content: "both" }
+      ? { dictionaryIds: plans.some(({plan}) => plan.dictionaryIds === null) ? null : [...new Set(plans.flatMap(({plan}) => plan.dictionaryIds || []))], content: "both" }
       : planOptions();
     const globalId = `global:${plans.map(({ plan }) => plan.id).join(",")}`;
     let changed = false;

@@ -7,11 +7,15 @@ import { parseSectionLinks, relationHeading, relationTypes } from "./relation-se
 import { cssColorToHex, escapeRe, todayString as todayStr } from "./shared-utils";
 import { LexisPluginBase, errorMessage, type RelationBag, type TranslationVars } from "./plugin-base";
 import { resolveEntryColorToken } from "./entry-colors";
+import { dictionarySources, resolveDictionaries } from "./dictionary-sources";
 
 export abstract class LexisPluginDictionary extends LexisPluginBase {
   abstract recordEncounter(file: TFile, type: "hover" | "add" | "open"): void;
   t(key: string, vars?: TranslationVars): string { return this.i18n ? this.i18n.t(key, vars) : key; }
-  async saveSettings() { await this.saveData(this.settings); }
+  async saveSettings() { this._dictionaryScopes = null; await this.saveData(this.settings); }
+  dictionaryScopes() {
+    return this._dictionaryScopes ??= resolveDictionaries(this.app, this.settings.dicts || [], file => this.getTags(file));
+  }
   applyReviewMetadataVisibility() {
     if (this._workspaceDocuments) {
       this._workspaceDocuments.forEach((document) => document.body?.classList.toggle("lexis-show-review-metadata", !!this.settings.showReviewMetadata));
@@ -33,12 +37,12 @@ export abstract class LexisPluginDictionary extends LexisPluginBase {
   parseTags(text: string): string[] { return (text || "").split(/[,，;；\s]+/).map((s) => s.trim().replace(/^#/, "").toLowerCase()).filter(Boolean); }
   vocabTagSet() {
     const tags = new Set(this.parseTags(this.settings.vocabTags));
-    for (const item of this.settings.dicts || []) for (const tag of this.parseTags(item?.tag || "")) tags.add(tag);
+    for (const item of this.settings.dicts || []) for (const source of dictionarySources(item)) if (source.kind === "tag") tags.add(source.value);
     return tags;
   }
   excludeTagSet() { return new Set(this.parseTags(this.settings.excludeTags)); }
-  // 词典表的文件夹列表 = 文件夹来源的单一真相
-  dictFolders() { return (this.settings.dicts || []).map((d) => this.normalizeFolder(d && d.folder)).filter(Boolean); }
+  // Capture destinations are separate from the collection's membership rules.
+  dictFolders() { return [...new Set((this.settings.dicts || []).map((d) => this.normalizeFolder(d && d.folder)).filter(Boolean))]; }
   // 一条词的最终高亮色:词条角色/直写色 > 内联分类 > 标签 > 词典 > 全局。
   colorForEntry(e: LexisEntry): string {
     let color = this.effectiveHighlightColor();           // 全局兜底(留空=主题色,已解析)
@@ -89,11 +93,7 @@ export abstract class LexisPluginDictionary extends LexisPluginBase {
     return this.templateProvider.readLexis(folder);
   }
   isVocabFile(file: TFile | null | undefined): boolean {
-    if (!file || !file.path) return false;
-    if (this.inFolderScope(file.path)) return true;
-    const ts = this.vocabTagSet();
-    if (ts.size) { for (const t of this.getTags(file)) if (ts.has(t)) return true; }
-    return false;
+    return !!file?.path && this.dictionaryScopes().byFile.has(file.path);
   }
   inScope(path: string, scope: string[]): boolean { if (!scope.length) return true; return scope.some((f) => path === f || path.startsWith(f + "/")); }
   extractSentence(content: string, idx: number): string {
@@ -161,12 +161,13 @@ export abstract class LexisPluginDictionary extends LexisPluginBase {
       }
     }
     if (!map.size) return;
-    container.createDiv({ cls: "lexis-section-title", text: `🌱 派生词 (${map.size})` });
+    container.createDiv({ cls: "lexis-section-title", text: this.t("relation.backlinks", { count: map.size }) });
     const w = container.createDiv({ cls: "lexis-related" });
     for (const [path, basename] of map) this.relLink(w, path, basename);
   }
   relLink(w: HTMLElement, path: string, basename: string): void {
     const a = w.createEl("a", { text: basename, href: "#" });
+    a.setAttribute("data-lexis-review-link", path);
     a.addEventListener("click", (e) => { e.preventDefault(); const f = this.app.vault.getAbstractFileByPath(path); if (f instanceof TFile) { void this.app.workspace.getLeaf(false).openFile(f); this.removePopover(); } });
   }
   async renderTypedRelations(container: HTMLElement, file: TFile): Promise<number> {

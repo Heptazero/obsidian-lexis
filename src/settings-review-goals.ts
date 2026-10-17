@@ -1,4 +1,5 @@
 import { Setting } from "obsidian";
+import { createSettingsSection } from "./settings-section";
 import type { TranslationVars } from "./i18n";
 import type { LexisSettings } from "./types";
 
@@ -9,9 +10,10 @@ interface GoalSettingsHost {
 }
 
 export function renderReviewGoalSettings(parent: HTMLElement, plugin: GoalSettingsHost): void {
-  new Setting(parent).setName(plugin.t("dashboard.goalSettings")).setHeading().setDesc(plugin.t("dashboard.goalHint"));
+  const group = createSettingsSection(parent, plugin.t("dashboard.goalSettings"), { key: "goals" }).body;
+  group.createDiv({ cls: "setting-item-description", text: plugin.t("dashboard.goalHint") });
   for (const [field, label, minimum] of [["reviewMinimumGoal", "dashboard.minimum", 0], ["reviewDailyGoal", "dashboard.goal", 1]] as const) {
-    new Setting(parent).setName(plugin.t(label)).addText((input) => {
+    new Setting(group).setName(plugin.t(label)).addText((input) => {
       input.inputEl.type = "number";
       input.inputEl.min = String(minimum);
       input.inputEl.max = "10000";
@@ -24,5 +26,5 @@ export function renderReviewGoalSettings(parent: HTMLElement, plugin: GoalSettin
       });
     });
   }
-  parent.createDiv({ cls: "lexis-dim", text: plugin.t("dashboard.countHint") });
+  group.createDiv({ cls: "lexis-dim", text: plugin.t("dashboard.countHint") });
 }

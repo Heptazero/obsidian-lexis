@@ -2,9 +2,20 @@
 
 // ---- 划词添加:选中文本 → 浮动 pill([＋] [词典] [🔗]) ----
 let selBtn = null;
+let selectionPillAnchor = null;
+let aliasMenuSequence = 0;
 function hideSelBtn() {
   if (selBtn) { selBtn.remove(); selBtn = null; }
+  selectionPillAnchor = null;
   document.querySelectorAll(".lexis-web-folderlist,.lexis-web-alias-results").forEach((element) => element.remove());
+}
+function positionSelBtn() {
+  if (!selBtn || !selectionPillAnchor) return;
+  const position = LexisPillPosition.positionBrowserSelectionPill(selectionPillAnchor,
+    { width: selBtn.offsetWidth, height: selBtn.offsetHeight },
+    { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight }, selectionPillOffset);
+  selBtn.style.left = position.left + window.scrollX + "px";
+  selBtn.style.top = position.top + window.scrollY + "px";
 }
 function hasWordContent(text) { return /[\p{L}\p{N}]/u.test(text); }
 function isSelectionCandidate(text) {
@@ -15,7 +26,9 @@ function isSelectionCandidate(text) {
 function onSelect() {
   // 正在用我们自己的别名输入框时别打扰(selectionchange 会因 input 聚焦误触发)
   if (selBtn && document.activeElement && selBtn.contains(document.activeElement)) return;
-  const sel = window.getSelection();
+  if (LexisWebDom.ignored(LexisWebDom.activeElement())) { hideSelBtn(); return; }
+  const sel = pageSelection();
+  if (sel?.anchorNode && LexisWebDom.ignored(sel.anchorNode)) { hideSelBtn(); return; }
   const text = sel ? sel.toString().trim() : "";
   // 选区没变、且 pill 已经在了 → 别重建(否则在 pill 上点文件夹下拉会被 mouseup 触发的本函数拆掉,闪一下就没)
   if (selBtn && selBtn.dataset && selBtn.dataset.word === text && text) return;
@@ -49,18 +62,15 @@ function onSelect() {
       if (ok) await chrome.runtime.sendMessage({ type: "sync" });
       hideSelBtn();
     });
-    const bw = 72, bh = 26, gap = 6;
-    let left = rect.left + (rect.width - bw) / 2 + window.scrollX;
-    let top = rect.bottom + window.scrollY + gap;
-    if (top + bh > window.scrollY + document.documentElement.clientHeight - 8) top = rect.top + window.scrollY - bh - gap;
-    selBtn.style.left = Math.max(8, Math.min(left, window.scrollX + document.documentElement.clientWidth - bw - 8)) + "px";
-    selBtn.style.top = Math.max(8, top) + "px";
     document.body.appendChild(selBtn);
+    selectionPillAnchor = rect;
+    positionSelBtn();
     return;
   }
   if (knownKeys && knownKeys.has(selectedKey)) { hideSelBtn(); return; }
   hideSelBtn();
   const sentence = sentenceFromSelection(sel);
+  const source = LexisWebSource.capture(sel.anchorNode);
   // 目标词典(文件夹)列表;优先沿用上次选择，目标已不存在时才回退到第一个。
   const dicts = (styleCfg && Array.isArray(styleCfg.dicts) ? styleCfg.dicts : []).filter(Boolean);
   let selFolder = dicts.includes(lastSelectionFolder) ? lastSelectionFolder : (dicts[0] || "");
@@ -76,7 +86,7 @@ function onSelect() {
   addBtn.addEventListener("mousedown", (e) => e.preventDefault());
   addBtn.addEventListener("click", async () => {
     addBtn.disabled = true; addBtn.textContent = "…";
-    await doAdd(text, sentence, undefined, selFolder);
+    await doAdd(text, sentence, undefined, selFolder, source);
     hideSelBtn();
   });
   pill.appendChild(addBtn);
@@ -134,12 +144,35 @@ function onSelect() {
     const results = document.createElement("div");
     results.className = "lexis-web-alias-results";
     results.setAttribute("role", "listbox");
+    results.id = `lexis-web-alias-options-${++aliasMenuSequence}`;
+    input.setAttribute("role", "combobox");
+    input.setAttribute("aria-autocomplete", "list");
+    input.setAttribute("aria-expanded", "true");
+    input.setAttribute("aria-controls", results.id);
     document.body.appendChild(results);
     const targets = collectAliasTargets(allWords);
     let primaryValue = input.value.trim();
     let exactTarget = findExactAliasTarget(targets, primaryValue);
     let matches = [];
     let activeIndex = 0;
+
+    const activate = (index) => {
+      activeIndex = index;
+      const rows = results.querySelectorAll('[role="option"]');
+      rows.forEach((row, rowIndex) => {
+        row.classList.toggle("is-active", rowIndex === index);
+        row.setAttribute("aria-selected", String(rowIndex === index));
+      });
+      const active = rows[index];
+      if (active) input.setAttribute("aria-activedescendant", active.id);
+      else input.removeAttribute("aria-activedescendant");
+    };
+    const bindOption = (row, index) => {
+      row.id = `${results.id}-${index}`;
+      row.tabIndex = -1;
+      row.addEventListener("mouseenter", () => activate(index));
+      row.addEventListener("focus", () => activate(index));
+    };
 
     const placeResults = () => {
       const rect = input.getBoundingClientRect();
@@ -153,7 +186,7 @@ function onSelect() {
     const choose = async (target) => {
       input.disabled = true;
       results.remove();
-      await doAdd(target.title, sentence, text, selFolder);
+      await doAdd(target.title, sentence, text, selFolder, source);
       hideSelBtn();
     };
     const chooseAt = async (index) => {
@@ -163,7 +196,7 @@ function onSelect() {
         input.disabled = true;
         results.remove();
         const sameAsSelection = primaryValue.normalize("NFKC").toLowerCase() === text.normalize("NFKC").toLowerCase();
-        await doAdd(primaryValue, sentence, sameAsSelection ? undefined : text, selFolder);
+        await doAdd(primaryValue, sentence, sameAsSelection ? undefined : text, selFolder, source);
         hideSelBtn();
         return;
       }
@@ -184,13 +217,15 @@ function onSelect() {
         row.className = "lexis-web-alias-result is-primary" + (activeIndex === 0 ? " is-active" : "");
         row.setAttribute("role", "option");
         row.setAttribute("aria-selected", activeIndex === 0 ? "true" : "false");
+        bindOption(row, 0);
         const title = document.createElement("span");
         title.textContent = primaryValue;
+        row.title = primaryValue;
         row.appendChild(title);
         const action = document.createElement("small");
         action.textContent = exactTarget ? `归入「${exactTarget.title}」` : "新建词条";
         row.appendChild(action);
-        row.addEventListener("mousedown", (event) => event.preventDefault());
+        row.addEventListener("mousedown", (event) => { event.preventDefault(); event.stopPropagation(); });
         row.addEventListener("click", () => { void chooseAt(0); });
         results.appendChild(row);
       }
@@ -208,26 +243,29 @@ function onSelect() {
           row.className = "lexis-web-alias-result" + (optionIndex === activeIndex ? " is-active" : "");
           row.setAttribute("role", "option");
           row.setAttribute("aria-selected", optionIndex === activeIndex ? "true" : "false");
+          bindOption(row, optionIndex);
           const title = document.createElement("span");
           title.textContent = match.title;
+          row.title = match.title;
           row.appendChild(title);
           if (String(match.matched).normalize("NFKC").toLowerCase() !== String(match.title).normalize("NFKC").toLowerCase()) {
             const alias = document.createElement("small");
             alias.textContent = match.matched;
             row.appendChild(alias);
           }
-          row.addEventListener("mousedown", (event) => event.preventDefault());
+          row.addEventListener("mousedown", (event) => { event.preventDefault(); event.stopPropagation(); });
           row.addEventListener("click", () => { void choose(match); });
           results.appendChild(row);
         });
       }
+      activate(activeIndex);
       placeResults();
     };
     input.addEventListener("input", () => { activeIndex = 0; render(); });
     input.addEventListener("keydown", (e) => {
       const optionCount = matches.length + (hasWordContent(primaryValue) ? 1 : 0);
-      if (e.key === "ArrowDown" && optionCount) { e.preventDefault(); activeIndex = (activeIndex + 1) % optionCount; render(); }
-      else if (e.key === "ArrowUp" && optionCount) { e.preventDefault(); activeIndex = (activeIndex - 1 + optionCount) % optionCount; render(); }
+      if (e.key === "ArrowDown" && optionCount) { e.preventDefault(); activate((activeIndex + 1) % optionCount); }
+      else if (e.key === "ArrowUp" && optionCount) { e.preventDefault(); activate((activeIndex - 1 + optionCount) % optionCount); }
       else if (e.key === "Enter" && optionCount) { e.preventDefault(); void chooseAt(activeIndex); }
       else if (e.key === "Escape") { e.preventDefault(); hideSelBtn(); }
     });
@@ -240,28 +278,18 @@ function onSelect() {
   pill.appendChild(aliasBtn);
 
   document.body.appendChild(pill);
-  // 智能定位:先按实际内容测量宽度，再放在选区附近。
-  const pillW = pill.offsetWidth || 90, pillH = pill.offsetHeight || 26, gap = 6;
-  let left = rect.left + (rect.width - pillW) / 2 + window.scrollX;
-  let top = rect.bottom + window.scrollY + gap;
-  if (top + pillH > window.scrollY + document.documentElement.clientHeight - 8)
-    top = rect.top + window.scrollY - pillH - gap;
-  if (left < 8) left = 8;
-  if (left + pillW > window.scrollX + document.documentElement.clientWidth - 8)
-    left = window.scrollX + document.documentElement.clientWidth - pillW - 8;
-  pill.style.left = Math.max(8, left) + "px";
-  pill.style.top = Math.max(8, top) + "px";
-
   const tc = textColorFor(getComputedStyle(pill).backgroundColor);
   pill.style.color = tc;
   pill.dataset.word = text;
   selBtn = pill;
+  selectionPillAnchor = rect;
+  positionSelBtn();
 }
 // mouseup + selectionchange 双触发:YouTube 等会吞掉 player 内的 mouseup,selectionchange 兜底
 function scheduleSel() { clearTimeout(selTimer); selTimer = setTimeout(onSelect, 200); }
-document.addEventListener("mouseup", () => { pointerSelecting = false; scheduleSel(); });
-document.addEventListener("selectionchange", () => {
-  const selection = window.getSelection();
+document.addEventListener("mouseup", () => { pointerSelecting = false; scheduleSel(); }, true);
+function handleSelectionChange() {
+  const selection = pageSelection();
   const selectionInsidePopover = !!(pop && selection?.anchorNode && pop.contains(selection.anchorNode));
   if (hasExpandedSelection(selection) && !selectionInsidePopover) removePop();
   else if (selectionDeferredRoots.size) {
@@ -270,7 +298,8 @@ document.addEventListener("selectionchange", () => {
     scheduleScan();
   }
   scheduleSel();
-});
+}
+document.addEventListener("selectionchange", handleSelectionChange);
 document.addEventListener("mousedown", (e) => {
   const insidePopover = !!(popHost && e.composedPath().includes(popHost));
   if (e.button === 0 && !(selBtn && selBtn.contains(e.target))) {
@@ -280,7 +309,7 @@ document.addEventListener("mousedown", (e) => {
   if (selBtn && !selBtn.contains(e.target)) hideSelBtn();
 });
 window.addEventListener("blur", () => { pointerSelecting = false; });
-document.addEventListener("scroll", hideSelBtn, { passive: true });
+document.addEventListener("scroll", hideSelBtn, { capture: true, passive: true });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "lexis-page-context") sendResponse({ site: currentSite });
@@ -292,18 +321,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 // ---- 启动 / 配置变化 ----
 async function init() {
-  const { cfg: c, words, styleConfig, lastSelectionFolder: savedFolder, popoverSize: savedPopoverSize, siteDictionaryVisibility: savedVisibility } = await chrome.storage.local.get(["cfg", "words", "styleConfig", "lastSelectionFolder", "popoverSize", "siteDictionaryVisibility"]);
+  const { cfg: c, words, styleConfig, lastSelectionFolder: savedFolder, popoverSize: savedPopoverSize, siteDictionaryVisibility: savedVisibility, selectionPillOffset: savedPillOffset } = await chrome.storage.local.get(["cfg", "words", "styleConfig", "lastSelectionFolder", "popoverSize", "siteDictionaryVisibility", "selectionPillOffset"]);
   cfg = Object.assign({}, DEFAULT_CFG, c || {});
   styleCfg = styleConfig || null;
   siteDictionaryVisibility = savedVisibility || {};
   lastSelectionFolder = typeof savedFolder === "string" ? savedFolder : "";
   popoverSize = savedPopoverSize && typeof savedPopoverSize === "object" ? savedPopoverSize : null;
+  selectionPillOffset = LexisPillPosition.normalizePillOffset(savedPillOffset);
   applyTheme();
   build(words || []);
   if ((words || []).length && !(words || []).some((word) => Object.prototype.hasOwnProperty.call(word, "p"))) {
     void chrome.runtime.sendMessage({ type: "sync" }).catch(() => null);
   }
-  if (cfg.highlight) { scan(document.body); startObserver(); }
+  startObserver();
+  scan(document.body);
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -319,6 +350,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (changes.siteDictionaryVisibility) siteDictionaryVisibility = changes.siteDictionaryVisibility.newValue || {};
     if (changes.lastSelectionFolder) lastSelectionFolder = typeof changes.lastSelectionFolder.newValue === "string" ? changes.lastSelectionFolder.newValue : "";
     if (changes.popoverSize) popoverSize = changes.popoverSize.newValue || null;
+    if (changes.selectionPillOffset) {
+      selectionPillOffset = LexisPillPosition.normalizePillOffset(changes.selectionPillOffset.newValue);
+      positionSelBtn();
+    }
     if (changes.words) build(changes.words.newValue || []);
     else if (changes.styleConfig || changes.siteDictionaryVisibility) build(allWords);
     const styleChanged = oldCfg && cfg && (oldCfg.useObsidianStyle !== cfg.useObsidianStyle

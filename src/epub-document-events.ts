@@ -1,6 +1,6 @@
 import { overlayDocumentFor } from "./reader-frame-geometry";
 
-interface EpubInteractions {
+export interface EpubInteractions {
   onMouseOver(event: MouseEvent): void;
   onMouseOut(event: MouseEvent): void;
   onClick(event: MouseEvent): void;
@@ -8,7 +8,7 @@ interface EpubInteractions {
   onPointerMove(event: PointerEvent): void;
   onPointerUp(event: PointerEvent): void;
   onPointerCancel(): void;
-  maybeShowSelPill(event: Pick<MouseEvent, "target">, fromEpub: boolean): void;
+  maybeShowSelPill(event: Pick<MouseEvent, "target">, fromEpub?: boolean): void;
 }
 
 export function epubDocumentEvents(document: Document, host: EpubInteractions) {

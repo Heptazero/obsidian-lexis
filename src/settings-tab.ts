@@ -1,20 +1,29 @@
 "use strict";
 
-import type { App, ColorComponent, MetadataCache, Plugin, Setting, SettingDefinitionItem, View } from "obsidian";
+import { Component, type App, type ColorComponent, type MetadataCache, type Plugin, type Setting, type SettingDefinitionItem, type View } from "obsidian";
 import type { TranslationVars } from "./i18n";
-import type { InlineCategoryOccurrence, InlineColorTokenUsage, LexisSettings, LexisStats } from "./types";
+import type { InlineCategoryOccurrence, InlineColorTokenUsage, LexisEntry, LexisSettings, LexisStats } from "./types";
 import type { LexisStatusBar } from "./status-bar";
-import { renderHighlightSettings } from "./settings-highlight-section";
+import { renderHighlightSettings, renderVocabularyRules } from "./settings-highlight-section";
 import { renderInlineSettings } from "./settings-inline-section";
 import { createPathSuggest } from "./settings-suggest";
 import { renderStorageSettings } from "./settings-storage-section";
-import { addSelectionPillPosition } from "./settings-selection-pill";
-import { orderedSectionKeys } from "./settings-section-order";
+import { renderReaderSettings } from "./settings-reader-section";
+import { askSettingsTabName } from "./settings-tab-name-modal";
+import { renderSettingsManual, type ManualRuntime } from "./settings-manual";
+import { createSettingsNavigation } from "./settings-navigation";
 import { renderReviewGoalSettings } from "./settings-review-goals";
+import { renderMarginNoteSettings } from "./settings-marginnote";
+import type { MarginNoteExport } from "./marginnote-export";
 import { addCurrentChoice } from "./settings-choice";
+import { createSettingsSection } from "./settings-section";
+import { renderPluginMaintenance } from "./settings-maintenance";
+import { renderDictionarySettings } from "./settings-dictionaries";
+import { inlineEntryConflictsWithFlashcard } from "./flashcard-syntax";
 
-export interface SettingsRuntime extends Plugin {
+export interface SettingsRuntime extends Plugin, ManualRuntime {
   settings: LexisSettings;
+  index: Map<string, LexisEntry>;
   stats: LexisStats;
   inlineCategoryOccurrences: InlineCategoryOccurrence[];
   inlineColorTokenUsages: InlineColorTokenUsage[];
@@ -28,8 +37,10 @@ export interface SettingsRuntime extends Plugin {
     restart(): void;
   };
   statusBar: LexisStatusBar;
+  marginNoteExport: MarginNoteExport;
   t(key: string, vars?: TranslationVars): string;
   saveSettings(): Promise<void>;
+  prepareReload(): Promise<void>;
   setEncounterFolder(folder: string): Promise<void>;
   refreshAllViews(): void;
   rebuildIndex(notify?: boolean): Promise<void>;
@@ -75,23 +86,23 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
     statsEl: HTMLElement | null = null;
     _colorComp: ColorComponent | null = null;
     private renderTargetEl: HTMLElement | null = null;
-    constructor(app: App, plugin: SettingsRuntime) { super(app, plugin); this.plugin = plugin; }
+    private manualComponent: Component | null = null;
+    constructor(app: App, plugin: SettingsRuntime) { super(app, plugin); this.plugin = plugin; plugin.register(() => this.hide()); }
 
     display(): void {
       this.renderSettings(this.containerEl);
     }
 
+    hide(): void { this.manualComponent?.unload(); this.manualComponent = null; }
+
     private rerender(): void {
       this.renderSettings(this.renderTargetEl?.isConnected ? this.renderTargetEl : this.containerEl);
     }
 
-    section(containerEl: HTMLElement, title: string, { open = false, desc = "" }: { open?: boolean; desc?: string } = {}): HTMLElement {
-      const details = containerEl.createEl("details", { cls: "lexis-settings-section" });
-      details.open = open;
-      const summary = details.createEl("summary");
-      summary.createSpan({ text: title });
-      if (desc) summary.createSpan({ cls: "lexis-settings-section-hint", text: desc });
-      return details.createDiv({ cls: "lexis-settings-section-body" });
+    section(containerEl: HTMLElement, title: string, { desc = "" }: { open?: boolean; desc?: string } = {}): HTMLElement {
+      return createSettingsSection(containerEl, title, {
+        level: "section", description: desc,
+      }).body;
     }
 
     getSettingDefinitions(): SettingDefinitionItem[] {
@@ -99,15 +110,17 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
         name: "Lexis",
         aliases: ["dictionary", "highlight", "review", "browser", "PDF", "词典", "高亮", "复习"],
         render: (setting: Setting) => {
-          setting.settingEl.empty();
-          setting.settingEl.addClass("lexis-settings-root");
           this.renderSettings(setting.settingEl);
         },
       }];
     }
 
     renderSettings(containerEl: HTMLElement): void {
+      this.hide();
+      this.manualComponent = new Component();
+      this.manualComponent.load();
       this.renderTargetEl = containerEl;
+      containerEl.addClass("lexis-settings-root");
       containerEl.empty();
       const t = (key: string, vars?: TranslationVars) => this.plugin.t(key, vars);
       const document = containerEl.ownerDocument;
@@ -125,9 +138,22 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
         reset: t("settings.resetAppearance"),
         done: t("common.done"),
       };
-      new Setting(containerEl).setName(t("settings.title")).setHeading();
+      const title = new Setting(containerEl).setName(t("settings.title")).setHeading();
+      title.settingEl.addClass("lexis-settings-title-row");
+      renderPluginMaintenance(title.controlEl, this.plugin, this.manualComponent);
 
-      addCurrentChoice(new Setting(containerEl).setName(t("language.name")), [
+      const sectionsContainer = containerEl.createDiv({ cls: "lexis-settings-navigation" });
+      const sections = new Map<string, HTMLElement>();
+      const topSection = (key: string, title: string, options: { open?: boolean; desc?: string } = {}) => {
+        const body = this.section(sectionsContainer, title, options);
+        const section = body.parentElement;
+        section.dataset.lexisSectionKey = key;
+        sections.set(key, section);
+        return body;
+      };
+      const generalSection = topSection("general", t("settings.tabGeneral"));
+
+      addCurrentChoice(new Setting(generalSection).setName(t("language.name")), [
         { value: "zh", label: t("language.zh") }, { value: "en", label: t("language.en") },
       ], this.plugin.settings.language || "zh", async (value) => {
           this.plugin.settings.language = value === "en" ? "en" : "zh";
@@ -141,18 +167,9 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
           this.rerender();
         });
 
-      new Setting(containerEl).setName(t("settings.statusBar")).setDesc(t("settings.statusBarDesc"))
+      new Setting(generalSection).setName(t("settings.statusBar")).setDesc(t("settings.statusBarDesc"))
         .addToggle((toggle) => toggle.setValue(this.plugin.settings.statusBarVisible !== false).onChange((value) => this.plugin.statusBar.setVisible(value)));
 
-      const sectionsContainer = containerEl.createDiv({ cls: "lexis-settings-sections" });
-      const sections = new Map<string, HTMLElement>();
-      const topSection = (key: string, title: string, options: { open?: boolean; desc?: string } = {}) => {
-        const body = this.section(sectionsContainer, title, options);
-        const details = body.parentElement;
-        details.dataset.lexisSectionKey = key;
-        sections.set(key, details);
-        return body;
-      };
       const folders = this.app.vault.getAllLoadedFiles().filter((f) => f instanceof TFolder).map((f) => f.path).filter((p) => p && p !== "/").sort();
       const mdFiles = this.app.vault.getMarkdownFiles().map((f) => f.path).sort();
       const hasSuggest = !!obsidian.AbstractInputSuggest;
@@ -174,101 +191,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       });
 
       const dictSection = topSection("dictionary", t("settings.dictionary"), { open: true });
-      const dictHeading = new Setting(dictSection).setDesc(t("settings.dictionaryDesc")).setHeading();
-      const dictsWrap = dictSection.createDiv();
-      let renderDicts: () => void;
-      const addSource = (tag: boolean) => {
-        this.plugin.settings.dicts.push(tag ? { folder: "", template: "", tag: "" } : { folder: "", template: "", highlight: true });
-        renderDicts();
-        void save();
-      };
-      dictHeading.addButton((button) => button.setButtonText(t("settings.addFolderSource")).onClick(() => addSource(false)));
-      dictHeading.addButton((button) => button.setButtonText(t("settings.addTagSource")).onClick(() => addSource(true)));
-      renderDicts = () => {
-        dictsWrap.empty();
-        const reorder = createReorderController({
-          container: dictsWrap,
-          setIcon: obsidian.setIcon,
-          label: t("settings.reorder"),
-          onMove: async (from, to) => {
-            this.plugin.settings.dicts = moveItem(this.plugin.settings.dicts, from, to);
-            await save();
-            await this.plugin.rebuildIndex(false);
-            renderDicts();
-          },
-        });
-        (this.plugin.settings.dicts || []).forEach((d, i) => {
-          const row = dictsWrap.createDiv({ cls: "lexis-setting-row lexis-dictionary-row" });
-          const isTagSource = () => typeof d.tag === "string";
-          const fIn = new obsidian.TextComponent(row);
-          fIn.setPlaceholder(t("settings.folderPlaceholder")).setValue(isTagSource() ? `#${d.tag || ""}` : (d.folder || ""));
-          const tIn = new obsidian.TextComponent(row);
-          tIn.setPlaceholder(t("settings.templatePlaceholder")).setValue(d.template || "");
-          if (isTagSource()) {
-            tIn.setDisabled(true);
-            tIn.setPlaceholder(t("settings.tagSourcePlaceholder"));
-          }
-          const updateTemplateSource = () => {
-            if (isTagSource()) {
-              tIn.setDisabled(true);
-              tIn.setValue("");
-              tIn.inputEl.title = "";
-              return;
-            }
-            const match = this.plugin.templateProvider.templaterTemplateFor(d.folder);
-            tIn.setDisabled(!!match);
-            tIn.setValue(match ? match.path : (d.template || ""));
-            tIn.inputEl.title = match ? t("settings.templaterTemplate", { path: match.path }) : "";
-          };
-          const onSource = async (v: string) => {
-            const value = (v || "").trim();
-            if (value.startsWith("#")) {
-              d.tag = this.plugin.parseTags(value)[0] || "";
-              d.folder = "";
-              tIn.setDisabled(true);
-              tIn.setValue("");
-            } else {
-              delete d.tag;
-              d.folder = value;
-              tIn.setDisabled(false);
-              updateTemplateSource();
-            }
-            await save();
-            void this.plugin.rebuildIndex(false);
-            this.renderStats();
-          };
-          fIn.onChange(onSource);
-          const onTpl = async (v: string) => { d.template = (v || "").trim(); await save(); };
-          tIn.onChange(onTpl);
-          updateTemplateSource();
-          if (hasSuggest) {
-            new PathSuggest(this.app, fIn.inputEl, () => [...folders, ...allTags.map((tag) => `#${tag}`)], (v) => { fIn.setValue(v); void onSource(v); });
-            new PathSuggest(this.app, tIn.inputEl, () => mdFiles, (v) => { tIn.setValue(v); void onTpl(v); });
-          }
-          if (!isTagSource()) {
-            new obsidian.ToggleComponent(row)
-              .setTooltip(t("settings.showDictionaryHighlight"))
-              .setValue(d.highlight !== false)
-              .onChange(async (value) => { d.highlight = value; refresh(); await save(); });
-            const globalColor = this.plugin.settings.highlightColor || accentHex;
-            addAppearanceButton({
-              app: this.app,
-              obsidian,
-              parent: row,
-              title: t("settings.dictionaryAppearance"),
-              labels: appearanceLabels,
-              state: () => ({ color: d.color || globalColor, opacity: Number(d.opacity ?? this.plugin.settings.highlightOpacity) }),
-              onChange: async (patch) => { Object.assign(d, patch); await save(); refresh(); },
-              onReset: async () => { delete d.color; delete d.opacity; await save(); refresh(); },
-            });
-          } else {
-            row.createSpan({ cls: "lexis-source-kind", text: t("settings.tagSource") });
-          }
-          new obsidian.ExtraButtonComponent(row).setIcon("trash").setTooltip(t("settings.deleteDictionary")).onClick(async () => { this.plugin.settings.dicts.splice(i, 1); await save(); await this.plugin.rebuildIndex(false); renderDicts(); this.renderStats(); });
-          reorder.attach(row, i);
-        });
-      };
-      renderDicts();
+      renderDictionarySettings(dictSection, this.plugin, accentHex, appearanceLabels, () => this.renderStats());
       new Setting(dictSection).setName(t("settings.includeAliases"))
         .addToggle((t) => t.setValue(this.plugin.settings.includeAliases).onChange(async (v) => { this.plugin.settings.includeAliases = v; await save(); await this.plugin.rebuildIndex(false); this.renderStats(); }));
       new Setting(dictSection).setName(t("settings.aliasProperties")).setDesc(t("settings.aliasPropertiesDesc"))
@@ -289,89 +212,42 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
         appearanceLabels, createReorderController, moveItem, addAppearanceButton,
       });
 
-      const cardSection = topSection("popover", t("settings.popover"));
-      const preview = cardSection.createDiv({ cls: "lexis-popover lexis-popover-preview" });
-      const previewScroll = preview.createDiv({ cls: "lexis-popover-scroll" });
-      previewScroll.createDiv({ cls: "lexis-popover-title", text: "Yalda · 人物" });
-      previewScroll.createDiv({ cls: "lexis-popover-body", text: t("settings.popoverPreview") });
-      const updateCards = () => {
-        this.plugin.applyPopoverAppearance(preview);
-        const doc = preview.ownerDocument || document;
-        doc.querySelectorAll<HTMLElement>(".lexis-popover:not(.lexis-popover-preview)").forEach((el) => this.plugin.applyPopoverAppearance(el));
-      };
-      updateCards();
-      addCurrentChoice(new Setting(cardSection).setName(t("settings.popoverEditMode")), [
-        { value: "inline", label: t("settings.popoverEditInline") }, { value: "window", label: t("settings.popoverEditWindow") },
-      ], this.plugin.settings.popoverEditMode || "inline", async (value) => { this.plugin.settings.popoverEditMode = value; await save(); });
-      new Setting(cardSection).setName(t("settings.popoverFont"))
-        .addSlider((s) => s.setLimits(11, 24, 1).setValue(this.plugin.settings.popoverFontSize).onChange(async (v) => { this.plugin.settings.popoverFontSize = v; updateCards(); await save(); }));
-      new Setting(cardSection).setName(t("settings.hoverDelay")).setDesc(t("settings.hoverDelayDesc"))
-        .addSlider((s) => s.setLimits(0, 3, 0.1).setValue((this.plugin.settings.hoverDelayMs || 0) / 1000).onChange(async (v) => { this.plugin.settings.hoverDelayMs = Math.round(v * 1000); await save(); }));
-      new Setting(cardSection).setName(t("settings.showRelated")).addToggle((toggle) => toggle.setValue(this.plugin.settings.showRelated).onChange(async (v) => { this.plugin.settings.showRelated = v; await save(); }));
-      new Setting(cardSection).setName(t("settings.showOccurrences")).setDesc(t("settings.showOccurrencesDesc"))
-        .addToggle((t) => t.setValue(this.plugin.settings.showOccurrences).onChange(async (v) => { this.plugin.settings.showOccurrences = v; await save(); }));
-      new Setting(cardSection).setName(t("settings.pdfOccurrences")).setDesc(t("settings.pdfOccurrencesDesc"))
-        .addToggle((toggle) => toggle.setValue(this.plugin.settings.includePdfOccurrences !== false).onChange(async (v) => { this.plugin.settings.includePdfOccurrences = v; this.plugin._occCache.clear(); await save(); }));
-      new Setting(cardSection).setName(t("settings.occurrenceLimit")).addSlider((s) => s.setLimits(1, 15, 1).setValue(this.plugin.settings.occurrenceLimit).onChange(async (v) => { this.plugin.settings.occurrenceLimit = v; await save(); this.plugin._occCache.clear(); }));
-      new Setting(cardSection).setName(t("settings.occurrenceScope")).setDesc(t("settings.occurrenceScopeDesc"))
-        .addText((input) => input.setPlaceholder(t("settings.wholeVault")).setValue(this.plugin.settings.occurrenceFolders).onChange(async (v) => { this.plugin.settings.occurrenceFolders = v.trim(); await save(); this.plugin._occCache.clear(); }));
-
-      const addSection = topSection("selection-add", t("settings.selectionAdd"));
-      new Setting(addSection).setName(t("settings.selectionPill"))
-        .addToggle((toggle) => toggle.setValue(this.plugin.settings.selectionPill).onChange(async (v) => { this.plugin.settings.selectionPill = v; await save(); if (!v) this.plugin.removeSelPill(); }));
-      addSelectionPillPosition(addSection, { Setting, settings: this.plugin.settings, t, save });
-      addCurrentChoice(new Setting(addSection).setName(t("settings.emptyNotePreset")).setDesc(t("settings.emptyNotePresetDesc")), [
-        { value: "blank", label: t("settings.emptyNoteBlank") }, { value: "occ", label: t("settings.emptyNoteOccurrences") },
-      ], this.plugin.settings.emptyNotePreset || "blank", async (value) => { this.plugin.settings.emptyNotePreset = value; await save(); });
-      new Setting(addSection).setName(t("settings.defaultTemplate")).setDesc(t("settings.defaultTemplateDesc"))
-        .addText((input) => {
-          input.setPlaceholder("template/word.md").setValue(this.plugin.settings.newWordTemplate);
-          const onTpl = async (v: string) => { this.plugin.settings.newWordTemplate = (v || "").trim(); await save(); };
-          input.onChange(onTpl);
-          if (hasSuggest) new PathSuggest(this.app, input.inputEl, () => mdFiles, (v) => { input.setValue(v); void onTpl(v); });
-        });
-      const occurrenceSetting = new Setting(addSection).setName(t("settings.occurrenceTemplate")).setDesc(t("settings.occurrenceTemplateDesc"))
-        .addTextArea((input) => input
-          .setPlaceholder(DEFAULT_SETTINGS.occurrenceTemplate)
-          .setValue(this.plugin.settings.occurrenceTemplate ?? DEFAULT_SETTINGS.occurrenceTemplate)
-          .onChange(async (v) => { this.plugin.settings.occurrenceTemplate = v; await save(); }));
-      occurrenceSetting.settingEl.addClass("lexis-template-setting");
-      const occurrenceTextarea = occurrenceSetting.controlEl.querySelector("textarea");
-      if (occurrenceTextarea) occurrenceTextarea.rows = 4;
-      new Setting(addSection).setName(t("settings.annotationHeading")).setDesc(t("settings.annotationHeadingDesc"))
-        .addText((input) => input.setPlaceholder("#### 批注").setValue(this.plugin.settings.annotationHeading).onChange(async (value) => { this.plugin.settings.annotationHeading = value; await save(); }));
-      addCurrentChoice(new Setting(addSection).setName(t("settings.annotationImageLocation")).setDesc(t("settings.annotationImageLocationDesc")), [
-        { value: "obsidian", label: t("settings.annotationImageObsidian") }, { value: "custom", label: t("settings.annotationImageCustom") },
-      ], this.plugin.settings.annotationImageLocation || "obsidian", async (value) => {
-        this.plugin.settings.annotationImageLocation = value;
-        await save();
-        this.rerender();
+      renderVocabularyRules.call(this, {
+        obsidian, Setting, PathSuggest, topSection, t, save, refresh, accentHex, allTags, hasSuggest,
+        appearanceLabels, createReorderController, moveItem, addAppearanceButton,
       });
-      if (this.plugin.settings.annotationImageLocation === "custom") {
-        new Setting(addSection).setName(t("settings.annotationImageFolder")).setDesc(t("settings.annotationImageFolderDesc"))
-          .addText((input) => {
-            const apply = async (value: string) => { this.plugin.settings.annotationImageFolder = value.trim(); await save(); };
-            input.setPlaceholder("Attachments/lexis").setValue(this.plugin.settings.annotationImageFolder || "").onChange(apply);
-            if (hasSuggest) new PathSuggest(this.app, input.inputEl, () => folders, (value) => { input.setValue(value); void apply(value); });
-          });
-      }
+
+      renderReaderSettings({ plugin: this.plugin, topSection, PathSuggest, mdFiles, hasSuggest });
 
       const fsrsSection = topSection("review", t("settings.review"));
       renderReviewGoalSettings(fsrsSection, this.plugin);
-      const syntaxTemplates: Array<[keyof Pick<LexisSettings, "flashcardInlineTemplate" | "flashcardBidirectionalTemplate" | "flashcardBlockTemplate" | "flashcardClozeTemplate">, string, string]> = [
-        ["flashcardInlineTemplate", "settings.flashcardInline", "{{question}}::{{answer}}"],
-        ["flashcardBidirectionalTemplate", "settings.flashcardBidirectional", "{{sideA}}:::{{sideB}}"],
-        ["flashcardBlockTemplate", "settings.flashcardBlock", "{{question}}??\n{{answer}}"],
-        ["flashcardClozeTemplate", "settings.flashcardCloze", "=={{answer}}=="],
+      addCurrentChoice(new Setting(fsrsSection).setName(t("settings.reviewLinkMode")).setDesc(t("settings.reviewLinkDesc")), [
+        { value: "current", label: t("settings.reviewLinkCurrent") }, { value: "tab", label: t("settings.reviewLinkTab") },
+      ], this.plugin.settings.reviewLinkMode, async (value) => { this.plugin.settings.reviewLinkMode = value; await save(); });
+      const syntaxTemplates: Array<[keyof Pick<LexisSettings, "flashcardInlineTemplate" | "flashcardBidirectionalTemplate" | "flashcardBlockTemplate" | "flashcardClozeTemplate">, string]> = [
+        ["flashcardInlineTemplate", "settings.flashcardInline"],
+        ["flashcardBidirectionalTemplate", "settings.flashcardBidirectional"],
+        ["flashcardBlockTemplate", "settings.flashcardBlock"],
+        ["flashcardClozeTemplate", "settings.flashcardCloze"],
       ];
-      for (const [field, label, placeholder] of syntaxTemplates) {
-        const setting = new Setting(fsrsSection).setName(t(label)).setDesc(t("settings.flashcardTemplateDesc"));
-        const saveTemplate = async (value: string) => { this.plugin.settings[field] = value; await save(); };
+      for (const [field, label] of syntaxTemplates) {
+        const setting = new Setting(fsrsSection).setName(t(label));
+        const updateDescription = () => {
+          const conflict = field === "flashcardInlineTemplate"
+            && inlineEntryConflictsWithFlashcard(this.plugin.settings.inlineEntryDelimiter, this.plugin.settings[field]);
+          setting.setDesc(`${t("settings.flashcardTemplateDesc")}${conflict ? ` ${t("settings.syntaxConflict")}` : ""}`);
+        };
+        updateDescription();
+        const saveTemplate = async (value: string) => {
+          this.plugin.settings[field] = value;
+          updateDescription();
+          await save();
+        };
         if (field === "flashcardBlockTemplate") {
-          setting.addTextArea((input) => input.setPlaceholder(placeholder).setValue(this.plugin.settings[field]).onChange(saveTemplate));
+          setting.addTextArea((input) => input.setPlaceholder(t("settings.templateDisabledPlaceholder")).setValue(this.plugin.settings[field]).onChange(saveTemplate));
           const textarea = setting.controlEl.querySelector("textarea");
           if (textarea) textarea.rows = 2;
-        } else setting.addText((input) => input.setPlaceholder(placeholder).setValue(this.plugin.settings[field]).onChange(saveTemplate));
+        } else setting.addText((input) => input.setPlaceholder(t("settings.templateDisabledPlaceholder")).setValue(this.plugin.settings[field]).onChange(saveTemplate));
         setting.addExtraButton((button) => button.setIcon("reset").setTooltip(t("settings.resetTemplate")).onClick(async () => {
           const value = DEFAULT_SETTINGS[field];
           this.plugin.settings[field] = value;
@@ -413,6 +289,8 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       new Setting(fsrsSection).setName(t("settings.retireDays")).setDesc(t("settings.retireDaysDesc"))
         .addSlider((s) => s.setLimits(14, 365, 1).setValue(this.plugin.settings.retireCandidateDays).onChange(async (v) => { this.plugin.settings.retireCandidateDays = v; await save(); }));
       const bridgeSection = topSection("bridge", t("settings.bridge"), { desc: t("settings.bridgeDesc") });
+      renderMarginNoteSettings(topSection("marginnote", t("mn.exportSection")), this.plugin);
+      renderSettingsManual(topSection("manual", t("settings.syntaxManual")), this.plugin, this.manualComponent);
       new Setting(bridgeSection).setName(t("settings.enableBridge"))
         .addToggle((t) => t.setValue(this.plugin.settings.bridgeEnabled).onChange(async (v) => {
           this.plugin.settings.bridgeEnabled = v;
@@ -429,26 +307,22 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
         .addExtraButton((b) => b.setIcon("copy").setTooltip(t("settings.copyToken")).onClick(async () => { if (this.plugin.settings.bridgeToken) { await navigator.clipboard.writeText(this.plugin.settings.bridgeToken); new Notice(t("notice.tokenCopied")); } }))
         .addExtraButton((b) => b.setIcon("refresh-cw").setTooltip(t("settings.regenerateToken")).onClick(async () => { this.plugin.settings.bridgeToken = this.plugin.bridge.generateToken(); await save(); this.plugin.bridge.restart(); this.rerender(); }));
 
-      const sectionOrder = orderedSectionKeys([...sections.keys()], this.plugin.settings.settingsSectionOrder);
-      for (const key of sectionOrder) sectionsContainer.appendChild(sections.get(key));
-      const sectionReorder = createReorderController({
-        container: sectionsContainer,
-        setIcon: obsidian.setIcon,
-        label: t("settings.reorder"),
-        onMove: async () => {
-          this.plugin.settings.settingsSectionOrder = Array.from(sectionsContainer.children)
-            .map((element) => (element as HTMLElement).dataset.lexisSectionKey)
-            .filter((key): key is string => !!key);
-          await save();
-        },
+      createSettingsNavigation(sectionsContainer, sections, {
+        activeTab: this.plugin.settings.settingsActiveTab, sectionOrder: this.plugin.settings.settingsSectionOrder, t,
+        setIcon: obsidian.setIcon, tabOrder: this.plugin.settings.settingsTabOrder,
+        assignments: this.plugin.settings.settingsTabAssignments, groupOrder: this.plugin.settings.settingsGroupOrder,
+        tabNames: this.plugin.settings.settingsTabNames, customTabs: this.plugin.settings.settingsCustomTabs,
+        requestTabName: (current, deletable) => askSettingsTabName(this.app, t(current ? "settings.renameTab" : "settings.addTab"), current, t("common.done"),
+          deletable ? t("settings.deleteTab") : undefined, deletable ? t("settings.deleteTabHint") : undefined),
+        onGroupsChange: (names, custom) => { this.plugin.settings.settingsTabNames = names; this.plugin.settings.settingsCustomTabs = custom; void save(); },
+        onTabChange: (id) => { this.plugin.settings.settingsActiveTab = id; void save(); },
+        onOrderChange: (order) => { this.plugin.settings.settingsSectionOrder = order; void save(); },
+        onTabOrderChange: (order) => { this.plugin.settings.settingsTabOrder = order; void save(); },
+        onAssignmentsChange: (assignments) => { this.plugin.settings.settingsTabAssignments = assignments; void save(); },
+        onGroupOrderChange: (orders) => { this.plugin.settings.settingsGroupOrder = orders; void save(); },
       });
-      sectionOrder.forEach((key, index) => {
-        const details = sections.get(key);
-        sectionReorder.attach(details, index, { handleParent: details.querySelector("summary") });
-      });
-
-      new Setting(containerEl).setName(t("settings.rebuild")).addButton((b) => b.setButtonText(t("settings.rebuildNow")).onClick(() => { void this.plugin.rebuildIndex(true); this.renderStats(); }));
-      this.statsEl = containerEl.createEl("p", { cls: "lexis-stats" });
+      new Setting(dictSection).setName(t("settings.rebuild")).addButton((b) => b.setButtonText(t("settings.rebuildNow")).onClick(() => { void this.plugin.rebuildIndex(true); this.renderStats(); }));
+      this.statsEl = dictSection.createEl("p", { cls: "lexis-stats" });
       this.renderStats();
     }
 

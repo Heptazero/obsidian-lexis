@@ -1,6 +1,6 @@
 # Lexis Privacy Policy
 
-Last updated: September 19, 2026
+Last updated: October 14, 2026
 
 Lexis is a local-first personal lexicon for Obsidian. This policy covers the Lexis Obsidian plugin, the Lexis Web browser extension, and Lexis for Zotero.
 
@@ -30,9 +30,11 @@ Communication from Lexis Web is limited to the loopback addresses `127.0.0.1` or
 
 Dictionary notes and review data remain ordinary files in the user's Obsidian vault. Lexis for Zotero uses the same local bridge model.
 
+When the user clicks Check for updates in the Obsidian plugin settings, Lexis requests public release metadata from GitHub. Downloading plugin code requires a separate confirmation. These HTTPS requests contain ordinary connection information, such as an IP address and a Lexis User-Agent header; no notes, learning records, bridge tokens or vault paths are sent. There are no background update checks in this feature. Browser and Zotero bridge communication is unchanged.
+
 ## Sharing and sale
 
-Lexis does not sell, rent, share, or transfer user data to third parties. It does not transfer user data to external servers. Data is disclosed only to the user's own local Obsidian Lexis bridge when the user invokes or enables the relevant feature.
+Lexis does not sell, rent or share note content or learning data with third parties. Those data are sent only to the user's own local Obsidian Lexis bridge when the user invokes or enables the relevant feature. The user-triggered GitHub update requests described above do not include those data.
 
 ## Retention and deletion
 
@@ -60,7 +62,7 @@ Questions and privacy requests can be submitted through the [Lexis issue tracker
 
 # Lexis 隐私政策
 
-更新日期：2026 年 9 月 19 日
+更新日期：2026 年 10 月 14 日
 
 Lexis 是 Obsidian 的本地优先个人词典。本政策适用于 Lexis Obsidian 插件、Lexis Web 浏览器扩展和 Lexis for Zotero。
 
@@ -90,9 +92,11 @@ Lexis Web 只与 `127.0.0.1` 或 `localhost` 回环地址通信，并使用用�
 
 词典笔记和复习数据始终是用户 Obsidian 库里的普通文件。Lexis for Zotero 使用相同的本机桥接方式。
 
+用户点击 Obsidian 插件设置中的「检查更新」时，Lexis 会向 GitHub 请求公开的发布信息。下载插件代码需要另行确认。这些 HTTPS 请求包含 IP 地址、Lexis User-Agent 请求头等通常的连接信息，不会发送笔记、学习记录、桥接令牌或库路径。该功能不进行后台更新检查；浏览器和 Zotero 的桥接通信方式不变。
+
 ## 共享与出售
 
-Lexis 不出售、出租、共享或向第三方转移用户数据，也不会将用户数据传到外部服务器。只有在用户启用或调用相应功能时，数据才会发送到用户自己的本机 Obsidian Lexis 桥接。
+Lexis 不向第三方出售、出租或共享笔记内容及学习数据。这些数据只在用户启用或调用相应功能时发送到用户自己的本机 Obsidian Lexis 桥接；上述由用户触发的 GitHub 更新请求不包含这些数据。
 
 ## 保留与删除
 

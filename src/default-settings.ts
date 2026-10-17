@@ -1,17 +1,22 @@
 import type { LexisSettings } from "./types";
 import { LEXIS_BRIDGE_DEFAULT_PORT } from "./constants";
+import { DEFAULT_INLINE_ENTRY_DELIMITER } from "./inline-entry-parser";
 
 export type DefaultLexisSettings = Omit<LexisSettings, "dicts" | "vocabFolders" | "excludeTags">;
 
 export const DEFAULT_SETTINGS: DefaultLexisSettings = {
   language: "zh",
+  marginNoteExportFolder: "Lexis-export",
+  marginNoteAutoExport: false,
+  marginNoteSources: null,
+  marginNoteFollowVisibility: false,
   statusBarVisible: true,
   statusBarExpanded: false,
   vocabTags: "",
   includeAliases: true,
   aliasSources: "",
   inlineEntriesEnabled: true,
-  inlineEntryDelimiter: "::",
+  inlineEntryDelimiter: DEFAULT_INLINE_ENTRY_DELIMITER,
   inlineAliasDelimiter: "/",
   inlineClassificationMode: "heading",
   inlineHeadingLevel: 2,
@@ -28,6 +33,12 @@ export const DEFAULT_SETTINGS: DefaultLexisSettings = {
   inlineFileOrder: [],
   inlineCategoryOrderByParent: {},
   settingsSectionOrder: [],
+  settingsActiveTab: "general",
+  settingsTabOrder: [],
+  settingsTabAssignments: {},
+  settingsGroupOrder: {},
+  settingsTabNames: {},
+  settingsCustomTabs: [],
   enableHighlight: true,
   highlightMode: "automatic",
   enableLivePreview: true,
@@ -36,7 +47,7 @@ export const DEFAULT_SETTINGS: DefaultLexisSettings = {
   highlightOpacity: 1,
   popoverWidth: 460,
   popoverMaxHeight: 420,
-  popoverFontSize: 14,
+  popoverFontSize: 0,
   popoverEditMode: "inline",
   hoverDelayMs: 250,
   clickHighlightToOpen: true,
@@ -69,6 +80,9 @@ export const DEFAULT_SETTINGS: DefaultLexisSettings = {
   reviewHistory: {},
   reviewEvents: [],
   reviewAddedAt: {},
+  reviewCardMeta: {},
+  reviewCatalogInitialized: false,
+  reviewPriorities: {},
   syntaxCardStates: {},
   suspendedReviewItems: {},
   showReviewMetadata: false,
@@ -84,6 +98,7 @@ export const DEFAULT_SETTINGS: DefaultLexisSettings = {
   annotationImageFolder: "",
   cardFront: "note",
   reviewBottomSpace: 70,
+  reviewLinkMode: "current",
   lastReviewLinkSource: "",
   lastReviewHub: "",
   bridgeEnabled: false,

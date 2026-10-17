@@ -1,4 +1,5 @@
-import { createEpubHighlights } from "../../src/epub-highlights";
+import { EpubHighlights } from "../../src/epub-highlights";
+import { ReaderHover } from "../../src/reader-hover";
 import { createHighlightEngine } from "../../src/highlight-engine";
 import { createReaderInteractions } from "../../src/reader-interactions";
 import { Platform } from "obsidian";
@@ -42,7 +43,8 @@ function plugin(): any {
     selectionCalls: 0, hoverCalls: 0, clickCalls: 0,
   };
   Object.defineProperties(host, createReaderInteractions());
-  Object.defineProperties(host, createEpubHighlights());
+  host.epubHighlights = new EpubHighlights(host);
+  host.readerHover = new ReaderHover(host);
   const selection = host.maybeShowSelPill;
   host.maybeShowSelPill = (event: MouseEvent, fromEpub: boolean) => {
     host.selectionCalls++;
@@ -88,13 +90,16 @@ async function run(): Promise<void> {
   const book = document.createElement("div");
   document.body.appendChild(book);
   const host = plugin();
-  host.setupEpubIframeHighlight(document);
+  host.epubHighlights.start(document);
   let frame = await chapter(book, "plain text");
   check(typeof (frame.contentDocument!.body as any).createSpan === "undefined", "EPUB has no Obsidian DOM extensions");
   check(select(host, frame) === "plain text", "first plain chapter is selectable");
+  const firstDocument = frame.contentDocument!;
+  const firstSelectionCalls = host.selectionCalls;
   frame.remove();
   await tick();
-  check(host._epubIframeFrames.size === 0, "removed chapter is released");
+  firstDocument.querySelector("p")!.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  check(host.selectionCalls === firstSelectionCalls, "removed chapter is released");
 
   for (let chapterIndex = 0; chapterIndex < 5; chapterIndex++) {
     frame = await chapter(book, "known");
@@ -105,16 +110,15 @@ async function run(): Promise<void> {
     highlight.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
     highlight.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     check(host.hoverCalls === chapterIndex + 1 && host.clickCalls === chapterIndex + 1, "hover and click remain bound after chapter changes");
-    const state = host._epubIframeFrames.get(frame);
-    host.rescanEpubIframes();
-    check(host._epubIframeFrames.get(frame).hooks === state.hooks && doc.querySelectorAll(".lexis-hl").length === 1,
+    host.epubHighlights.rescan();
+    check(doc.querySelectorAll(".lexis-hl").length === 1,
       "rescan neither duplicates hooks nor nests highlights");
     select(host, frame);
     const selectionCalls = host.selectionCalls;
     frame.remove();
     await tick();
     doc.querySelector("p")!.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-    check(host._epubIframeFrames.size === 0 && host.selectionCalls === selectionCalls, "detached chapter documents lose their listeners");
+    check(host.selectionCalls === selectionCalls, "detached chapter documents lose their listeners");
   }
 
   frame = await chapter(book, "known");
@@ -123,7 +127,7 @@ async function run(): Promise<void> {
   frame.srcdoc = "<p>known</p>";
   await loaded;
   await tick();
-  check(frame.contentDocument !== oldDocument && host._epubIframeFrames.get(frame).document === frame.contentDocument,
+  check(frame.contentDocument !== oldDocument && frame.contentDocument!.querySelector(".lexis-hl"),
     "reused iframe rebinds to its new chapter document");
   const beforeOldSelection = host.selectionCalls;
   oldDocument.querySelector("p")!.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
@@ -135,13 +139,13 @@ async function run(): Promise<void> {
   rewrittenDocument.write("<p>known</p>");
   rewrittenDocument.close();
   await tick();
-  host.scanEpubIframe(frame);
-  check(host._epubIframeFrames.get(frame).document === frame.contentDocument,
+  host.epubHighlights.rescan();
+  check(frame.contentDocument!.querySelectorAll(".lexis-hl").length === 1,
     "document.write chapter replacement tracks the current document");
   select(host, frame);
 
   host.settings.highlightMode = "manual";
-  host.rescanEpubIframes();
+  host.epubHighlights.rescan();
   check(!frame.contentDocument!.querySelector(".lexis-hl"), "manual mode removes automatic highlights");
   select(host, frame);
   check(host._selPill.textContent.includes("selection.lookupExisting"), "manual mode still offers lookup in the pill");
@@ -152,7 +156,7 @@ async function run(): Promise<void> {
   select(host, frame);
 
   host.settings.enableHighlight = false;
-  host.rescanEpubIframes();
+  host.epubHighlights.rescan();
   select(host, frame);
   check(!frame.contentDocument!.querySelector(".lexis-hl"), "selection pill is independent of the highlight master switch");
   host.settings.selectionPill = false;
@@ -164,42 +168,44 @@ async function run(): Promise<void> {
   host.settings.highlightMode = "automatic";
 
   const normalRenderer = host.wrapMatchesInElement;
-  host.wrapMatchesInElement = () => { throw new Error("simulated renderer failure"); };
   const failedChapter = document.createElement("iframe");
   failedChapter.setAttribute("enable-annotation", "true");
   book.appendChild(failedChapter);
   failedChapter.contentDocument!.body.innerHTML = "<p>known</p>";
-  try { host.observeEpubIframe(failedChapter); } catch (error) {
+  host.wrapMatchesInElement = (root: HTMLElement, ...args: any[]) => {
+    if (root.ownerDocument === failedChapter.contentDocument) throw new Error("simulated renderer failure");
+    normalRenderer.call(host, root, ...args);
+  };
+  try { host.epubHighlights.rescan(); } catch (error) {
     check((error as Error).message === "simulated renderer failure", "render failure is observable");
   }
   select(host, failedChapter);
   host.wrapMatchesInElement = normalRenderer;
 
-  const tracked = Array.from(host._epubIframeFrames.keys()) as HTMLIFrameElement[];
-  const oldState = host._epubIframeFrames.get(frame);
-  host.teardownEpubIframeHighlight();
+  const tracked = Array.from(book.querySelectorAll("iframe"));
+  host.epubHighlights.dispose();
   const beforeTeardownSelection = host.selectionCalls;
   for (const trackedFrame of tracked) {
     trackedFrame.dispatchEvent(new Event("load"));
     trackedFrame.contentDocument!.querySelector("p")!.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
   }
-  check(!host._epubIframeFrames && !oldState.document && host.selectionCalls === beforeTeardownSelection,
+  check(host.selectionCalls === beforeTeardownSelection,
     "teardown removes both load and document listeners");
   await tick();
   check(errors.length === 0, `no asynchronous errors: ${errors.join(", ")}`);
   host.removeSelPill();
   failedChapter.remove();
 
-  host.setupEpubIframeHighlight(document);
+  host.epubHighlights.start(document);
   select(host, frame);
   check(frame.contentDocument!.querySelectorAll(".lexis-hl").length === 1, "restart binds already-open chapters without duplicate highlights");
   const moved = document.createElement("div");
   document.body.appendChild(moved);
   moved.appendChild(frame);
   await tick();
-  check(host._epubIframeFrames.size === 1, "moving a connected chapter does not discard its binding");
+  check(frame.contentDocument!.querySelectorAll(".lexis-hl").length === 1, "moving a connected chapter does not discard its binding");
   select(host, frame);
-  host.teardownEpubIframeHighlight();
+  host.epubHighlights.dispose();
   host.removeSelPill();
   book.remove(); moved.remove();
 
@@ -224,7 +230,7 @@ async function nestedReaders(host: any): Promise<void> {
   pane.className = "workspace-leaf-content";
   pane.dataset.type = "pdf-annotator";
   document.body.appendChild(pane);
-  host.setupEpubIframeHighlight(document);
+  host.epubHighlights.start(document);
   const shell = document.createElement("iframe");
   shell.style.cssText = "position:absolute;left:80px;top:70px;width:500px;height:400px;border:7px solid blue";
   const loaded = new Promise((resolve) => shell.addEventListener("load", resolve, { once: true }));
@@ -261,10 +267,10 @@ async function nestedReaders(host: any): Promise<void> {
 
   const sidebar = shellDoc.querySelector('iframe[title="sidebar"]') as HTMLIFrameElement;
   sidebar.contentDocument!.body.innerHTML = "<p>known</p>";
-  check(!host._epubIframeFrames.has(sidebar) && !sidebar.contentDocument!.querySelector(".lexis-hl"),
+  check(!sidebar.contentDocument!.querySelector(".lexis-hl"),
     "annotation sidebar is not treated as book text");
   const plainFrame = await chapter(document.body, "known", false);
-  check(!host._epubIframeFrames.has(plainFrame) && !plainFrame.contentDocument!.querySelector(".lexis-hl"),
+  check(!plainFrame.contentDocument!.querySelector(".lexis-hl"),
     "ordinary non-reader iframe content is not touched");
   plainFrame.remove();
   await tick();
@@ -303,21 +309,23 @@ async function nestedReaders(host: any): Promise<void> {
   const reloaded = new Promise((resolve) => shell.addEventListener("load", resolve, { once: true }));
   shell.srcdoc = '<div id="viewer"></div>';
   await reloaded; await tick();
-  check(host._epubIframeFrames.size === 0, "Annotator shell navigation prunes stale nested chapter documents");
   const beforeStale = host.selectionCalls;
   oldDoc.querySelector("p")!.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-  check(host.selectionCalls === beforeStale, "old Annotator chapters no longer receive selection events");
+  check(host.selectionCalls === beforeStale, "Annotator shell navigation prunes stale nested chapter listeners");
   inner = await chapter(shell.contentDocument!.querySelector("#viewer")!, "known", false);
   check(inner.contentDocument!.querySelector(".lexis-hl"), "Annotator viewer chapters work without modern epub.js attributes");
   select(host, inner);
   const rewrittenShell = shell.contentDocument!;
   rewrittenShell.open(); rewrittenShell.write('<div id="viewer"></div>'); rewrittenShell.close();
-  await tick(); host.rescanEpubIframes();
+  await tick(); host.epubHighlights.rescan();
   inner = await chapter(shell.contentDocument!.querySelector("#viewer")!, "known", false);
   select(host, inner);
   check(inner.contentDocument!.querySelector(".lexis-hl"), "rewritten Annotator shells still observe later chapter insertion");
+  const closingCalls = host.selectionCalls;
+  const closingDoc = inner.contentDocument!;
   pane.remove(); await tick();
-  check(host._epubIframeFrames.size === 0, "closing an Annotator pane releases the whole reader tree");
+  closingDoc.querySelector("p")!.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  check(host.selectionCalls === closingCalls, "closing an Annotator pane releases the whole reader tree");
   host.removeSelPill();
 
   const weave = document.createElement("foliate-view") as any;
@@ -330,21 +338,23 @@ async function nestedReaders(host: any): Promise<void> {
   weave.renderer = { getContents: () => [{ doc: foliateFrame.contentDocument }] };
   weave.dispatchEvent(new Event("load"));
   await tick();
-  check(weave.shadowRoot === null && host._epubIframeFrames.has(foliateFrame), "Foliate's public document API works through a closed shadow root");
+  check(weave.shadowRoot === null && foliateFrame.contentDocument!.querySelector(".lexis-hl"), "Foliate's public document API works through a closed shadow root");
   check(foliateFrame.contentDocument!.querySelectorAll(".lexis-hl").length === 1, "Weave/Foliate chapters share the actual highlighter");
   select(host, foliateFrame);
   const sameHighlight = foliateFrame.contentDocument!.querySelector(".lexis-hl");
   for (let i = 0; i < 5; i++) weave.dispatchEvent(new Event("relocate"));
   check(foliateFrame.contentDocument!.querySelector(".lexis-hl") === sameHighlight,
     "Foliate relocation does not rewrite selected text or nest highlights");
-  host.settings.highlightMode = "manual"; host.rescanEpubIframes();
+  host.settings.highlightMode = "manual"; host.epubHighlights.rescan();
   check(!foliateFrame.contentDocument!.querySelector(".lexis-hl"), "explicit refresh updates Foliate highlight settings");
   host.settings.highlightMode = "automatic";
+  const cachedCalls = host.selectionCalls;
   weave.renderer.getContents = () => [];
   weave.dispatchEvent(new Event("relocate"));
-  check(host._epubIframeFrames.size === 0, "Foliate's discarded but connected cached chapters lose their event listeners");
+  foliateFrame.contentDocument!.querySelector("p")!.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  check(host.selectionCalls === cachedCalls, "Foliate's discarded but connected cached chapters lose their event listeners");
   weave.remove(); await tick();
-  host.teardownEpubIframeHighlight(); host.removeSelPill();
+  host.epubHighlights.dispose(); host.readerHover.dispose(); host.removeSelPill();
   check(errors.length === 0, `no errors in nested readers: ${errors.join(", ")}`);
 }
 

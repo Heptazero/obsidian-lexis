@@ -12,6 +12,7 @@ import type { ExcalidrawHighlights } from "./excalidraw-highlights";
 import { manualLookupEnabled } from "./highlight-mode";
 import { finishPopoverEdit } from "./popover-edit-lifecycle";
 import { overlayDocumentFor, readerRectInDocument } from "./reader-frame-geometry";
+import type { ReaderHover } from "./reader-hover";
 
 type AddWordOptions = {
   openExisting?: boolean;
@@ -48,10 +49,7 @@ function createReaderInteractions(): PropertyDescriptorMap {
   declare app: App;
   declare settings: LexisSettings;
   declare index: Map<string, LexisEntry>;
-  declare _hideTimer: number;
-  declare _showTimer: number | null;
-  declare _showTarget: HTMLElement | null;
-  declare _surfaceHoverTarget: HTMLElement | null;
+  declare readerHover: ReaderHover;
   declare _excalidrawHighlights: ExcalidrawHighlights;
   declare _popover: HTMLElement | null;
   declare _popoverComp: ObsidianComponent | null;
@@ -91,13 +89,7 @@ function createReaderInteractions(): PropertyDescriptorMap {
       || canvasHighlightAt(event)
       || this._excalidrawHighlights?.highlightAt(event)
       || null;
-    if (target === this._surfaceHoverTarget) return;
-    if (this._surfaceHoverTarget) {
-      window.clearTimeout(this._showTimer);
-      this._showTarget = null;
-      if (!eventElement(event.target)?.closest('.lexis-popover')) this.scheduleHide();
-    }
-    this._surfaceHoverTarget = target;
+    if (!this.readerHover.move(target, !!eventElement(event.target)?.closest('.lexis-popover'))) return;
     if (target) this.onMouseOver(event);
   }
   onMouseOver(e: MouseEvent): void {
@@ -105,28 +97,14 @@ function createReaderInteractions(): PropertyDescriptorMap {
     const t = this.highlightTarget(e);
     if (!t) return;
     if ((e.buttons & 1) || hasExpandedSelection(t)) return;
-    window.clearTimeout(this._hideTimer);
-    if (this._popover?.dataset.lexisKey === t.dataset.lexisKey) return;
-    if (this._showTarget === t) return;
-    window.clearTimeout(this._showTimer);
-    this._showTarget = t;
-    const open = () => {
-      this._showTimer = null;
-      if (this._showTarget === t && t.isConnected) void this.showPopover(t);
-    };
     const delay = Math.max(0, Number(this.settings.hoverDelayMs) || 0);
-    if (delay) this._showTimer = window.setTimeout(open, delay); else open();
+    this.readerHover.enter(t, delay);
   }
   onMouseOut(e: MouseEvent): void {
     if (obsidian.Platform.isMobile) return;
     const t = this.highlightTarget(e);
     if (!t) return;
-    if (this._showTarget === t) {
-      window.clearTimeout(this._showTimer);
-      this._showTimer = null;
-      this._showTarget = null;
-    }
-    if (this._popover?.dataset.lexisKey === t.dataset.lexisKey) this.scheduleHide();
+    this.readerHover.leave(t);
   }
   onPointerDown(e: PointerEvent): void {
     if (!obsidian.Platform.isMobile || e.pointerType !== "touch") return;
@@ -227,10 +205,7 @@ function createReaderInteractions(): PropertyDescriptorMap {
     } else if (this._popover && !this._popover.contains(eventElement(e.target))) this.removePopover();
   }
   scheduleHide() {
-    window.clearTimeout(this._hideTimer);
-    this._hideTimer = window.setTimeout(() => {
-      if (this._popover?.dataset.lexisResizing !== "1" && this._popover?.dataset.lexisEditing !== "1") this.removePopover();
-    }, 220);
+    this.readerHover.scheduleHide();
   }
   removePopover() {
     const editing = this._popover;
@@ -238,9 +213,8 @@ function createReaderInteractions(): PropertyDescriptorMap {
       void finishPopoverEdit(editing).then((saved) => { if (saved && this._popover === editing) this.removePopover(); });
       return;
     }
-    window.clearTimeout(this._showTimer);
-    this._showTimer = null;
-    this._showTarget = null;
+    this.readerHover.cancelOpen();
+    this.readerHover.keepOpen();
     if (this._popoverComp) { this._popoverComp.unload(); this._popoverComp = null; }
     if (this._popover) { this._popover.remove(); this._popover = null; }
     if (this._manualLookupAnchor) { this._manualLookupAnchor.remove(); this._manualLookupAnchor = null; }
@@ -257,7 +231,7 @@ function createReaderInteractions(): PropertyDescriptorMap {
       if (event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
-      window.clearTimeout(this._hideTimer);
+      this.readerHover.keepOpen();
       const start = popover.getBoundingClientRect();
       const startHeight = popover.style.height;
       const startMaxHeight = popover.style.maxHeight;

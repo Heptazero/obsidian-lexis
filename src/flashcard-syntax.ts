@@ -1,3 +1,6 @@
+import { reviewHeadingPaths } from "./review-heading-path";
+import { maskExcludedLines, maskInlineCode } from "./flashcard-code-mask";
+
 export type SyntaxCardKind = "inline" | "bidirectional" | "block" | "cloze";
 
 export interface FlashcardTemplates {
@@ -17,12 +20,18 @@ export interface ParsedSyntaxCard {
   clozeAnswer?: string;
   clozeIndex?: number;
   line: number;
+  headingPath?: string[];
 }
 
 export interface ClozeAnswerRange {
   start: number;
   end: number;
   answer: string;
+}
+
+export interface FlashcardParseOptions {
+  /** In a marked inline-entry file, an identical delimiter belongs to the dictionary entry. */
+  inlineEntryDelimiter?: string;
 }
 
 const PLACEHOLDERS = {
@@ -34,6 +43,7 @@ const PLACEHOLDERS = {
 
 const ANSWER_MASK_OPEN = '<span class="lexis-rv-answer-mask">';
 const ANSWER_MASK_CLOSE = "</span>";
+const hasQuestion = (value: string): boolean => !!value.trim() && !/^(?:#{1,6}|[-+*]|\d+[.)])$/.test(value.trim());
 
 const hashText = (value: string): string => {
   let hash = 0x811c9dc5;
@@ -55,37 +65,28 @@ const betweenVariables = (template: string, left: string, right: string): string
   return template.slice(leftIndex + left.length, rightIndex);
 };
 
-const maskExcludedLines = (markdown: string): string[] => {
-  const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
-  let fence = "";
-  let frontmatter = lines[0]?.trim() === "---";
-  let comment = false;
-  return lines.map((line, index) => {
-    const trimmed = line.trim();
-    if (frontmatter) {
-      if (index > 0 && trimmed === "---") frontmatter = false;
-      return "";
-    }
-    if (fence) {
-      if (trimmed.startsWith(fence)) fence = "";
-      return "";
-    }
-    const fenceMatch = /^(```+|~~~+)/.exec(trimmed);
-    if (fenceMatch) { fence = fenceMatch[1][0].repeat(fenceMatch[1].length); return ""; }
-    if (comment) {
-      if (line.includes("-->")) comment = false;
-      return "";
-    }
-    const commentStart = line.indexOf("<!--");
-    if (commentStart >= 0) {
-      if (!line.slice(commentStart + 4).includes("-->")) comment = true;
-      return line.slice(0, commentStart);
-    }
-    return line;
-  });
+export const inlineQuestionDelimiter = (template: string): string => (
+  betweenVariables(template || "", PLACEHOLDERS.question, PLACEHOLDERS.answer).trim()
+);
+
+export const inlineEntryConflictsWithFlashcard = (entryDelimiter: string, template: string): boolean => {
+  const entry = String(entryDelimiter || "").trim();
+  return !!entry && entry === inlineQuestionDelimiter(template);
 };
 
 const wrapAnswer = (value: string): string => `${ANSWER_MASK_OPEN}${value}${ANSWER_MASK_CLOSE}`;
+
+const delimiterIndex = (line: string, delimiter: string): number => {
+  let from = 0;
+  while (delimiter) {
+    const at = line.indexOf(delimiter, from);
+    if (at < 0) return -1;
+    const standardLibraryScope = delimiter === "::" && /\bstd$/.test(line.slice(0, at)) && /^[A-Za-z_]/.test(line.slice(at + delimiter.length));
+    if (!standardLibraryScope) return at;
+    from = at + delimiter.length;
+  }
+  return -1;
+};
 
 const maskBlockLine = (line: string): string => {
   if (!line.trim()) return line;
@@ -109,9 +110,9 @@ const applyMaskRanges = (line: string, ranges: MaskRange[]): string => {
   return result;
 };
 
-export function maskSyntaxAnswers(markdown: string, templates: FlashcardTemplates): string {
+export function maskSyntaxAnswers(markdown: string, templates: FlashcardTemplates, options: FlashcardParseOptions = {}): string {
   const rawLines = markdown.replace(/\r\n?/g, "\n").split("\n");
-  const lines = maskExcludedLines(markdown);
+  const lines = maskInlineCode(maskExcludedLines(rawLines.join("\n")));
   const output = [...rawLines];
   const fullyMasked = new Set<number>();
   const ranges = new Map<number, MaskRange[]>();
@@ -134,11 +135,11 @@ export function maskSyntaxAnswers(markdown: string, templates: FlashcardTemplate
         while (start >= 0 && lines[start].trim()) start--;
         question = rawLines.slice(start + 1, index).join("\n").trim();
       } else if (!markerOnOwnLine && line.trimEnd().endsWith(blockMarker)) {
-        question = line.trimEnd().slice(0, -blockMarker.length).trim();
+        question = rawLines[index].trimEnd().slice(0, -blockMarker.length).trim();
       } else continue;
       let answerEnd = answerStart;
       while (answerEnd < rawLines.length && rawLines[answerEnd].trim()) answerEnd++;
-      if (!question || answerEnd === answerStart) continue;
+      if (!hasQuestion(question) || answerEnd === answerStart) continue;
       for (let answerLine = answerStart; answerLine < answerEnd; answerLine++) {
         output[answerLine] = maskBlockLine(rawLines[answerLine]);
         fullyMasked.add(answerLine);
@@ -148,17 +149,21 @@ export function maskSyntaxAnswers(markdown: string, templates: FlashcardTemplate
   }
 
   const bidirectionalDelimiter = betweenVariables(templates.bidirectional || "", PLACEHOLDERS.sideA, PLACEHOLDERS.sideB).trim();
-  const inlineDelimiter = betweenVariables(templates.inline || "", PLACEHOLDERS.question, PLACEHOLDERS.answer).trim();
+  const configuredInlineDelimiter = inlineQuestionDelimiter(templates.inline);
+  const inlineDelimiter = inlineEntryConflictsWithFlashcard(options.inlineEntryDelimiter || "", templates.inline) ? "" : configuredInlineDelimiter;
   for (let index = 0; index < lines.length; index++) {
     if (fullyMasked.has(index) || !lines[index].trim()) continue;
     const line = lines[index];
-    const delimiter = bidirectionalDelimiter && line.includes(bidirectionalDelimiter)
+    const bidirectionalAt = delimiterIndex(line, bidirectionalDelimiter);
+    const inlineAt = delimiterIndex(line, inlineDelimiter);
+    const delimiter = bidirectionalAt >= 0
       ? bidirectionalDelimiter
-      : inlineDelimiter && line.includes(inlineDelimiter) ? inlineDelimiter : "";
+      : inlineAt >= 0 ? inlineDelimiter : "";
     if (!delimiter) continue;
-    const at = line.indexOf(delimiter);
+    const at = delimiter === bidirectionalDelimiter ? bidirectionalAt : inlineAt;
     const answerStart = at + delimiter.length;
-    if (line.slice(0, at).trim() && line.slice(answerStart).trim()) addRange(index, answerStart, line.length);
+    const answer = rawLines[index].slice(answerStart);
+    if (hasQuestion(rawLines[index].slice(0, at)) && (delimiter === bidirectionalDelimiter ? hasQuestion(answer) : answer.trim())) addRange(index, answerStart, rawLines[index].length);
   }
 
   const clozeTemplate = templates.cloze || "";
@@ -176,7 +181,7 @@ export function maskSyntaxAnswers(markdown: string, templates: FlashcardTemplate
         const contentStart = start + clozeOpen.length;
         const close = source.indexOf(clozeClose, contentStart);
         if (close < 0) break;
-        if (source.slice(contentStart, close).trim()) addRange(index, contentStart, close);
+        if (rawLines[index].slice(contentStart, close).trim()) addRange(index, contentStart, close);
         cursor = close + clozeClose.length;
       }
     }
@@ -194,12 +199,14 @@ export function findClozeAnswerRanges(markdown: string, templates: FlashcardTemp
   const clozeClose = clozeTemplate.slice(answerAt + PLACEHOLDERS.answer.length);
   if (!clozeOpen || !clozeClose) return [];
   const ranges: ClozeAnswerRange[] = [];
+  const rawLines = markdown.split("\n");
+  const searchable = maskInlineCode(maskExcludedLines(markdown)).map((line, index) => line.padEnd(rawLines[index].length, "\0")).join("\n");
   let cursor = 0;
   while (cursor < markdown.length) {
-    const start = markdown.indexOf(clozeOpen, cursor);
+    const start = searchable.indexOf(clozeOpen, cursor);
     if (start < 0) break;
     const answerStart = start + clozeOpen.length;
-    const close = markdown.indexOf(clozeClose, answerStart);
+    const close = searchable.indexOf(clozeClose, answerStart);
     if (close < 0) break;
     const answer = markdown.slice(answerStart, close).trim();
     if (answer) ranges.push({ start, end: close + clozeClose.length, answer });
@@ -247,9 +254,10 @@ const addCard = (
   });
 };
 
-export function parseSyntaxCards(markdown: string, filePath: string, templates: FlashcardTemplates): ParsedSyntaxCard[] {
+export function parseSyntaxCards(markdown: string, filePath: string, templates: FlashcardTemplates, options: FlashcardParseOptions = {}): ParsedSyntaxCard[] {
   const rawLines = markdown.replace(/\r\n?/g, "\n").split("\n");
-  const lines = maskExcludedLines(markdown);
+  const visibleLines = maskExcludedLines(rawLines.join("\n"));
+  const lines = maskInlineCode(visibleLines);
   const cards: ParsedSyntaxCard[] = [];
   const counts = new Map<string, number>();
   const consumed = new Set<number>();
@@ -269,12 +277,12 @@ export function parseSyntaxCards(markdown: string, filePath: string, templates: 
         questionStart = start + 1;
         question = rawLines.slice(questionStart, index).join("\n").trim();
       } else if (!markerOnOwnLine && line.trimEnd().endsWith(blockMarker)) {
-        question = line.trimEnd().slice(0, -blockMarker.length).trim();
+        question = rawLines[index].trimEnd().slice(0, -blockMarker.length).trim();
       } else continue;
       let answerEnd = answerStart;
       while (answerEnd < rawLines.length && rawLines[answerEnd].trim()) answerEnd++;
       const answer = rawLines.slice(answerStart, answerEnd).join("\n").trim();
-      if (!question || !answer) continue;
+      if (!hasQuestion(question) || !answer) continue;
       for (let used = questionStart; used < answerEnd; used++) consumed.add(used);
       addCard(cards, counts, filePath, "block", question, answer, questionStart, `${question}\n${answer}`);
       index = Math.max(index, answerEnd - 1);
@@ -282,15 +290,17 @@ export function parseSyntaxCards(markdown: string, filePath: string, templates: 
   }
 
   const bidirectionalDelimiter = betweenVariables(templates.bidirectional || "", PLACEHOLDERS.sideA, PLACEHOLDERS.sideB).trim();
-  const inlineDelimiter = betweenVariables(templates.inline || "", PLACEHOLDERS.question, PLACEHOLDERS.answer).trim();
+  const configuredInlineDelimiter = inlineQuestionDelimiter(templates.inline);
+  const inlineDelimiter = inlineEntryConflictsWithFlashcard(options.inlineEntryDelimiter || "", templates.inline) ? "" : configuredInlineDelimiter;
   for (let index = 0; index < lines.length; index++) {
     if (consumed.has(index) || !lines[index].trim()) continue;
     const line = lines[index];
-    if (bidirectionalDelimiter && line.includes(bidirectionalDelimiter)) {
-      const at = line.indexOf(bidirectionalDelimiter);
-      const sideA = line.slice(0, at).trim();
-      const sideB = line.slice(at + bidirectionalDelimiter.length).trim();
-      if (sideA && sideB) {
+    const bidirectionalAt = delimiterIndex(line, bidirectionalDelimiter);
+    if (bidirectionalAt >= 0) {
+      const at = bidirectionalAt;
+      const sideA = rawLines[index].slice(0, at).trim();
+      const sideB = rawLines[index].slice(at + bidirectionalDelimiter.length).trim();
+      if (hasQuestion(sideA) && hasQuestion(sideB)) {
         const group = `${sideA}${bidirectionalDelimiter}${sideB}`;
         addCard(cards, counts, filePath, "bidirectional", sideA, sideB, index, group);
         addCard(cards, counts, filePath, "bidirectional", sideB, sideA, index, group);
@@ -298,11 +308,12 @@ export function parseSyntaxCards(markdown: string, filePath: string, templates: 
       }
       continue;
     }
-    if (inlineDelimiter && line.includes(inlineDelimiter)) {
-      const at = line.indexOf(inlineDelimiter);
-      const question = line.slice(0, at).trim();
-      const answer = line.slice(at + inlineDelimiter.length).trim();
-      if (question && answer) {
+    const inlineAt = delimiterIndex(line, inlineDelimiter);
+    if (inlineAt >= 0) {
+      const at = inlineAt;
+      const question = rawLines[index].slice(0, at).trim();
+      const answer = rawLines[index].slice(at + inlineDelimiter.length).trim();
+      if (hasQuestion(question) && answer) {
         addCard(cards, counts, filePath, "inline", question, answer, index);
         consumed.add(index);
       }
@@ -325,20 +336,23 @@ export function parseSyntaxCards(markdown: string, filePath: string, templates: 
         const contentStart = start + clozeOpen.length;
         const close = source.indexOf(clozeClose, contentStart);
         if (close < 0) break;
-        const answer = source.slice(contentStart, close).trim();
+        const answer = rawLines[index].slice(contentStart, close).trim();
         if (answer) ranges.push({ start, end: close + clozeClose.length, answer });
         cursor = close + clozeClose.length;
       }
       if (!ranges.length) continue;
-      const combinedFront = ranges.reduceRight((value, range) => value.slice(0, range.start) + "[…]" + value.slice(range.end), source);
+      const original = rawLines[index];
+      const combinedFront = ranges.reduceRight((value, range) => value.slice(0, range.start) + "[…]" + value.slice(range.end), original);
       ranges.forEach((range, clozeIndex) => {
-        const front = source.slice(0, range.start) + "[…]" + source.slice(range.end);
-        addCard(cards, counts, filePath, "cloze", front, source, index, source, combinedFront);
+        const front = original.slice(0, range.start) + "[…]" + original.slice(range.end);
+        addCard(cards, counts, filePath, "cloze", front, original, index, original, combinedFront);
         cards[cards.length - 1].clozeAnswer = range.answer;
         cards[cards.length - 1].clozeIndex = clozeIndex;
       });
     }
   }
 
+  const paths = reviewHeadingPaths(visibleLines);
+  for (const card of cards) card.headingPath = paths[card.line] || [];
   return cards;
 }

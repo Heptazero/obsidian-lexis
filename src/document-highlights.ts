@@ -3,7 +3,6 @@
 import type { App } from "obsidian";
 import type { HighlightStyle, LexisEntry, LexisSettings } from "./types";
 import { setPdfTargets } from "./pdf-highlight-targets";
-import { createEpubHighlights } from "./epub-highlights";
 import { automaticHighlighting } from "./highlight-mode";
 
 type HighlightStyleOptions = { external?: boolean; pdf?: boolean };
@@ -457,7 +456,7 @@ function createDocumentHighlights(): PropertyDescriptorMap {
 
   }
   const { constructor: _constructor, ...descriptors } = Object.getOwnPropertyDescriptors(DocumentHighlights.prototype);
-  return { ...createEpubHighlights(), ...descriptors };
+  return descriptors;
 }
 
 export { createDocumentHighlights, pdfHighlightBand, selectionTouchesLayer };

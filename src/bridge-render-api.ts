@@ -6,6 +6,8 @@ import { relationHeading, relationTypes, replaceLexisFences } from "./relation-s
 import type { Occurrence } from "./occurrence-search";
 import type { InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats, ReviewHistoryEvent } from "./types";
 import { inlineCategoryLabel } from "./inline-category";
+import { buildCurveViewHtml } from "./curve-view";
+import { createMathCssExporter } from "./bridge-math-css";
 
 type Relation = { path: string; basename: string };
 type RelationBag = Record<string, Relation[]>;
@@ -27,6 +29,7 @@ function textValue(value: unknown): string {
 }
 
 function createBridgeRenderApi({ TFile, Component, recentReviewDates, escapeRe, renderLexisMarkdown, finishRenderMath, escHtml, vaultImageDataUrl }: BridgeRenderDependencies): PropertyDescriptorMap {
+  const exportMathCss = createMathCssExporter();
   class BridgeRenderApi {
     declare app: App;
     declare settings: LexisSettings;
@@ -47,7 +50,7 @@ function createBridgeRenderApi({ TFile, Component, recentReviewDates, escapeRe, 
     declare renderInlineEntryInto: (element: HTMLElement, entry: LexisEntry, component: ObsidianComponent) => Promise<void>;
     declare inVocabFolder: (path: string) => boolean;
     declare readCard: (file: ObsidianTFile) => CurveCard;
-    declare buildCurveSVG: (card: CurveCard) => string | null;
+    declare buildCurveSVG: (card: CurveCard, limit?: number) => string | null;
     declare findTypedRelations: (file: ObsidianTFile) => Promise<{ out: RelationBag; inc: RelationBag }>;
     declare findOccurrences: (word: string) => Promise<Occurrence[]>;
     declare getCuratedSourcePaths: (file: ObsidianTFile) => Promise<Set<string>>;
@@ -74,8 +77,7 @@ function createBridgeRenderApi({ TFile, Component, recentReviewDates, escapeRe, 
     return { title, subtitle };
   }
   bridgeMathCss() {
-    const style = this.app.workspace.containerEl.ownerDocument.getElementById("MJX-CHTML-styles") as HTMLStyleElement | null;
-    return style?.sheet ? Array.from(style.sheet.cssRules, (rule: CSSRule) => rule.cssText).join("\n") : "";
+    return exportMathCss(this.app.workspace.containerEl.ownerDocument);
   }
   async bridgeWordDetail(key: unknown) {
     const k = this.resolveIndexKey(textValue(key));
@@ -83,11 +85,12 @@ function createBridgeRenderApi({ TFile, Component, recentReviewDates, escapeRe, 
     if (!e) return { ok: false, error: "not-found" };
     if (e.inline) {
       const heading = this.cardHeading(e);
+      const html = await this.renderInlineEntryHtml(e);
       return {
         ok: true, word: e.display, base: e.canonical || e.display, file: e.file.path,
         vault: this.app.vault.getName(), inline: true, category: e.category, markdown: e.annotation || "*(无批注)*",
         title: heading.title, subtitle: heading.subtitle, colorName: e.colorToken || "",
-        html: await this.renderInlineEntryHtml(e),
+        html, mathCss: html.includes("<mjx-container") ? await this.bridgeMathCss() : "",
       };
     }
     this.recordEncounter(e.file, "hover");
@@ -106,7 +109,7 @@ function createBridgeRenderApi({ TFile, Component, recentReviewDates, escapeRe, 
       title: heading.title, subtitle: heading.subtitle, colorName: e.colorToken || "",
       alias: !!e.isAlias, tags: [...(e.tags || [])],
       meaning: this.extractSection(body, ["意思", "意义"]),
-      markdown: body, html, mathCss: html.includes("<mjx-container") ? this.bridgeMathCss() : "",
+      markdown: body, html, mathCss: html.includes("<mjx-container") ? await this.bridgeMathCss() : "",
     };
   }
   async bridgeWordOccurrences(key: unknown) {
@@ -114,7 +117,7 @@ function createBridgeRenderApi({ TFile, Component, recentReviewDates, escapeRe, 
     const entry = this.index.get(k);
     if (!entry || entry.inline) return { ok: false, error: "not-found" };
     const html = await this.lexisBlockHtml(entry.file, entry.display, "occ");
-    return { ok: true, html, mathCss: html.includes("<mjx-container") ? this.bridgeMathCss() : "" };
+    return { ok: true, html, mathCss: html.includes("<mjx-container") ? await this.bridgeMathCss() : "" };
   }
   bridgeOlink(path: string, base: string) {
     const vault = encodeURIComponent(this.app.vault.getName());
@@ -227,13 +230,13 @@ function createBridgeRenderApi({ TFile, Component, recentReviewDates, escapeRe, 
     const typeArg = parts.slice(1).join(" ");
     const olink = (path: string, basename: string) => this.bridgeOlink(path, basename);
     const relMap = (bags: RelationBag, types: string[]) => { const map = new Map<string, string>(); for (const type of types) for (const relation of (bags[type] || [])) map.set(relation.path, relation.basename); return map; };
-    // 派生词
+    // Legacy derived command: all dictionary backlinks, not linguistic derivation.
     if (m === "derived" || m === "派生") {
       const resolved = this.app.metadataCache.resolvedLinks || {};
       const map = new Map<string, string>();
       for (const s in resolved) if (this.inVocabFolder(s) && resolved[s] && resolved[s][file.path]) { const sf = this.app.vault.getAbstractFileByPath(s); if (sf instanceof TFile) map.set(s, sf.basename); }
-      let h = `<div class="lexis-web-sec">🌱 派生词 (${map.size})</div>`;
-      if (!map.size) return h + `<div class="lexis-web-occ lexis-web-dim">(还没有单词链到这个词根)</div>`;
+      let h = `<div class="lexis-web-sec">${escHtml(this.t("relation.backlinks", { count: map.size }))}</div>`;
+      if (!map.size) return h + `<div class="lexis-web-occ lexis-web-dim">${escHtml(this.t("relation.noBacklinks"))}</div>`;
       return h + `<div class="lexis-web-rel">` + [...map].map(([p, b]) => olink(p, b)).join("") + `</div>`;
     }
     const showCurve = m === "" || m === "curve" || m === "all";
@@ -247,7 +250,8 @@ function createBridgeRenderApi({ TFile, Component, recentReviewDates, escapeRe, 
         const due = card.due ? ` · 下次复习 ${String(card.due).slice(0, 10)}` : "";
         const dates = recentReviewDates(card);
         const history = dates.length ? `<div class="lexis-curve-history">${escHtml(this.t("curve.recentReviews", { dates: dates.map((date) => date.slice(5)).join(" · ") }))}</div>` : "";
-        html += `<div class="lexis-web-sec">🧠 记忆曲线（复习日期 × 保留率${due}）</div><div class="lexis-web-curve">${history}${svg}</div>`;
+        const view = buildCurveViewHtml(card, this.buildCurveSVG.bind(this), this.t.bind(this));
+        html += `<div class="lexis-web-sec">🧠 记忆曲线（复习日期 × 保留率${due}）</div><div class="lexis-web-curve">${history}${view}</div>`;
       }
     }
     if (showRelated && this.settings.showRelated) {

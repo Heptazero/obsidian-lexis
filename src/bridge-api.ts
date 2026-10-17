@@ -2,8 +2,10 @@
 
 import type { App, Component as ObsidianComponent, TFile as ObsidianTFile } from "obsidian";
 import { createBridgeRenderApi } from "./bridge-render-api";
+import { renderOccurrenceContent } from "./occurrence-render";
 import type { Occurrence } from "./occurrence-search";
 import type { HighlightStyle, InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats, ReviewHistoryEvent } from "./types";
+import { dictionaryId, dictionaryName, resolveDictionaries } from "./dictionary-sources";
 
 type TemplateVars = Record<string, unknown>;
 type BridgePayload = Record<string, unknown>;
@@ -145,6 +147,7 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, recentR
     const reqFolder = this.normalizeFolder(textValue(payload.folder));
     const folder = (reqFolder && this.dictFolders().includes(reqFolder)) ? reqFolder : this.primaryVocabFolder();
     const targetPath = (folder ? folder + "/" : "") + name + ".md";
+    const memberships = (file: ObsidianTFile) => (resolveDictionaries(this.app,this.settings.dicts || [],item=>this.getTags(item),[file]).byFile.get(file.path) || []).map(dictionaryId);
     let existing = this.app.vault.getAbstractFileByPath(targetPath);
     // 按路径没找到,不代表这个词不存在——它可能落在别的词典文件夹里(网页端加出处不带 folder 参数,
     // 拼出来的 targetPath 只会落在 primaryVocabFolder)。所以不管是不是在加别名,都按索引(标题或别名)兜底查一遍,
@@ -177,14 +180,14 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, recentR
         }
         if (occurrence) {
           const cur = await this.app.vault.cachedRead(existing);
-          if (dupKey && cur.includes(dupKey)) return { ok: true, created: false, dup: true, word, file: existing.path };
+          if (dupKey && cur.includes(dupKey)) return { ok: true, created: false, dup: true, word, file: existing.path, dictionaries: memberships(existing) };
           const apply = (data: string) => this.insertOccurrence(data, occurrence);
           if (this.app.vault.process) await this.app.vault.process(existing, apply);
           else await this.app.vault.modify(existing, apply(cur));
           this.recordEncounter(existing, "add");
         }
         if (!alias) this.scheduleRebuild();
-        return { ok: true, created: false, word: existing.basename, alias: alias || undefined, file: existing.path };
+        return { ok: true, created: false, word: existing.basename, alias: alias || undefined, file: existing.path, dictionaries: memberships(existing) };
       }
       await this.ensureFolder(folder);
       const tpl = await this.templateForFolder(folder);
@@ -200,7 +203,7 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, recentR
       await this.rebuildIndex(false);
       // 保险:metadataCache 偶尔延迟,手动确保别名进索引
       if (alias) { const ak = alias.toLowerCase(); if (!this.index.has(ak)) this.index.set(ak, { display: alias, file, isAlias: true, tags: new Set() }); }
-      return { ok: true, created: true, word, alias: alias || undefined, file: file.path };
+      return { ok: true, created: true, word, alias: alias || undefined, file: file.path, dictionaries: memberships(file) };
     } catch (err) { return { ok: false, error: errorMessage(err) }; }
   }
   async bridgeDeleteWord(key: unknown) {
@@ -333,7 +336,7 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, recentR
     if (!definition) return data;
     const source = textValue(vars.source);
     const values = { ...vars, source, sourceSuffix: source ? ` —— ${source}` : "" };
-    const item = this.renderTemplate(definition.item, values).trim();
+    const item = renderOccurrenceContent(definition.item, values).trim();
     if (!item) return data;
     if (definition.heading) {
       const heading = this.renderTemplate(definition.heading, values).trim();
@@ -427,8 +430,10 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, recentR
   }
   bridgeWordList() {
     const words = [];
+    const dictionaries = this.settings.dicts || [];
+    const membership = resolveDictionaries(this.app, dictionaries, file => this.getTags(file), [...new Map([...this.index.values()].map(entry => [entry.file.path, entry.file])).values()]);
     // 已归档/已淘汰的词不发给浏览器扩展——扩展自己没有这套生命周期概念,最简单的处理是压根不让它高亮
-    for (const [key, e] of this.index) { if (e.archived || e.retired) continue; words.push({ key, word: e.display, alias: !!e.isAlias, inline: !!e.inline, tags: [...(e.tags || [])], file: e.file && e.file.path, color: this.colorForEntry(e), opacity: this.highlightAlphaForEntry(e), visible: this.highlightVisibleForEntry(e, false), wstyle: this.styleKindForEntry(e) }); }
+    for (const [key, e] of this.index) { if (e.archived || e.retired) continue; words.push({ key, word: e.display, alias: !!e.isAlias, inline: !!e.inline, tags: [...(e.tags || [])], file: e.file && e.file.path, dictionaries: (membership.byFile.get(e.file.path) || []).map(dictionaryId), color: this.colorForEntry(e), opacity: this.highlightAlphaForEntry(e), visible: this.highlightVisibleForEntry(e, false), wstyle: this.styleKindForEntry(e) }); }
     return {
       ok: true, version: this.manifest.version, count: words.length, words,
       styleConfig: {
@@ -438,6 +443,7 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, recentR
         highlightStyle: this.settings.highlightStyle,
         excludeTags: this.parseTags(this.settings.excludeTags),
         dicts: this.dictFolders(),
+        collections: dictionaries.map(row => ({ id: dictionaryId(row), name: dictionaryName(row), folder: row.folder })),
         dictColors: this.dictColorMap(),
         popoverWidth: this.settings.popoverWidth,
         popoverMaxHeight: this.settings.popoverMaxHeight,

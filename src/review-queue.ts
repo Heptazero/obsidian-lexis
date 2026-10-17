@@ -2,6 +2,8 @@ import type { App, TFile } from "obsidian";
 import { parseSyntaxCards, type FlashcardTemplates, type ParsedSyntaxCard } from "./flashcard-syntax";
 import { noteSuspensionKey, syntaxSuspensionKey, restrictReviewItem, reviewItemKeys, reviewGroupState } from "./review-item";
 import type { LexisSettings, ReviewCardState, ReviewItem, ReviewOptions, ReviewSortKey, SuspendedReviewEntry } from "./types";
+import { orderByReviewPriority } from "./review-priority";
+import { linkedMarkdownFiles, resolveDictionaries } from "./dictionary-sources";
 
 interface ReviewQueueDependencies {
   todayStr: () => string;
@@ -15,6 +17,7 @@ interface ReviewQueueHost {
   normalizeFolder(folder: string): string;
   inScope(path: string, folders: string[]): boolean;
   getTags(file: TFile): Set<string>;
+  isInlineSourceFile?(file: TFile): boolean;
   readCard(file: TFile): ReviewCardState;
   readSyntaxCardState(id: string): ReviewCardState;
   freqVal(file: TFile): number;
@@ -54,6 +57,7 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
     declare normalizeFolder: ReviewQueueHost["normalizeFolder"];
     declare inScope: ReviewQueueHost["inScope"];
     declare getTags: ReviewQueueHost["getTags"];
+    declare isInlineSourceFile: (file: TFile) => boolean;
     declare readCard: ReviewQueueHost["readCard"];
     declare readSyntaxCardState: ReviewQueueHost["readSyntaxCardState"];
     declare freqVal: ReviewQueueHost["freqVal"];
@@ -88,7 +92,8 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
         await Promise.all(this.app.vault.getMarkdownFiles().map(async (file) => {
           let markdown = "";
           try { markdown = await this.app.vault.cachedRead(file); } catch { return; }
-          for (const card of parseSyntaxCards(markdown, file.path, templates)) {
+          const options = this.isInlineSourceFile?.(file) ? { inlineEntryDelimiter: this.settings.inlineEntryDelimiter } : {};
+          for (const card of parseSyntaxCards(markdown, file.path, templates, options)) {
             if (syntaxKeys.has(card.id)) syntaxMatches.set(card.id, { file, card });
           }
         }));
@@ -118,18 +123,16 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
     }
 
     directLinkedFiles(sourcePath: string): TFile[] {
-      const source = this.app.vault.getFileByPath(sourcePath);
-      if (!source) return [];
-      const links = this.app.metadataCache.getFileCache(source)?.links || [];
-      const linked = new Map<string, TFile>();
-      for (const link of links) {
-        const file = this.app.metadataCache.getFirstLinkpathDest(link.link, source.path);
-        if (file?.extension === "md" && file.path !== source.path) linked.set(file.path, file);
-      }
-      return [...linked.values()];
+      return linkedMarkdownFiles(this.app, sourcePath);
     }
 
     reviewScopeFiles(options: ReviewOptions): TFile[] {
+      if (options.dictionaryIds !== undefined) {
+        const membership = resolveDictionaries(this.app, this.settings.dicts || [], file => this.getTags(file));
+        const ids = options.dictionaryIds === null ? [...membership.paths.keys()] : options.dictionaryIds;
+        const included = new Set(ids.flatMap(id => [...(membership.paths.get(id) || [])]));
+        return membership.files.filter(file => included.has(file.path) && !this.readLifecycle(file).archived && !this.readLifecycle(file).retired);
+      }
       if (options.sources) {
         const files = new Map<string, TFile>();
         for (const source of options.sources) {
@@ -176,7 +179,7 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
           type: "syntax",
           file,
           card,
-          syntax: { id: syntax.id, memberIds: [syntax.id], kind: syntax.kind, front: syntax.front, back: syntax.back, line: syntax.line },
+          syntax: { id: syntax.id, memberIds: [syntax.id], kind: syntax.kind, front: syntax.front, back: syntax.back, line: syntax.line, headingPath: syntax.headingPath },
         });
       }
       for (const group of combinedGroups.values()) {
@@ -188,6 +191,7 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
           card: reviewGroupState(members.map((member) => member.card)),
           syntax: {
             id: first.groupId,
+            headingPath: first.headingPath,
             memberIds: members.map((member) => member.id),
             members,
             kind: "cloze",
@@ -208,8 +212,9 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
       let markdown = "";
       try { markdown = await this.app.vault.cachedRead(file); } catch { return; }
       const templates = syntaxTemplates(this.settings);
-      const previous = parseSyntaxCards(markdown, oldPath, templates);
-      const current = parseSyntaxCards(markdown, file.path, templates);
+      const options = this.isInlineSourceFile?.(file) ? { inlineEntryDelimiter: this.settings.inlineEntryDelimiter } : {};
+      const previous = parseSyntaxCards(markdown, oldPath, templates, options);
+      const current = parseSyntaxCards(markdown, file.path, templates, options);
       let changed = false;
       for (let index = 0; index < Math.min(previous.length, current.length); index++) {
         const before = previous[index], after = current[index];
@@ -261,7 +266,10 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
       }
       if (content === "syntax" || content === "both") {
         const templates = syntaxTemplates(this.settings);
-        const parsed = files.map((file) => this.syntaxItems(file, parseSyntaxCards(markdownByPath.get(file.path) || "", file.path, templates), today, includeReviewed));
+        const parsed = files.map((file) => {
+          const options = this.isInlineSourceFile?.(file) ? { inlineEntryDelimiter: this.settings.inlineEntryDelimiter } : {};
+          return this.syntaxItems(file, parseSyntaxCards(markdownByPath.get(file.path) || "", file.path, templates, options), today, includeReviewed);
+        });
         for (const items of parsed) candidates.push(...items);
       }
       return candidates;
@@ -313,6 +321,7 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
         });
       }
       const newLimit = Math.max(0, this.settings.newPerDay ?? 20);
+      queue = orderByReviewPriority(queue, this.settings.reviewPriorities);
       let admittedFresh = 0;
       queue = queue.filter((item) => !isFresh(item.card) || admittedFresh++ < newLimit);
       if (resolved.dailyCardLimit != null) {

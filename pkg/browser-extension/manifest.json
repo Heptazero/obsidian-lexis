@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Lexis Web",
-  "version": "1.2.4",
+  "version": "1.2.6",
   "description": "Highlight your Obsidian Lexis entries on the web, open notes on hover, and send selections back over a local-only bridge.",
   "permissions": ["storage"],
   "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
@@ -26,15 +26,22 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["config.js", "alias-search.js", "content-core.js", "content-popover.js", "content.js"],
-      "css": ["content.css"],
+      "js": ["config.js", "alias-search.js", "curve-controls.js", "pill-position.js", "content-dom.js", "content-source.js", "content-math.js", "content-core.js", "content-scan.js", "content-popover.js", "content.js"],
+      "css": ["highlight.css", "content.css"],
       "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["math-source-page.js"],
+      "run_at": "document_idle",
+      "world": "MAIN",
       "all_frames": false
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["popover.css"],
+      "resources": ["popover.css", "highlight.css"],
       "matches": ["<all_urls>"]
     }
   ]

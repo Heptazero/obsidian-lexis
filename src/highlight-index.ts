@@ -3,7 +3,7 @@
 import type { App, Notice as ObsidianNotice, TFile } from "obsidian";
 import type { OccurrenceSearch } from "./occurrence-search";
 import type { InlineCategoryOccurrence, InlineColorTokenUsage, LexisEntry, LexisSettings, LexisStats } from "./types";
-import { parseInlineEntries } from "./inline-entry-parser";
+import { DEFAULT_INLINE_ENTRY_DELIMITER, parseInlineEntries } from "./inline-entry-parser";
 import { inlineClassificationHeading, inlineClassificationPath } from "./inline-category";
 import { collectInlineColorTokenUsages } from "./entry-colors";
 
@@ -32,10 +32,12 @@ function createHighlightIndex({ Notice, boundedSource, compactMixedScriptSpacing
     declare _indexBuildId: number;
     declare _rebuildTimer: number;
     declare _pattern: string | null;
+    declare _dictionaryScopes: unknown;
     declare _indexKeysByCompact: Map<string, string>;
     declare _matchKeysByCompact: Map<string, string>;
     declare statusBar: { update(): void };
     declare reviewDashboard: { refresh(): void };
+    declare marginNoteExport: { schedule(): void };
     declare bridge: { running: boolean } | null;
     declare occurrenceSearch: OccurrenceSearch;
     declare saveSettings: () => Promise<void>;
@@ -52,6 +54,7 @@ function createHighlightIndex({ Notice, boundedSource, compactMixedScriptSpacing
     selfKeysFor(path: string): Set<string> | null { return (this._selfKeysByPath && this._selfKeysByPath.get(path)) || null; }
 
     maybeRebuild(file: TFile | null, oldPath?: string) {
+      this._dictionaryScopes = null;
       const path = file?.path || "";
       this._occCache.clear();
       if (file?.extension === "pdf") this.occurrenceSearch?.invalidatePdf(file.path);
@@ -78,7 +81,8 @@ function createHighlightIndex({ Notice, boundedSource, compactMixedScriptSpacing
         }
         if (reviewChanged) void this.saveSettings();
       }
-      if (this.isVocabFile(file) || this.vocabPaths.has(path) || this.isInlineSourceFile(file) || this.inlineSourcePaths?.has(path) || (oldPath && (this.inFolderScope(oldPath) || this.vocabPaths.has(oldPath) || this.inlineSourcePaths?.has(oldPath)))) this.scheduleRebuild();
+      const hubChanged = this.settings.dicts?.some(row => row.sources?.some(source => source.kind === "links" && source.value.normalize("NFC") === path.normalize("NFC")));
+      if (hubChanged || this.isVocabFile(file) || this.vocabPaths.has(path) || this.isInlineSourceFile(file) || this.inlineSourcePaths?.has(path) || (oldPath && (this.inFolderScope(oldPath) || this.vocabPaths.has(oldPath) || this.inlineSourcePaths?.has(oldPath)))) this.scheduleRebuild();
     }
 
     scheduleRebuild() {
@@ -86,7 +90,7 @@ function createHighlightIndex({ Notice, boundedSource, compactMixedScriptSpacing
       this._rebuildTimer = window.setTimeout(() => { void this.rebuildIndex(false); }, 800);
     }
 
-    inlineDelimiter() { return String(this.settings.inlineEntryDelimiter || "::").trim() || "::"; }
+    inlineDelimiter() { return String(this.settings.inlineEntryDelimiter || DEFAULT_INLINE_ENTRY_DELIMITER).trim() || DEFAULT_INLINE_ENTRY_DELIMITER; }
     inlineAliasDelimiter() { return String(this.settings.inlineAliasDelimiter || "/").trim() || "/"; }
 
     isInlineSourceFile(file: TFile | null | undefined): boolean {
@@ -145,6 +149,7 @@ function createHighlightIndex({ Notice, boundedSource, compactMixedScriptSpacing
     }
 
     async rebuildIndex(notify: boolean): Promise<LexisStats> {
+      this._dictionaryScopes = null;
       const buildId = (this._indexBuildId || 0) + 1;
       this._indexBuildId = buildId;
       const index = new Map<string, LexisEntry>();
@@ -235,6 +240,7 @@ function createHighlightIndex({ Notice, boundedSource, compactMixedScriptSpacing
       this.buildMatcher();
       this.updateStatusBar();
       this.reviewDashboard?.refresh();
+      this.marginNoteExport?.schedule();
       this.refreshAllViews();
       if (notify) {
         const aliasPart = this.settings.includeAliases ? this.t("notice.aliasCount", { count: aliases }) : "";

@@ -1,26 +1,6 @@
 /* 页面层只保留高亮、划词药丸和提示；悬浮卡样式在 Shadow DOM 的 popover.css。 */
 :root { --lexis-web-color: #7c5cff; }
 
-.lexis-web-hl {
-  cursor: text;
-  text-decoration-line: underline;
-  text-decoration-style: wavy;
-  text-decoration-color: var(--lexis-web-color);
-  text-decoration-thickness: 1px;
-  text-underline-offset: 2px;
-}
-.lexis-web-hl::selection {
-  background: Highlight;
-  color: HighlightText;
-  text-decoration-color: transparent;
-}
-[data-lexis-style="underline"] .lexis-web-hl { text-decoration-style: solid; }
-[data-lexis-style="background"] .lexis-web-hl {
-  border-radius: 3px;
-  background-color: color-mix(in srgb, var(--lexis-web-color) 22%, transparent);
-  text-decoration-line: none;
-}
-
 .lexis-web-selbtn {
   position: absolute;
   z-index: 2147483647;
@@ -75,42 +55,67 @@
 .lexis-web-selfolder { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .lexis-web-alias-results {
+  --lexis-alias-background: #fff;
+  --lexis-alias-text: #242424;
+  --lexis-alias-muted: #666;
+  --lexis-alias-hover: rgba(0, 0, 0, .06);
   position: absolute;
   z-index: 2147483647;
   box-sizing: border-box;
   max-height: 220px;
   padding: 4px;
   overflow-y: auto;
-  border: 1px solid rgba(255, 255, 255, .12);
+  border: 1px solid var(--lexis-alias-muted);
   border-radius: 8px;
-  background: #2a2a30;
-  color: #e6e6e6;
+  background: var(--lexis-alias-background);
+  color: var(--lexis-alias-text);
   box-shadow: 0 4px 16px rgba(0, 0, 0, .35);
 }
-.lexis-web-alias-result {
+.lexis-web-alias-results > .lexis-web-alias-result {
+  box-sizing: border-box;
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
   width: 100%;
+  margin: 0;
   padding: 6px 8px;
-  border: 0;
-  border-radius: 5px;
+  border: 1px solid transparent;
+  border-radius: 0;
+  box-shadow: none;
   background: transparent;
   color: inherit;
   font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
   text-align: left;
   cursor: pointer;
 }
-.lexis-web-alias-result:hover,
-.lexis-web-alias-result.is-active { background: rgba(255, 255, 255, .12); }
-.lexis-web-alias-result small {
+.lexis-web-alias-results > .lexis-web-alias-result.is-active {
+  border-color: var(--lexis-alias-muted);
+  border-radius: 5px;
+  background: var(--lexis-alias-hover);
+}
+.lexis-web-alias-results > .lexis-web-alias-result small {
   overflow: hidden;
-  color: #aaa;
+  color: var(--lexis-alias-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.lexis-web-alias-empty { padding: 7px 8px; color: #aaa; font-size: 12px; }
+.lexis-web-alias-results > .lexis-web-alias-result.is-active small { color: inherit; }
+.lexis-web-alias-results > .lexis-web-alias-result > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lexis-web-alias-empty { padding: 7px 8px; color: var(--lexis-alias-muted); font-size: 12px; }
+@media (prefers-color-scheme: dark) {
+  .lexis-web-alias-results {
+    --lexis-alias-background: #2a2a30;
+    --lexis-alias-text: #e6e6e6;
+    --lexis-alias-muted: #b9b9c4;
+    --lexis-alias-hover: rgba(255, 255, 255, .12);
+  }
+}
 
 .lexis-web-folderlist {
   position: absolute;

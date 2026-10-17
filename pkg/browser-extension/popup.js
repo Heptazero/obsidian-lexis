@@ -23,7 +23,7 @@ function renderDictionaries() {
   const container = $("dictionaries");
   container.textContent = "";
   $("currentSite").textContent = currentSite || "当前页面不可设置";
-  const dictionaries = Array.isArray(styleCfg?.dicts) ? styleCfg.dicts.filter(Boolean) : [];
+  const dictionaries = Array.isArray(styleCfg?.collections) ? styleCfg.collections : (styleCfg?.dicts || []).filter(Boolean).map(folder => ({id:folder,name:shortFolder(folder),folder}));
   if (!currentSite || !dictionaries.length) {
     const empty = document.createElement("div");
     empty.className = "dictionary-empty";
@@ -31,19 +31,18 @@ function renderDictionaries() {
     container.appendChild(empty);
     return;
   }
-  for (const folder of dictionaries) {
+  for (const {id,name:label,folder} of dictionaries) {
     const row = document.createElement("label");
     row.className = "dictionary-row";
-    row.title = folder;
+    row.title = label;
     const input = document.createElement("input");
     input.type = "checkbox";
-    input.checked = siteDictionaryVisibility[currentSite]?.[folder] !== false;
+    input.checked = (siteDictionaryVisibility[currentSite]?.[id] ?? siteDictionaryVisibility[currentSite]?.[folder]) !== false;
     const name = document.createElement("span");
-    name.textContent = shortFolder(folder);
+    name.textContent = label;
     input.addEventListener("change", async () => {
       const siteState = { ...(siteDictionaryVisibility[currentSite] || {}) };
-      if (input.checked) delete siteState[folder];
-      else siteState[folder] = false;
+      siteState[id] = input.checked;
       siteDictionaryVisibility = { ...siteDictionaryVisibility };
       if (Object.keys(siteState).length) siteDictionaryVisibility[currentSite] = siteState;
       else delete siteDictionaryVisibility[currentSite];
@@ -55,7 +54,7 @@ function renderDictionaries() {
 }
 
 async function load() {
-  const stored = await chrome.storage.local.get(["cfg", "meta", "pendingAdds", "styleConfig", "siteDictionaryVisibility"]);
+  const stored = await chrome.storage.local.get(["cfg", "meta", "pendingAdds", "styleConfig", "siteDictionaryVisibility", "selectionPillOffset"]);
   const { cfg: c, meta, pendingAdds, styleConfig } = stored;
   cfg = Object.assign({}, DEFAULT_CFG, c || {});
   const storedPort = cfg.port;
@@ -78,6 +77,8 @@ async function load() {
   $("useObsidianStyle").checked = !!(cfg.useObsidianStyle !== false && hasStyleConfig);
   toggleObsidianStyle();
   renderDictionaries();
+  LexisPillPositionEditor.mount($("pillPosition"), stored.selectionPillOffset,
+    (selectionPillOffset) => chrome.storage.local.set({ selectionPillOffset }));
   renderMeta(meta, pendingAdds);
   void autoSyncIfStale(meta).then((connected) => { if (connected) void preloadCurrentPage(); });
 }

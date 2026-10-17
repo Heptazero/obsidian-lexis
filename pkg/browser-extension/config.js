@@ -24,7 +24,16 @@
     return best;
   }
 
-  function isDictionaryVisible(site, folder, dictionaries, visibilityBySite) {
+  function isDictionaryVisible(site, folder, dictionaries, visibilityBySite, memberships, collections) {
+    if (Array.isArray(memberships)) {
+      const state = visibilityBySite?.[site];
+      return !memberships.length || memberships.some(id => {
+        if (state?.[id] !== undefined) return state[id] !== false;
+        // Preserve an existing per-site folder switch until it is edited by ID.
+        const previousFolder = collections?.find(row => row.id === id)?.folder;
+        return !previousFolder || state?.[previousFolder] !== false;
+      });
+    }
     const dictionary = dictionaryForFolder(folder, dictionaries);
     if (!dictionary) return true;
     return visibilityBySite?.[site]?.[dictionary] !== false;

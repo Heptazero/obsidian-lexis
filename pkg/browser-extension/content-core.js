@@ -4,8 +4,6 @@
 const { isDictionaryVisible, hasExpandedSelection, selectionIntersectsNode } = globalThis.LexisWebConfig;
 const { collectAliasTargets, findExactAliasTarget, rankAliasTargets } = globalThis.LexisAliasSearch;
 const HL = "lexis-web-hl";
-const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "INPUT", "SELECT", "OPTION", "KBD", "SAMP"]);
-const CODE_EDITOR_SELECTOR = ".monaco-editor,.CodeMirror,.cm-editor,.ace_editor";
 const DEFAULT_CFG = { highlight: true, showMemoryCurve: true, color: "#7c5cff", style: "wavy", useObsidianStyle: true, opacity: 100 };
 
 let cfg = null;
@@ -24,11 +22,11 @@ let excludedKeys = null;
 let knownKeyByCompact = null;
 let matchKeyByCompact = null;
 let regex = null;
-let observer = null;
 let scanTimer = null;
 let selTimer = null;
 let lastSelectionFolder = "";
 let popoverSize = null;
+let selectionPillOffset = { x: 0, y: 0 };
 let pendingRoots = new Set();
 const selectionDeferredRoots = new Set();
 let pointerSelecting = false;
@@ -37,6 +35,7 @@ const detailCache = new Map();
 let pop = null, popHost = null, hideTimer = null, currentSpan = null;
 let popoverSheetPromise = null;
 let mathCssInstalled = "", mathSheet = null;
+const mathFonts = new Map();
 
 function popoverSheet() {
   if (!popoverSheetPromise) popoverSheetPromise = fetch(chrome.runtime.getURL("popover.css"))
@@ -46,15 +45,43 @@ function popoverSheet() {
 }
 
 function installMathCss(root, css) {
-  if (!css) return;
+  if (!css) return Promise.resolve();
   if (!mathSheet) {
     mathSheet = new CSSStyleSheet();
   }
   if (css !== mathCssInstalled) {
     mathSheet.replaceSync(css);
+    // Font-face rules in an adopted shadow stylesheet do not register document
+    // fonts. Register embedded font data explicitly, with names private to Lexis.
+    const families = new Map();
+    for (const rule of mathSheet.cssRules) {
+      if (rule.type !== CSSRule.FONT_FACE_RULE) continue;
+      const family = rule.style.fontFamily.replace(/["']/g, "");
+      families.set(family, `Lexis-${family}`);
+      const source = rule.style.getPropertyValue("src");
+      if (!/^url\(["']?data:font\//.test(source)) continue;
+      const previous = mathFonts.get(family);
+      if (previous?.source === source) continue;
+      if (previous) document.fonts.delete(previous.face);
+      const face = new FontFace(`Lexis-${family}`, source, {
+        style: rule.style.fontStyle || "normal", weight: rule.style.fontWeight || "normal",
+      });
+      document.fonts.add(face);
+      const ready = face.load().catch(() => null);
+      mathFonts.set(family, { source, face, ready });
+    }
+    const rename = (rules) => {
+      for (const rule of rules) {
+        if (rule.style?.fontFamily) rule.style.fontFamily = rule.style.fontFamily.split(",")
+          .map((family) => families.get(family.trim().replace(/["']/g, "")) || family).join(",");
+        if (rule.cssRules) rename(rule.cssRules);
+      }
+    };
+    rename(mathSheet.cssRules);
     mathCssInstalled = css;
   }
   if (!root.adoptedStyleSheets.includes(mathSheet)) root.adoptedStyleSheets = [...root.adoptedStyleSheets, mathSheet];
+  return Promise.all([...mathFonts.values()].map((font) => font.ready));
 }
 
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -118,6 +145,7 @@ function blockOf(node) {
 }
 function sentenceAroundSpan(span) {
   const block = blockOf(span);
+  if (globalThis.LexisWebMath) return LexisWebMath.sentence(block || span, span);
   const text = (block ? block.textContent : span.textContent) || "";
   const idx = text.indexOf(span.textContent);
   return extractSentence(text, idx < 0 ? 0 : idx);
@@ -126,6 +154,7 @@ function sentenceFromSelection(sel) {
   try {
     const node = sel.anchorNode;
     const block = blockOf(node);
+    if (globalThis.LexisWebMath) return LexisWebMath.sentence(block || node, node, sel.anchorOffset || 0);
     const text = (block ? block.textContent : (node && node.textContent)) || "";
     const probe = (sel.toString() || "").trim();
     const idx = probe ? text.indexOf(probe) : (sel.anchorOffset || 0);
@@ -142,8 +171,8 @@ function toast(text, ok) {
   setTimeout(() => { t.style.opacity = "0"; setTimeout(() => t.remove(), 300); }, 1600);
 }
 
-async function doAdd(word, sentence, alias, folder) {
-  const payload = { word, sentence, url: location.href, title: document.title };
+async function doAdd(word, sentence, alias, folder, source = { url: location.href, title: document.title }) {
+  const payload = { word, sentence, url: source.url, title: source.title };
   if (alias) payload.alias = alias;
   if (folder) payload.folder = folder;
   let r;
@@ -163,7 +192,7 @@ async function doAdd(word, sentence, alias, folder) {
         const responseFile = String(r.file || "");
         const slash = responseFile.lastIndexOf("/");
         const responseFolder = slash > 0 ? responseFile.slice(0, slash) : folder;
-        if (isDictionaryVisible(currentSite, responseFolder, styleCfg?.dicts || [], siteDictionaryVisibility) && !keySet.has(immediateKey)) {
+        if (isDictionaryVisible(currentSite, responseFolder, styleCfg?.dicts || [], siteDictionaryVisibility, r.dictionaries, styleCfg?.collections) && !keySet.has(immediateKey)) {
           keySet.add(immediateKey);
           knownKeyByCompact.set(immediateKey, immediateKey);
           matchKeyByCompact.set(immediateKey, immediateKey);
@@ -234,7 +263,7 @@ function build(words) {
     keyVisible.set(k, x.v !== false);
     if (x.s) keyStyle.set(k, x.s);
     if (exSet.size && tags.some((t) => exSet.has(t))) { excludedKeys.add(k); continue; }
-    if (!isDictionaryVisible(currentSite, x.f, styleCfg?.dicts || [], siteDictionaryVisibility)) continue;
+    if (!isDictionaryVisible(currentSite, x.f, styleCfg?.dicts || [], siteDictionaryVisibility, x.d, styleCfg?.collections)) continue;
     keySet.add(k);
     matchKeyByCompact.set(k, k);
     if (!matchKeyByCompact.has(compact)) matchKeyByCompact.set(compact, k);
@@ -291,18 +320,6 @@ function inlineStyleFor(key) {
   return `text-decoration-line:underline;text-decoration-style:${line};text-decoration-color:${color};text-underline-offset:2px`;
 }
 
-function skip(node) {
-  let p = node.parentElement;
-  while (p) {
-    if (SKIP_TAGS.has(p.tagName)) return true;
-    if (p.isContentEditable) return true;
-    if (p.matches(CODE_EDITOR_SELECTOR)) return true;
-    if (p.classList && (p.classList.contains(HL) || p.classList.contains("lexis-web-pop"))) return true;
-    p = p.parentElement;
-  }
-  return false;
-}
-
 function wrap(textNode) {
   const text = textNode.nodeValue;
   regex.lastIndex = 0;
@@ -324,73 +341,4 @@ function wrap(textNode) {
   if (!found) return;
   if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
   textNode.parentNode.replaceChild(frag, textNode);
-}
-
-function scan(root) {
-  if (!regex || !(cfg && cfg.highlight)) return;
-  const selection = window.getSelection();
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode(n) {
-      if (!n.nodeValue || (n.nodeValue.length < 2 && !/[^\x00-\x7f]/.test(n.nodeValue))) return NodeFilter.FILTER_REJECT;
-      if (skip(n)) return NodeFilter.FILTER_REJECT;
-      if (selectionIntersectsNode(selection, n)) {
-        if (n.parentElement) selectionDeferredRoots.add(n.parentElement);
-        return NodeFilter.FILTER_REJECT;
-      }
-      regex.lastIndex = 0;
-      if (!regex.test(n.nodeValue)) return NodeFilter.FILTER_REJECT;
-      return NodeFilter.FILTER_ACCEPT;
-    },
-  });
-  const targets = [];
-  let n;
-  while ((n = walker.nextNode())) targets.push(n);
-  for (const t of targets) wrap(t);
-}
-
-function unwrapAll() {
-  const parents = new Set();
-  for (const span of document.querySelectorAll("." + HL)) {
-    if (span.parentNode) parents.add(span.parentNode);
-    const tn = document.createTextNode(span.textContent);
-    span.parentNode.replaceChild(tn, span);
-  }
-  for (const parent of parents) if (parent.isConnected) parent.normalize();
-}
-
-function scheduleScan() {
-  clearTimeout(scanTimer);
-  scanTimer = setTimeout(flushScan, 120);
-}
-function flushScan() {
-  if (!regex || !(cfg && cfg.highlight)) { pendingRoots.clear(); return; }
-  const roots = [...pendingRoots];
-  pendingRoots.clear();
-  if (!roots.length) return;
-  // 只扫变动的子树(而非整页),YouTube 字幕这种频繁重渲染的也能近乎即时重新高亮、且不卡
-  for (const r of roots) { if (r && r.isConnected) scan(r); }
-}
-
-function startObserver() {
-  if (observer) return;
-  observer = new MutationObserver((muts) => {
-    let any = false;
-    for (const mu of muts) {
-      if (mu.type === "characterData") {
-        const p = mu.target && mu.target.parentElement;
-        if (p && !(p.classList && p.classList.contains(HL))) { pendingRoots.add(p); any = true; }
-        continue;
-      }
-      for (const node of mu.addedNodes) {
-        if (node.nodeType === 1) {
-          if (node.classList && node.classList.contains(HL)) continue; // 自己插的高亮,别再触发
-          pendingRoots.add(node); any = true;
-        } else if (node.nodeType === 3 && node.parentElement && !(node.parentElement.classList && node.parentElement.classList.contains(HL))) {
-          pendingRoots.add(node.parentElement); any = true;
-        }
-      }
-    }
-    if (any) scheduleScan();
-  });
-  observer.observe(document.body, { childList: true, subtree: true, characterData: true });
 }

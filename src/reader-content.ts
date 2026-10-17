@@ -14,6 +14,7 @@ function createReaderContent({ boundedSource, Component, renderLexisMarkdown }: 
   class ReaderContent {
     declare app: App;
     declare settings: LexisSettings;
+    declare isInlineSourceFile: (file: ObsidianTFile | null | undefined) => boolean;
 
     boldMatchesInPlace(el: HTMLElement, word: string): void {
       const re = new RegExp(boundedSource(word), "ig");
@@ -68,7 +69,7 @@ function createReaderContent({ boundedSource, Component, renderLexisMarkdown }: 
         bidirectional: this.settings.flashcardBidirectionalTemplate,
         block: this.settings.flashcardBlockTemplate,
         cloze: this.settings.flashcardClozeTemplate,
-      });
+      }, this.isInlineSourceFile(file) ? { inlineEntryDelimiter: this.settings.inlineEntryDelimiter } : {});
       const markdown = this.compactSections(stripped.trim()) || "*(空)*";
       el.empty();
       await renderLexisMarkdown(this.app, markdown, el, file.path, comp);

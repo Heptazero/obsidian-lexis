@@ -1,15 +1,44 @@
-# Lexis
+# Lexis — Markdown Personal Dictionary and Automatic Highlighter for Obsidian
 
 [简体中文](./README.zh-CN.md)
 
-Lexis is a local-first personal lexicon for Obsidian. Your notes are the database: no account, hosted service, or proprietary store is required.
+**Lexis is an Obsidian personal dictionary, glossary, and word-bank plugin built on ordinary Markdown notes.** It automatically highlights known terms across your vault, shows their notes on hover, captures selected text from Markdown, PDF, EPUB, browser, and Zotero reading, and schedules optional FSRS spaced-repetition review.
 
-## What it does
+Your vault remains the database. Lexis needs no account, hosted service, or proprietary dictionary format.
+
+## One plugin for the workflows usually split across several plugins
+
+| If you want… | Lexis provides… |
+| --- | --- |
+| A pure-Markdown personal dictionary | One note per entry, several entries in one note, aliases, folders, tags, and index-note links |
+| Automatic highlighting and hover definitions | Matching terms are highlighted throughout supported Obsidian reading surfaces; hover opens the original Markdown note |
+| A vocabulary or terminology review system | The same entries become FSRS cards without copying them into a second database |
+| The same dictionary while reading elsewhere | PDF, EPUB, browser, Zotero, Canvas, and Excalidraw integrations use the Obsidian vault as their source of truth |
+
+## Common questions
+
+### Can I build a personal dictionary in Obsidian using only Markdown?
+
+Yes. A dictionary can be a folder of ordinary notes, a tag, an individual note, an index note's direct links, or several inline entries inside one note. Lexis does not lock definitions into JSON or a proprietary database.
+
+### Can Obsidian automatically highlight every occurrence of my dictionary terms?
+
+Yes. Lexis matches titles and aliases across supported views, highlights them in context, and opens the source note in a hover card. Each dictionary can be shown or hidden independently.
+
+### Can I use the same Obsidian dictionary in PDFs, EPUBs, websites, and Zotero?
+
+Yes. Lexis supports Obsidian's built-in PDF viewer and compatible EPUB readers; the optional Lexis Web and Lexis for Zotero companions reuse the same local Markdown dictionary. Documents must have selectable text.
+
+### Can a Markdown dictionary also work as a spaced-repetition deck?
+
+Yes. Lexis includes FSRS review for whole notes, question-and-answer syntax, and cloze cards. Review is optional: automatic highlighting and hover definitions work without turning every entry into a card.
+
+## Core workflows
 
 ### Store entries as files or inside a note
 
 - **One file per entry.** Point Lexis at one or more folders. Each note title becomes an entry; frontmatter aliases are indexed too.
-- **Many entries in one file.** Mark a note with `lexis-inline: true`, then write `Name / Alias:: annotation`. Spaces around `/` are optional, the delimiter is configurable, and `\/` writes a literal slash. This is useful for recurring characters, places, objects, and factions in a novel without creating hundreds of tiny files.
+- **Many entries in one file.** Mark a note with `lexis-inline: true`, then write `Name / Alias=> annotation`. Spaces around `/` are optional, the delimiter is configurable, and `\/` writes a literal slash. Inline entries take precedence when a legacy delimiter still matches flashcard syntax. This is useful for recurring characters, places, objects, and factions in a novel without creating hundreds of tiny files.
 
 ```md
 ---
@@ -42,10 +71,11 @@ Each Obsidian dictionary has its own highlight switch. Lexis Web keeps a separat
 ### Review what still needs memory
 
 - FSRS spaced repetition with note and occurrence-cloze cards
-- review by dictionary, folder, tag, current note, or the direct links of one selected file; choose whole notes, syntax cards, or both
+- dictionaries combine folders, tags, individual files, and an index file's direct valid links; choose whole notes, syntax cards, or both
 - choose one or all answers on multi-cloze cards, and suspend cards without deleting notes or highlights
 - daily minimum and full goals, deduplicated completions, and a seven-day chart linked to the review log
-- saved review plans combining folders, dictionaries, tags, and Hub links; expandable folder counts
+- saved review plans select one or more dictionaries; overlapping cards share one schedule and are reviewed once
+- reviewed and unreviewed lists share dictionary filters and grouping by dictionary, folder, tag, index links, source file, or heading
 - session progress: green completed, red retry, and neutral remaining; undo and skip
 - a collapsible long-term review heatmap
 - highlights that fade as memory stability grows
@@ -92,21 +122,34 @@ Dictionary notes and FSRS fields stay in vault Markdown files. Lexis settings an
 Use a `lexis` code block to render memory, relationship, and occurrence data inside an entry note:
 
 - `curve` — retention curve
-- `rel [type]` — typed bidirectional relations
+- `rel` — outgoing and incoming links grouped by heading
+- `rel {{heading}}` — missing backlinks under that heading; replace the placeholder with the actual heading, without braces
 - `occ` — unsaved occurrences
-- `derived` — root-derived entries
+- `derived` — dictionary notes linking to this entry, regardless of heading; it does not infer word derivation
 - blank — all applicable sections
 
 Relation types come from heading text rather than a fixed list. Any Markdown heading level (`#` through `######`) works. For example:
 
+`cold.md`:
+
 ````md
-### Antonyms
-```rel Antonyms
+## Antonyms
+[[warm]]
+
+```lexis
+rel
 ```
-[[cold]]
 ````
 
-This is shorthand for `rel Antonyms` inside a `lexis` block. The block adds missing reverse links without repeating links already written in the note.
+`warm.md`:
+
+````md
+```rel
+Antonyms
+```
+````
+
+The first note shows warm; the second automatically shows cold, which links to it. No reciprocal `[[cold]]` needs to be written. Antonyms is only an example for `{{heading}}`, not a reserved name. The block adds missing reverse links without repeating outgoing links already written in the note.
 
 Use `lexis-home` for a compact home summary, or `lexis-heatmap` for the heatmap alone.
 
@@ -147,6 +190,7 @@ Lexis does not promise faster reading or learning without effort.
 - The optional bridge listens only on a configurable loopback port and requires a token.
 - The browser and Zotero companions do not become separate databases.
 - Scanned PDFs without a text layer cannot be highlighted.
+- Settings has top-right Reload and Check for updates actions. Checks contact GitHub only on click; a newer compatible release requires confirmation before downloading. Only the three plugin code assets are replaced, with rollback on failure. Development folders can reload but cannot self-update.
 
 See the full [Lexis Privacy Policy](./PRIVACY.md).
 

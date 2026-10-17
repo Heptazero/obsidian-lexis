@@ -4,6 +4,7 @@
 let hoverTimer = null, hoverTarget = null;
 function removePop() {
   clearTimeout(hoverTimer); hoverTimer = null; hoverTarget = null;
+  pop?.lexisCurveCleanup?.();
   if (popHost) popHost.remove();
   popHost = null; pop = null;
 }
@@ -82,6 +83,7 @@ async function showPop(span) {
   shadow.adoptedStyleSheets = [cardSheet];
   pop = document.createElement("div");
   pop.className = "lexis-web-pop";
+  pop.lexisContext = { source: LexisWebSource.capture(span), sentence: sentenceAroundSpan(span) };
   pop.dataset.k = key;
   pop.innerHTML = `<div class="lexis-web-pop-scroll"><div class="lexis-web-pop-title">${span.textContent}</div><div class="lexis-web-pop-corner"></div><div class="lexis-web-pop-meta"></div><div class="lexis-web-pop-body"></div></div>`;
   pop.addEventListener("mouseenter", () => clearTimeout(hideTimer));
@@ -100,6 +102,7 @@ async function showPop(span) {
   position(popHost, span);
 
   let data = detailCache.get(key);
+  if (data && !LexisCurveControls.curveDateIsCurrent(data.html || "")) data = null;
   const loadingTimer = data ? null : setTimeout(() => {
     if (pop?.dataset.k === key) pop.querySelector(".lexis-web-pop-body").textContent = "加载中…";
   }, 180);
@@ -120,6 +123,7 @@ function obsidianUri(data) {
 }
 
 function renderDetail(box, data) {
+  box.lexisCurveCleanup?.();
   const titleEl = box.querySelector(".lexis-web-pop-title");
   const cornerEl = box.querySelector(".lexis-web-pop-corner");
   const metaEl = box.querySelector(".lexis-web-pop-meta");
@@ -235,9 +239,9 @@ function renderDetail(box, data) {
   const targetWord = data.base || data.word;
   addBtn.addEventListener("click", async (ev) => {
     ev.preventDefault();
-    const sentence = currentSpan ? sentenceAroundSpan(currentSpan) : "";
+    const sentence = box.lexisContext?.sentence || (currentSpan ? sentenceAroundSpan(currentSpan) : "");
     addBtn.disabled = true; addBtn.textContent = "…";
-    await doAdd(targetWord, sentence);
+    await doAdd(targetWord, sentence, undefined, undefined, box.lexisContext?.source);
     removePop();
   });
   if (!data.inline) metaEl.appendChild(addBtn);
@@ -396,6 +400,7 @@ function renderDetail(box, data) {
     });
   }
   body.appendChild(content);
+  LexisCurveControls.attachBrowserCurves(box, content, () => chrome.runtime.sendMessage({ type: "detail", key: box.dataset.k }), (fresh) => { detailCache.set(box.dataset.k, fresh); renderDetail(box, fresh); });
 
   if (data.extraHtml && data.extraHtml.trim()) {
     const extra = document.createElement("div");
@@ -441,8 +446,10 @@ async function loadOccurrences(box, key) {
 async function preloadVisibleDetails() {
   void popoverSheet().catch(() => null);
   const keys = new Set();
-  for (const span of document.querySelectorAll(`.${HL}`)) {
+  for (const span of pageScope.queryAll(`.${HL}`)) {
+    if (LexisWebDom.ignored(span)) continue;
     const rect = span.getBoundingClientRect();
+    if (!rect.width || !rect.height) continue;
     if (rect.bottom < 0 || rect.top > innerHeight || rect.right < 0 || rect.left > innerWidth) continue;
     const key = span.dataset.k;
     if (!key || detailCache.has(key) || keys.has(key)) continue;
@@ -467,10 +474,11 @@ function position(box, span) {
   box.style.top = Math.max(8, top) + "px";
 }
 
-document.addEventListener("mouseover", (e) => {
-  const t = e.target;
+function handleHighlightHover(e) {
+  pageScope.discoverEventRoots(e);
+  const t = LexisWebDom.eventHighlight(e);
   if (!(t && t.classList && t.classList.contains(HL))) return;
-  if (pointerSelecting || (e.buttons & 1) || hasExpandedSelection(window.getSelection())) return;
+  if (pointerSelecting || (e.buttons & 1) || hasExpandedSelection(pageSelection())) return;
   clearTimeout(hideTimer);
   if (pop && pop.dataset.k === t.dataset.k) return;
   if (hoverTarget === t) return;
@@ -480,10 +488,12 @@ document.addEventListener("mouseover", (e) => {
   const delay = Math.max(120, Number(styleCfg && styleCfg.hoverDelayMs) || 0);
   const open = () => { hoverTimer = null; if (hoverTarget === t && t.isConnected) showPop(t); };
   if (delay) hoverTimer = setTimeout(open, delay); else open();
-});
-document.addEventListener("mouseout", (e) => {
-  const t = e.target;
+}
+function handleHighlightLeave(e) {
+  const t = LexisWebDom.eventHighlight(e);
   if (!(t && t.classList && t.classList.contains(HL))) return;
   if (hoverTarget === t) { clearTimeout(hoverTimer); hoverTimer = null; hoverTarget = null; }
   if (pop && pop.dataset.k === t.dataset.k) scheduleHide();
-});
+}
+document.addEventListener("mouseover", handleHighlightHover);
+document.addEventListener("mouseout", handleHighlightLeave);

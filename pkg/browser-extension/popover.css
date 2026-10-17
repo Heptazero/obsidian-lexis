@@ -298,9 +298,15 @@
 .lexis-web-pop-content hr { margin: 8px 0; border: 0; border-top: 1px solid rgba(128, 128, 128, .25); }
 .lexis-web-pop-content img,
 .lexis-web-pop-content svg { max-width: 100%; height: auto; }
-.lexis-web-pop-content .lexis-web-curve { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
+.lexis-web-pop-content .lexis-web-curve { max-width: 100%; overflow-x: hidden; --background-primary: #fff; --background-modifier-border: #ddd; --text-muted: #777; --text-faint: #aaa; --text-accent: #8668db; --interactive-accent: #8668db; }
 .lexis-web-pop-content .lexis-curve-history { position: sticky; left: 0; width: max-content; max-width: 100%; margin-bottom: 2px; opacity: .7; font-size: 11px; white-space: normal; }
-.lexis-web-pop-content .lexis-web-curve svg { width: auto; height: 122px; max-width: none; }
+.lexis-web-pop-content .lexis-web-curve svg { width: 100%; height: auto; max-width: 100%; display: block; }
+.lexis-curve-view { max-width: 640px; }
+.lexis-curve-panel[hidden] { display: none; }
+.lexis-curve-view > button { display: block; margin-inline-start: auto; }
+.lexis-curve-info { min-height: 1.4em; opacity: .7; font-size: 11px; }
+.lexis-curve-view [data-curve-detail] { cursor: pointer; }
+@media (prefers-color-scheme: dark) { .lexis-web-pop-content .lexis-web-curve { --background-primary: #232326; --background-modifier-border: #555; --text-muted: #bbb; --text-faint: #999; } }
 .lexis-web-pop-content table { width: 100%; border-collapse: collapse; }
 .lexis-web-pop-content th,
 .lexis-web-pop-content td { padding: 3px 5px; border: 1px solid rgba(128, 128, 128, .25); text-align: left; }

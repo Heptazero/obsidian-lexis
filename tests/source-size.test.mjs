@@ -3,7 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
-const roots = ["src", "pkg/browser-extension", "pkg/zotero-extension"];
+const roots = ["src", "pkg/browser-extension", "pkg/zotero-extension", "pkg/marginnote-extension"];
 const generatedDirectories = new Set(["dist", "node_modules"]);
 
 async function sourceFiles(directory) {

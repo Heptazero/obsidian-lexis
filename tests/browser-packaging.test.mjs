@@ -11,8 +11,18 @@ test("keeps Chrome and Firefox packages on one version", async () => {
   assert.deepEqual(firefoxManifest.optional_host_permissions, ["http://127.0.0.1/*", "http://localhost/*"]);
   assert.equal("host_permissions" in firefoxManifest, false);
   assert.deepEqual(firefoxManifest.background.scripts, ["config.js", "background.js"]);
-  assert.deepEqual(chromeManifest.content_scripts[0].js, ["config.js", "alias-search.js", "content-core.js", "content-popover.js", "content.js"]);
+  assert.deepEqual(chromeManifest.content_scripts[0].js, ["config.js", "alias-search.js", "curve-controls.js", "pill-position.js", "content-dom.js", "content-source.js", "content-math.js", "content-core.js", "content-scan.js", "content-popover.js", "content.js"]);
   assert.deepEqual(firefoxManifest.content_scripts[0].js, chromeManifest.content_scripts[0].js);
+  assert.deepEqual(chromeManifest.content_scripts[1], firefoxManifest.content_scripts[1]);
+  assert.equal(chromeManifest.content_scripts[1].world, "MAIN");
+  assert.deepEqual(chromeManifest.content_scripts[1].js, ["math-source-page.js"]);
+  const build = await readFile(`${extensionRoot}/scripts/build.sh`, "utf8");
+  const popup = await readFile(`${extensionRoot}/popup.html`, "utf8");
+  const popupScripts = [...popup.matchAll(/<script src="([^"]+)"/g)].map(match=>match[1]);
+  for (const file of [...chromeManifest.content_scripts.flatMap((script) => script.js), ...chromeManifest.content_scripts[0].css, ...popupScripts]) {
+    assert.ok(build.includes(file), `missing package file: ${file}`);
+    await readFile(`${extensionRoot}/${file}`);
+  }
 });
 
 test("bounds browser detail requests and delays the loading label", async () => {
@@ -34,7 +44,7 @@ test("bounds browser detail requests and delays the loading label", async () => 
 });
 
 test("highlights static code blocks without touching code editors", async () => {
-  const source = await readFile(`${extensionRoot}/content-core.js`, "utf8");
+  const source = await readFile(`${extensionRoot}/content-dom.js`, "utf8");
   const tags = JSON.parse(/SKIP_TAGS = new Set\((\[[^;]+\])\)/.exec(source)?.[1] || "[]");
   assert.equal(tags.includes("CODE"), false);
   assert.equal(tags.includes("PRE"), false);

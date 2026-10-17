@@ -1,5 +1,7 @@
 import { findExactAliasTarget, rankAliasTargets, type AliasTarget } from "./alias-search";
 
+let aliasMenuSequence = 0;
+
 export interface AliasComboboxController {
   close(): void;
 }
@@ -21,19 +23,40 @@ interface AliasComboboxOptions {
 export function openAliasCombobox(options: AliasComboboxOptions): AliasComboboxController {
   const { document: doc, anchor, targets } = options;
   const panel = doc.body.createDiv({ cls: "lexis-alias-search" });
-  panel.setAttribute("role", "combobox");
   const input = panel.createEl("input", { cls: "lexis-alias-search-input" });
   input.value = options.initialValue;
   input.placeholder = options.placeholder;
   input.setAttribute("aria-autocomplete", "list");
+  input.setAttribute("role", "combobox");
+  input.setAttribute("aria-expanded", "true");
   const list = panel.createDiv({ cls: "lexis-alias-search-results" });
   list.setAttribute("role", "listbox");
+  list.id = `lexis-alias-options-${++aliasMenuSequence}`;
+  input.setAttribute("aria-controls", list.id);
 
   let closed = false;
   let activeIndex = 0;
   let primaryValue = input.value.trim();
   let exactTarget = findExactAliasTarget(targets, primaryValue);
   let matches = rankAliasTargets(targets, primaryValue, 9).filter((target) => target.id !== exactTarget?.id).slice(0, 7);
+
+  const activate = (index: number) => {
+    activeIndex = index;
+    const rows = list.querySelectorAll<HTMLElement>('[role="option"]');
+    rows.forEach((row, rowIndex) => {
+      row.classList.toggle("is-active", rowIndex === index);
+      row.setAttribute("aria-selected", String(rowIndex === index));
+    });
+    const active = rows[index];
+    if (active) input.setAttribute("aria-activedescendant", active.id);
+    else input.removeAttribute("aria-activedescendant");
+  };
+  const bindOption = (row: HTMLElement, index: number) => {
+    row.id = `${list.id}-${index}`;
+    row.tabIndex = -1;
+    row.addEventListener("mouseenter", () => activate(index));
+    row.addEventListener("focus", () => activate(index));
+  };
 
   const place = () => {
     const win = doc.defaultView || window;
@@ -75,7 +98,9 @@ export function openAliasCombobox(options: AliasComboboxOptions): AliasComboboxC
       primary.classList.toggle("is-active", activeIndex === 0);
       primary.setAttribute("role", "option");
       primary.setAttribute("aria-selected", activeIndex === 0 ? "true" : "false");
+      bindOption(primary, 0);
       primary.createSpan({ text: primaryValue });
+      primary.setAttribute("title", primaryValue);
       primary.createEl("small", { text: exactTarget ? options.existingLabel(exactTarget) : options.createLabel });
       primary.addEventListener("pointerdown", (event) => event.preventDefault());
       primary.addEventListener("click", () => chooseAt(0));
@@ -91,8 +116,10 @@ export function openAliasCombobox(options: AliasComboboxOptions): AliasComboboxC
         row.classList.toggle("is-active", optionIndex === activeIndex);
         row.setAttribute("role", "option");
         row.setAttribute("aria-selected", optionIndex === activeIndex ? "true" : "false");
+        bindOption(row, optionIndex);
         const title = row.createSpan();
         title.textContent = match.title;
+        row.setAttribute("title", match.title);
         if (normalizedLabel(match.matched) !== normalizedLabel(match.title)) {
           const alias = row.createEl("small");
           alias.textContent = match.matched;
@@ -101,6 +128,7 @@ export function openAliasCombobox(options: AliasComboboxOptions): AliasComboboxC
         row.addEventListener("click", () => choose(match));
       });
     }
+    activate(activeIndex);
     place();
   };
 
@@ -114,6 +142,7 @@ export function openAliasCombobox(options: AliasComboboxOptions): AliasComboboxC
       if (closed) return;
       closed = true;
       doc.removeEventListener("pointerdown", onOutside, true);
+      input.setAttribute("aria-expanded", "false");
       panel.remove();
       options.onClose();
     },
@@ -122,8 +151,8 @@ export function openAliasCombobox(options: AliasComboboxOptions): AliasComboboxC
   input.addEventListener("input", () => { activeIndex = 0; render(); });
   input.addEventListener("keydown", (event) => {
     const optionCount = matches.length + (primaryValue ? 1 : 0);
-    if (event.key === "ArrowDown" && optionCount) { event.preventDefault(); activeIndex = (activeIndex + 1) % optionCount; render(); }
-    else if (event.key === "ArrowUp" && optionCount) { event.preventDefault(); activeIndex = (activeIndex - 1 + optionCount) % optionCount; render(); }
+    if (event.key === "ArrowDown" && optionCount) { event.preventDefault(); activate((activeIndex + 1) % optionCount); }
+    else if (event.key === "ArrowUp" && optionCount) { event.preventDefault(); activate((activeIndex - 1 + optionCount) % optionCount); }
     else if (event.key === "Enter" && optionCount) { event.preventDefault(); chooseAt(activeIndex); }
     else if (event.key === "Escape") { event.preventDefault(); controller.close(); }
   });

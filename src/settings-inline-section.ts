@@ -1,10 +1,13 @@
 "use strict";
+import { createSettingsSection } from "./settings-section";
 
 import type { App } from "obsidian";
 import type { InlineCategoryOccurrence, InlineHeadingLevel } from "./types";
 import type { SettingsRuntime } from "./settings-tab";
 import { unconfiguredEntryColorUsages } from "./entry-colors";
 import { addCurrentChoice } from "./settings-choice";
+import { inlineEntryConflictsWithFlashcard } from "./flashcard-syntax";
+import { DEFAULT_INLINE_ENTRY_DELIMITER } from "./inline-entry-parser";
 
 interface InlineGroup {
   id: string;
@@ -51,19 +54,27 @@ export function renderInlineSettings(this: InlineSettingsHost, context: InlineSe
   const inlineSection = topSection("inline", t("settings.inline"), { desc: t("settings.inlineDesc") });
   new Setting(inlineSection).setName(t("settings.enableInline")).setDesc(t("settings.enableInlineDesc"))
     .addToggle((t) => t.setValue(this.plugin.settings.inlineEntriesEnabled).onChange(async (v) => { this.plugin.settings.inlineEntriesEnabled = v; await save(); await this.plugin.rebuildIndex(false); this.renderStats(); }));
-  new Setting(inlineSection).setName(t("settings.inlineDelimiter")).setDesc(t("settings.inlineDelimiterDesc"))
-    .addText((t) => t.setPlaceholder("::").setValue(this.plugin.inlineDelimiter()).onChange(async (v) => { this.plugin.settings.inlineEntryDelimiter = (v || "").trim() || "::"; await save(); await this.plugin.rebuildIndex(false); this.renderStats(); }));
+  const delimiterSetting = new Setting(inlineSection).setName(t("settings.inlineDelimiter"));
+  const updateDelimiterDescription = () => {
+    const delimiter = this.plugin.inlineDelimiter();
+    const conflict = inlineEntryConflictsWithFlashcard(delimiter, this.plugin.settings.flashcardInlineTemplate);
+    delimiterSetting.setDesc(`${t("settings.inlineDelimiterDesc", { delimiter })}${conflict ? ` ${t("settings.syntaxConflict")}` : ""}`);
+  };
+  updateDelimiterDescription();
+  delimiterSetting.addText((input) => input.setPlaceholder(DEFAULT_INLINE_ENTRY_DELIMITER).setValue(this.plugin.inlineDelimiter()).onChange(async (value) => {
+    this.plugin.settings.inlineEntryDelimiter = (value || "").trim() || DEFAULT_INLINE_ENTRY_DELIMITER;
+    updateDelimiterDescription();
+    await save();
+    await this.plugin.rebuildIndex(false);
+    this.renderStats();
+  }));
   new Setting(inlineSection).setName(t("settings.inlineAliasDelimiter")).setDesc(t("settings.inlineAliasDelimiterDesc"))
     .addText((t) => t.setPlaceholder("/").setValue(this.plugin.inlineAliasDelimiter()).onChange(async (v) => { this.plugin.settings.inlineAliasDelimiter = (v || "").trim() || "/"; await save(); await this.plugin.rebuildIndex(false); this.renderStats(); }));
   const inlineSubsection = (key: string, title: string) => {
-    const details = inlineSection.createEl("details", { cls: "lexis-inline-settings-section" });
-    details.open = this.plugin.settings.inlineSettingsCollapsed[key] !== true;
-    details.addEventListener("toggle", () => { this.plugin.settings.inlineSettingsCollapsed[key] = !details.open; void save(); });
-    const summary = details.createEl("summary", { cls: "lexis-inline-settings-summary" });
-    const chevron = summary.createSpan({ cls: "lexis-inline-settings-chevron" });
-    obsidian.setIcon(chevron, "chevron-right");
-    summary.createSpan({ text: title });
-    return details.createDiv({ cls: "lexis-inline-settings-body" });
+    return createSettingsSection(inlineSection, title, {
+      key, open: this.plugin.settings.inlineSettingsCollapsed[key] !== true,
+      onToggle: (open) => { this.plugin.settings.inlineSettingsCollapsed[key] = !open; void save(); },
+    }).body;
   };
   const entryColorGroup = inlineSubsection("entry-colors", t("settings.entryColors"));
   entryColorGroup.createDiv({ cls: "setting-item-description", text: t("settings.entryColorsDesc") });
@@ -238,8 +249,7 @@ export function renderInlineSettings(this: InlineSettingsHost, context: InlineSe
       details.open = collapsed[group.id] !== true;
       details.addEventListener("toggle", () => { void (async () => { collapsed[group.id] = !details.open; await save(); })(); });
       const summary = details.createEl("summary", { cls: "lexis-setting-row lexis-inline-group-row" });
-      const chevron = summary.createSpan({ cls: "lexis-inline-chevron" });
-      obsidian.setIcon(chevron, "chevron-right");
+      summary.createSpan({ cls: "lexis-inline-chevron" });
       summary.createSpan({ cls: "lexis-inline-group-name", text: group.name, attr: { title: group.key } });
       const parentControls = summary.createDiv({ cls: "lexis-inline-category-controls" });
       parentControls.addEventListener("click", (event) => event.stopPropagation());

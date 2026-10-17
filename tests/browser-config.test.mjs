@@ -37,3 +37,20 @@ test("browser highlighting leaves the active selection untouched", async () => {
   assert.equal(config.selectionIntersectsNode(selection, outsideNode), false);
   assert.equal(config.selectionIntersectsNode({ ...selection, isCollapsed: true }, selectedNode), false);
 });
+
+test("overlapping named dictionaries use any enabled membership, independent per site", async () => {
+  const config = await loadConfig();
+  const collections = [{id:"a",name:"Renamed",folder:"Words"},{id:"b",name:"Hub",folder:""}];
+  const state = {site:{a:false,b:false,Words:false}};
+  const visible = (members,site="site")=>config.isDictionaryVisible(site,"Words",["Words"],state,members,collections);
+  assert.equal(visible(["a","b"]),false);
+  state.site.b=true;
+  assert.equal(visible(["a","b"]),true);
+  assert.equal(visible(["a"]),false);
+  assert.equal(visible(["a"],"other"),true);
+  assert.equal(visible([]),true); // Independent inline entries still work.
+  delete state.site.a;
+  assert.equal(visible(["a"]),false); // Previous folder switch survives migration.
+  state.site.a=true;
+  assert.equal(visible(["a"]),true);
+});

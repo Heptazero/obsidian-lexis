@@ -5,3 +5,4 @@ data.sync-conflict-*.json
 node_modules/
 pkg/zotero-extension/dist/
 pkg/browser-extension/dist/
+pkg/marginnote-extension/dist/

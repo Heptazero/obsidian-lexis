@@ -8,6 +8,8 @@ export interface InlineEntrySyntax {
   aliasDelimiter: string;
 }
 
+export const DEFAULT_INLINE_ENTRY_DELIMITER = "=>";
+
 export function splitInlineAliases(value: string, delimiter: string): string[] {
   const token = String(delimiter || "/").trim() || "/";
   const parts: string[] = [];
@@ -39,7 +41,7 @@ export function splitInlineAliases(value: string, delimiter: string): string[] {
 }
 
 export function parseInlineEntries(content: string, file: TFile, syntax: InlineEntrySyntax): LexisEntry[] {
-  const entryDelimiter = String(syntax.entryDelimiter || "::").trim() || "::";
+  const entryDelimiter = String(syntax.entryDelimiter || DEFAULT_INLINE_ENTRY_DELIMITER).trim() || DEFAULT_INLINE_ENTRY_DELIMITER;
   const lines = String(content || "").split(/\r?\n/);
   let firstContentLine = 0;
   if (lines[0]?.trim() === "---") {

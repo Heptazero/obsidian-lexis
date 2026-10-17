@@ -1,0 +1,8 @@
+{
+  "addonid": "com.heptazero.lexis.marginnote",
+  "author": "Heptazero",
+  "title": "Lexis MN",
+  "version": "0.2.1",
+  "marginnote_version_min": "4.0",
+  "cert_key": ""
+}

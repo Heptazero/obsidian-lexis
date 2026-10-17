@@ -30,6 +30,16 @@ test("parses inline aliases with optional whitespace and escaped delimiters", as
   assert.deepEqual(entries[1].aliases, ["输入输出"]);
 });
 
+test("the new default delimiter does not collide with flashcard questions", async () => {
+  const { DEFAULT_INLINE_ENTRY_DELIMITER, parseInlineEntries } = await loadParser();
+  const file = { path: "People.md", basename: "People" };
+  assert.equal(DEFAULT_INLINE_ENTRY_DELIMITER, "=>");
+  const [entry] = parseInlineEntries("萨拉斯第 / Salas=> 忒修斯号船员", file, { entryDelimiter: "", aliasDelimiter: "/" });
+  assert.equal(entry.display, "萨拉斯第");
+  assert.deepEqual(entry.aliases, ["Salas"]);
+  assert.equal(entry.annotation, "忒修斯号船员");
+});
+
 test("supports a custom inline alias delimiter and removes duplicates", async () => {
   const { parseInlineEntries } = await loadParser();
   const file = { path: "People.md", basename: "People" };

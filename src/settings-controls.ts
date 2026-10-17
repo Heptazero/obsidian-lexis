@@ -1,5 +1,6 @@
 "use strict";
 import { addCurrentChoice } from "./settings-choice";
+import { createSettingsSortable } from "./settings-sortable";
 
 import type { App } from "obsidian";
 import type { HighlightStyle } from "./types";
@@ -20,160 +21,24 @@ interface ReorderOptions {
   longPressMs?: number;
 }
 
-function createReorderController({ container, onMove, setIcon, label = "Reorder", longPressMs = 260 }: ReorderOptions) {
-  let from = -1;
-  let active = false;
-  let timer = 0;
-  let pointerId: number | null = null;
-  let activeHandle: HTMLElement | null = null;
-  let draggedRow: HTMLElement | null = null;
-  let draggedDetailsOpen: boolean | null = null;
-  let placeholder: HTMLElement | null = null;
-  let savedStyle: string | null = null;
-  let offsetX = 0;
-  let offsetY = 0;
-  let pointerX = 0;
-  let pointerY = 0;
-
-  const rows = () => Array.from(container.children).filter((el): el is HTMLElement => el.instanceOf(HTMLElement) && el.classList.contains("lexis-sortable-item"));
-  const candidates = () => rows().filter((row) => row !== draggedRow);
-  const restoreRow = () => {
-    if (!draggedRow) return;
-    draggedRow.classList.remove("is-dragging", "is-floating");
-    if (savedStyle == null) draggedRow.removeAttribute("style");
-    else draggedRow.setAttribute("style", savedStyle);
-    if (draggedDetailsOpen != null) (draggedRow as HTMLDetailsElement).open = draggedDetailsOpen;
-  };
-  const floatingPosition = (x: number, y: number) => {
-    if (!draggedRow) return;
-    draggedRow.setCssStyles({ left: `${Math.round(x - offsetX)}px`, top: `${Math.round(y - offsetY)}px` });
-  };
-  const targetAt = (x: number, y: number): HTMLElement | null => {
-    const doc = container.ownerDocument || document;
-    const direct = doc.elementFromPoint?.(x, y)?.closest?.(".lexis-sortable-item");
-    if (direct?.instanceOf(HTMLElement) && direct.parentElement === container && direct !== draggedRow) return direct;
-    let nearest: HTMLElement | null = null;
-    let distance = Infinity;
-    for (const row of candidates()) {
-      const rect = row.getBoundingClientRect();
-      const dx = x < rect.left ? rect.left - x : x > rect.right ? x - rect.right : 0;
-      const dy = y < rect.top ? rect.top - y : y > rect.bottom ? y - rect.bottom : 0;
-      const score = dx * dx + dy * dy;
-      if (score < distance) { nearest = row; distance = score; }
-    }
-    return nearest;
-  };
-  const movePlaceholder = (target: HTMLElement | null, x: number, y: number) => {
-    if (!placeholder || !target) return;
-    const rect = target.getBoundingClientRect();
-    const view = container.ownerDocument?.defaultView || window;
-    const isGrid = view.getComputedStyle?.(container).display === "grid";
-    const sameBand = y >= rect.top && y <= rect.bottom;
-    const after = isGrid && sameBand ? x > rect.left + rect.width / 2 : y > rect.top + rect.height / 2;
-    const reference = after ? target.nextSibling : target;
-    if (reference !== placeholder) container.insertBefore(placeholder, reference);
-  };
-  const begin = (row: HTMLElement, handle: HTMLElement, event: PointerEvent) => {
-    draggedDetailsOpen = row.tagName === "DETAILS" ? (row as HTMLDetailsElement).open : null;
-    if (draggedDetailsOpen) (row as HTMLDetailsElement).open = false;
-    const rect = row.getBoundingClientRect();
-    from = rows().indexOf(row);
-    if (from < 0) {
-      if (draggedDetailsOpen) (row as HTMLDetailsElement).open = true;
-      draggedDetailsOpen = null;
-      return;
-    }
-    active = true;
-    activeHandle = handle;
-    draggedRow = row;
-    savedStyle = row.getAttribute("style");
-    offsetX = pointerX - rect.left;
-    offsetY = pointerY - rect.top;
-    placeholder = container.createDiv({ cls: "lexis-sortable-placeholder" });
-    placeholder.setAttribute("aria-hidden", "true");
-    placeholder.setCssStyles({ height: `${Math.ceil(rect.height)}px` });
-    container.insertBefore(placeholder, row);
-    row.classList.add("is-dragging", "is-floating");
-    row.setCssStyles({
-      position: "fixed",
-      width: `${Math.ceil(rect.width)}px`,
-      left: `${Math.round(rect.left)}px`,
-      top: `${Math.round(rect.top)}px`,
-      margin: "0",
-      zIndex: "1000",
-      pointerEvents: "none",
-    });
-    floatingPosition(pointerX, pointerY);
-    try { handle.setPointerCapture?.(event.pointerId); } catch { /* Pointer capture is optional. */ }
-  };
-  const finish = () => {
-    window.clearTimeout(timer);
-    timer = 0;
-    const start = from;
-    let target = start;
-    if (active && placeholder && draggedRow) {
-      const order = Array.from(container.children).filter((el) => el === placeholder || (el.instanceOf(HTMLElement) && el.classList.contains("lexis-sortable-item") && el !== draggedRow));
-      target = order.indexOf(placeholder);
-      container.insertBefore(draggedRow, placeholder);
-      placeholder.remove();
-    }
-    restoreRow();
-    from = -1;
-    active = false;
-    if (activeHandle && pointerId != null) {
-      try { activeHandle.releasePointerCapture?.(pointerId); } catch { /* Pointer capture is optional. */ }
-    }
-    activeHandle = null;
-    pointerId = null;
-    draggedRow = null;
-    placeholder = null;
-    savedStyle = null;
-    draggedDetailsOpen = null;
-    if (start >= 0 && target >= 0 && start !== target) void onMove(start, target);
-  };
-
+function createReorderController({ container, onMove, label = "Reorder", longPressMs = 320 }: ReorderOptions) {
+  let previous: string[] = [];
+  const sorter = createSettingsSortable({
+    container, label, axis: "auto", longPressMs,
+    onOrder: (ids, movedId) => {
+      const from = previous.indexOf(movedId), to = ids.indexOf(movedId);
+      previous = ids;
+      if (from >= 0 && to >= 0 && from !== to) void onMove(from, to);
+    },
+  });
   return {
     attach(item: HTMLElement, index: number, { handleParent = item }: { handleParent?: HTMLElement } = {}) {
       item.classList.add("lexis-sortable-item");
       handleParent.classList.add("lexis-sortable-row");
       item.dataset.lexisOrder = String(index);
-      const handle = handleParent.createEl("button", {
-        cls: "lexis-drag-handle clickable-icon",
-        attr: { type: "button", "aria-label": label, title: label },
-      });
-      if (setIcon) setIcon(handle, "grip-vertical");
-      else handle.setText("⋮⋮");
-      // 拖动柄位于 details/summary 内时，点击只负责排序，不触发展开或折叠。
-      handle.addEventListener("click", (event) => { event.preventDefault(); event.stopPropagation(); });
-
-      handle.addEventListener("pointerdown", (event) => {
-        if (event.button != null && event.button !== 0) return;
-        window.clearTimeout(timer);
-        from = rows().indexOf(item);
-        if (from < 0) return;
-        pointerId = event.pointerId;
-        pointerX = event.clientX;
-        pointerY = event.clientY;
-        try { handle.setPointerCapture?.(event.pointerId); } catch { /* Pointer capture is optional. */ }
-        if (event.pointerType === "touch") timer = window.setTimeout(() => begin(item, handle, event), longPressMs);
-        else {
-          event.preventDefault();
-          begin(item, handle, event);
-        }
-      });
-      handle.addEventListener("pointermove", (event) => {
-        if (event.pointerId !== pointerId) return;
-        pointerX = event.clientX;
-        pointerY = event.clientY;
-        if (!active) return;
-        event.preventDefault();
-        floatingPosition(pointerX, pointerY);
-        const target = targetAt(event.clientX, event.clientY);
-        movePlaceholder(target, event.clientX, event.clientY);
-      }, { passive: false });
-      handle.addEventListener("pointerup", (event) => { if (event.pointerId === pointerId) finish(); });
-      handle.addEventListener("pointercancel", (event) => { if (event.pointerId === pointerId) finish(); });
-      handle.addEventListener("contextmenu", (event) => { if (active) event.preventDefault(); });
+      previous.push(String(index));
+      sorter.attach(item, handleParent, String(index));
+      handleParent.lastElementChild.classList.add("lexis-drag-handle");
     },
   };
 }

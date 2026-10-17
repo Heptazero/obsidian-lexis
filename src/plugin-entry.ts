@@ -89,7 +89,7 @@ export class LexisPluginEntry extends LexisPluginReview {
       const addOccurrence = (templateContent: string) => {
         let next = templateContent;
         // 出处写进正文(而不是 frontmatter 属性),好看且笔记里直接可见
-        if (!(sentence || srcFile)) return next;
+        if (!(sentence || srcFile || options.source)) return next;
         // PDF 出处带上页码,链接可直接跳到那一页
         let sub = "", disp = srcFile ? srcFile.basename : "";
         if (fromPdf) {
@@ -97,7 +97,7 @@ export class LexisPluginEntry extends LexisPluginReview {
           if (pg) { sub = `#page=${pg}`; disp = `${srcFile.basename} p.${pg}`; }
         }
         const sourceTarget = this.sourceLinkTarget(srcFile);
-        const source = srcFile ? (sub ? `[[${sourceTarget}${sub}|${disp}]]` : `[[${sourceTarget}]]`) : "";
+        const source = srcFile ? (sub ? `[[${sourceTarget}${sub}|${disp}]]` : `[[${sourceTarget}]]`) : options.source || "";
         next = this.insertOccurrence(next, { word: clean, sentence: sentence || "", source, date: todayStr() });
         return next;
       };

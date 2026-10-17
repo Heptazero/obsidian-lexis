@@ -5,8 +5,12 @@ import type { App, TFile, WorkspaceLeaf } from "obsidian";
 import type { TranslationVars } from "./i18n";
 import { chooseClozeRevealMode, type ClozeRevealMode } from "./review-item";
 import { findClozeAnswerRanges, maskClozeAnswers } from "./flashcard-syntax";
+import { displayedSyntaxFront } from "./review-card-display";
 import { sessionReviewProgress } from "./review-progress";
 import { renderReviewProgressBar } from "./review-progress-bar";
+import { ReviewMobileLayout, isMobileReview } from "./review-mobile-layout";
+import { ReviewNavigation } from "./review-navigation";
+import { renderReviewActions } from "./review-actions";
 import type { LexisSettings, ReviewCardState, ReviewItem, ReviewOptions, ReviewStateSnapshot } from "./types";
 
 interface ReviewSchedule {
@@ -37,6 +41,7 @@ interface ReviewSession {
 }
 
 interface ReviewRuntime {
+  saveSettings(): Promise<void>;
   app: App;
   settings: LexisSettings;
   t(key: string, vars?: TranslationVars): string;
@@ -87,18 +92,24 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
   _frontComp: Component | null = null;
   _imagePreview: HTMLElement | null = null;
   private grading = false;
+  private reviewNavigation: ReviewNavigation;
+  private mobileLayout: ReviewMobileLayout | null = null;
 
   isContextCard(item: ReviewItem | null): boolean {
     return !!item && item.type === "note" && this.options.content === "context";
   }
 
-  constructor(leaf: WorkspaceLeaf, plugin: ReviewRuntime) { super(leaf); this.plugin = plugin; this.queue = []; this.pos = 0; this.reviewed = 0; this.revealed = false; this.undoStack = []; this.options = {}; }
+  constructor(leaf: WorkspaceLeaf, plugin: ReviewRuntime) { super(leaf); this.navigation = true; this.plugin = plugin; this.queue = []; this.pos = 0; this.reviewed = 0; this.revealed = false; this.undoStack = []; this.options = {}; }
   getViewType() { return reviewViewType; }
   getDisplayText() { return this.plugin.t("review.title"); }
   getIcon() { return "brain"; }
   async onOpen() {
     this.registerDomEvent(window, "keydown", (event) => this.onKey(event));
-    this.registerDomEvent(window, "resize", () => this.updateMobileReviewLayout());
+    this.mobileLayout = new ReviewMobileLayout(this, this.containerEl, this.contentEl, () => this.rateBar);
+    this.reviewNavigation = new ReviewNavigation({ app: this.app, leaf: this.leaf,
+      mode: () => this.plugin.settings.reviewLinkMode || "current", sourcePath: () => this.currentItem?.file.path || "",
+      saveSession: () => this.saveSession(), failed: (error) => new Notice(this.plugin.t("review.openLinkFailed", { error: errorMessage(error) })),
+    }, this, this.contentEl);
     const saved = this.plugin.takeReviewSession(this.leaf);
     if (!saved) { await this.refresh(); return; }
     this.queue = saved.queue; this.pos = saved.pos; this.reviewed = saved.reviewed;
@@ -106,7 +117,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
     this.render();
     if (saved.revealed) await this.reveal();
   }
-  async onClose() { if (this._comp) this._comp.unload(); if (this._frontComp) this._frontComp.unload(); this.closeImagePreview(); }
+  async onClose() { this.saveSession(); this.mobileLayout?.dispose(); if (this._comp) this._comp.unload(); if (this._frontComp) this._frontComp.unload(); this.closeImagePreview(); }
   async refresh() {
     this.contentEl.empty();
     this.contentEl.createDiv({ cls: "lexis-rv-loading", text: this.plugin.t("common.loading") });
@@ -117,7 +128,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
 
   render() {
     const c = this.contentEl;
-    c.empty(); c.addClass("lexis-review"); c.setCssStyles({ paddingBottom: "" });
+    c.empty(); this.rateBar = null; c.addClass("lexis-review"); c.setCssStyles({ paddingBottom: "" });
     if (this.pos >= this.queue.length) { this.renderDone(c); return; }
     if (this._frontComp) { this._frontComp.unload(); this._frontComp = null; }
     this.revealed = false;
@@ -129,10 +140,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
       const ub = topbtns.createEl("button", { cls: "lexis-rv-undo", text: `↩ ${this.plugin.t("review.undo")}` });
       ub.addEventListener("click", () => { void this.undo(); });
     }
-    const sb = topbtns.createEl("button", { cls: "lexis-rv-undo", text: this.plugin.t("review.skip") });
-    sb.addEventListener("click", () => this.skip());
-    const suspend = topbtns.createEl("button", { cls: "lexis-rv-undo", text: this.plugin.t("review.suspend") });
-    suspend.addEventListener("click", () => { void this.suspend(); });
+    renderReviewActions(topbtns, this.plugin, this);
     const card = c.createDiv({ cls: "lexis-rv-card" });
     card.addEventListener("click", (event) => {
       const image = event.composedPath().find((node): node is HTMLImageElement => (node as HTMLElement)?.tagName === "IMG");
@@ -152,6 +160,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
       const source = card.createEl("button", { cls: "lexis-rv-source", text: `${item.file.basename} · L${item.syntax.line + 1}`, attr: { type: "button" } });
       source.setAttribute("title", this.plugin.t("review.openSource"));
       source.addEventListener("click", () => { void this.openSource(item); });
+      if (item.syntax.headingPath?.length) card.createDiv({ cls: "lexis-log-row-meta", text: item.syntax.headingPath.join(" / ") });
       wordEl = card.createDiv({ cls: "lexis-rv-word is-syntax" });
       void this.renderSyntaxFront(wordEl, item);
     } else {
@@ -187,10 +196,10 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
     this.rateBar.setCssStyles({ display: "none" });
     const bs = this.plugin.settings.reviewBottomSpace ?? 70;
     this.containerEl.setCssProps({ "--lexis-review-bottom-space": `${bs}px` });
-    const isPhone = this.containerEl.doc.body.classList.contains("is-phone");
+    const isPhone = isMobileReview(this.containerEl.doc);
     this.rateBar.setCssStyles({ marginBottom: isPhone ? "" : bs + "px" });
     this.renderRateButtons(item);
-    if (isPhone) this.updateMobileReviewLayout();
+    this.updateMobileReviewLayout();
   }
   renderRateButtons(item: ReviewItem) {
     this.rateBar.empty();
@@ -253,11 +262,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
     }
   }
   updateMobileReviewLayout() {
-    if (!this.rateBar || !this.containerEl.doc.body.classList.contains("is-phone")) return;
-    const navbarHeight = Math.ceil(this.containerEl.doc.querySelector(".mobile-navbar")?.getBoundingClientRect().height || 58);
-    this.containerEl.setCssProps({ "--lexis-mobile-navbar-height": `${navbarHeight}px` });
-    const rateBarHeight = Math.ceil(this.rateBar.getBoundingClientRect().height);
-    if (rateBarHeight) this.containerEl.setCssProps({ "--lexis-mobile-rate-height": `${rateBarHeight}px` });
+    this.mobileLayout?.update();
   }
   async grade(g: number) {
     if (this.grading) return;
@@ -296,17 +301,18 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
       this.render();
     } catch (err) { new Notice(this.plugin.t("review.undoFailed", { error: errorMessage(err) })); }
   }
-  async openSource(item: ReviewItem) {
+  saveSession(): void {
     this.plugin.saveReviewSession(this.leaf, {
       queue: this.queue, pos: this.pos, reviewed: this.reviewed, revealed: this.revealed,
       undoStack: this.undoStack, options: this.options,
     });
-    await this.leaf.openFile(item.file, { active: true });
-    await this.app.workspace.revealLeaf(this.leaf);
-    if (item.syntax && this.leaf.view instanceof MarkdownView) {
+  }
+  async openSource(item: ReviewItem) {
+    const leaf = await this.reviewNavigation.openFile(item.file);
+    if (item.syntax && leaf.view instanceof MarkdownView) {
       const position = { line: item.syntax.line, ch: 0 };
-      this.leaf.view.editor.setCursor(position);
-      this.leaf.view.editor.scrollIntoView({ from: position, to: position }, true);
+      leaf.view.editor.setCursor(position);
+      leaf.view.editor.scrollIntoView({ from: position, to: position }, true);
     }
   }
   onKey(e: KeyboardEvent) {
@@ -338,7 +344,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
     wordEl.removeClass("is-cloze");
     if (this._frontComp) this._frontComp.unload();
     this._frontComp = new Component(); this._frontComp.load();
-    let markdown = item.syntax.front;
+    let markdown = displayedSyntaxFront(item.syntax.front, item.syntax.kind);
     if (item.syntax.kind === "cloze") {
       wordEl.addClass("is-cloze");
       const templates = {
@@ -470,8 +476,9 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
     const b = d.createEl("button", { cls: "mod-cta", text: this.plugin.t("review.checkAgain") });
     b.onclick = () => { void this.plugin.rebuildIndex(false); void this.refresh(); };
     this.plugin.renderHeatmap(d.createDiv({ cls: "lexis-hm-wrap" }));
-    const isPhone = this.containerEl.doc.body.classList.contains("is-phone");
+    const isPhone = isMobileReview(this.containerEl.doc);
     c.setCssStyles({ paddingBottom: isPhone ? "" : `${this.plugin.settings.reviewBottomSpace ?? 70}px` });
+    this.updateMobileReviewLayout();
   }
 };
 

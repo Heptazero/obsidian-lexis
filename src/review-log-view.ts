@@ -1,25 +1,21 @@
-import { ItemView, TFile, type WorkspaceLeaf } from "obsidian";
+import { ItemView, Notice, type WorkspaceLeaf, type ViewStateResult } from "obsidian";
 import { LEXIS_LOG_VIEW } from "./constants";
-import { parseSyntaxCards, type ParsedSyntaxCard } from "./flashcard-syntax";
-import { addDays, firstAttemptSuccess, localDate, neverReviewed, weekStart } from "./review-log-data";
-import type { LexisSettings, ReviewCardState, ReviewLogEvent } from "./types";
+import type { ReviewCatalog, ListedReviewCard } from "./review-catalog";
+import { renderCardLibrary, renderLibraryPriority, renderLibraryMetrics, type LibraryHost, type LibraryState } from "./review-library";
+import { libraryMetrics, normalizeCompactLibraryState } from "./review-library-model";
+import { addDays, firstAttemptSuccess, localDate, weekStart } from "./review-log-data";
+import type { ReviewLogEvent } from "./types";
+import type { LibraryNavigation } from "./review-library-preview";
+import { ReviewRenderQueue } from "./review-render-queue";
+import { createReviewRow, renderReviewTitle } from "./review-log-rows";
+import { openReviewCardSource } from "./review-navigation";
 
-interface LogHost {
-  settings: LexisSettings;
-  t(key: string, vars?: Record<string, string | number>): string;
+interface LogHost extends LibraryHost {
+  reviewCatalog: ReviewCatalog;
   inVocabFolder(path: string): boolean;
-  readLifecycle(file: TFile): { archived: boolean; retired: boolean };
-  readCard(file: TFile): ReviewCardState;
-  readSyntaxCardState(id: string): ReviewCardState;
 }
 
-interface ListedCard {
-  key: string;
-  file: TFile;
-  label: string;
-  type: "note" | "syntax";
-  line?: number;
-}
+type ListedCard = ListedReviewCard;
 
 const dateOf = (event: ReviewLogEvent): string => event.date;
 const dateTime = (timestamp: string, precise: boolean): string => {
@@ -27,16 +23,19 @@ const dateTime = (timestamp: string, precise: boolean): string => {
   const value = new Date(timestamp);
   return `${localDate(value)} ${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
 };
-const scheduled = (state: ReviewCardState): boolean => Number.isFinite(Number(state.s)) && Number(state.s) > 0;
 
 export class LexisLogView extends ItemView {
+  navigation = true;
   private day = localDate(new Date());
-  private tab: "history" | "unreviewed" = "history";
+  private tab: "history" | "unreviewed" | "reviewed" = "history";
+  private library: LibraryState = normalizeCompactLibraryState({ sort: "reps", direction: "desc" });
   private filter: "all" | "note" | "syntax" = "all";
   private cards: ListedCard[] = [];
   private syntaxByKey = new Map<string, ListedCard>();
   private selectedKey = "";
   private refreshId = 0;
+  private libraryCleanup: (() => void) | null = null;
+  private rendering: ReviewRenderQueue | null = null;
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: LogHost) { super(leaf); }
   getViewType(): string { return LEXIS_LOG_VIEW; }
@@ -44,15 +43,34 @@ export class LexisLogView extends ItemView {
   getIcon(): string { return "calendar-days"; }
   setDay(day: string): void { this.day = day; this.tab = "history"; void this.refresh(); }
   async onOpen(): Promise<void> { await this.refresh(); }
+  async onClose(): Promise<void> { this.refreshId++; this.libraryCleanup?.(); this.rendering?.dispose(); this.rendering = null; }
+  getState(): Record<string, unknown> {
+    return { day: this.day, tab: this.tab, filter: this.filter, library: { ...this.library } };
+  }
+  async setState(state: unknown, result: ViewStateResult): Promise<void> {
+    const saved = state as Partial<ReturnType<LexisLogView["getState"]>> | null;
+    if (saved) {
+      if (typeof saved.day === "string") this.day = saved.day;
+      if (saved.tab === "library") this.tab = "reviewed";
+      else if (typeof saved.tab === "string" && ["history", "unreviewed", "reviewed"].includes(saved.tab)) this.tab = saved.tab as typeof this.tab;
+      if (typeof saved.filter === "string" && ["all", "note", "syntax"].includes(saved.filter)) this.filter = saved.filter as typeof this.filter;
+      const library = saved.library as Partial<LibraryState> | undefined;
+      if (library) this.library = normalizeCompactLibraryState({ ...this.library, ...library });
+    }
+    await super.setState(state, result);
+    await this.refresh();
+  }
 
   async refresh(): Promise<void> {
+    this.libraryCleanup?.(); this.libraryCleanup = null;
+    this.rendering?.reset();
     const request = ++this.refreshId;
-    if (this.tab === "unreviewed") {
+    if (this.tab !== "history") {
       this.contentEl.empty();
       this.contentEl.createDiv({ cls: "lexis-log-loading", text: this.plugin.t("common.loading") });
       await this.collectCards();
       if (request !== this.refreshId) return;
-    } else if (this.dayEvents().some((event) => event.type === "syntax" && !event.filePath) && !this.syntaxByKey.size) {
+    } else if (this.dayEvents().some((event) => event.type === "syntax") && !this.syntaxByKey.size) {
       this.contentEl.empty();
       this.contentEl.createDiv({ cls: "lexis-log-loading", text: this.plugin.t("common.loading") });
       await this.collectCards();
@@ -62,33 +80,9 @@ export class LexisLogView extends ItemView {
   }
 
   private async collectCards(): Promise<void> {
-    const files = this.app.vault.getMarkdownFiles();
-    const cards: ListedCard[] = [];
-    const syntaxByKey = new Map<string, ListedCard>();
-    const templates = {
-      inline: this.plugin.settings.flashcardInlineTemplate,
-      bidirectional: this.plugin.settings.flashcardBidirectionalTemplate,
-      block: this.plugin.settings.flashcardBlockTemplate,
-      cloze: this.plugin.settings.flashcardClozeTemplate,
-    };
-    await Promise.all(files.map(async (file) => {
-      const lifecycle = this.plugin.readLifecycle(file);
-      if (lifecycle.archived || lifecycle.retired) return;
-      if (this.plugin.inVocabFolder(file.path)) cards.push({ key: file.path, file, label: file.basename, type: "note" });
-      let markdown = "";
-      try { markdown = await this.app.vault.cachedRead(file); } catch { return; }
-      for (const syntax of parseSyntaxCards(markdown, file.path, templates)) {
-        const card = this.syntaxCard(file, syntax);
-        cards.push(card);
-        syntaxByKey.set(card.key, card);
-      }
-    }));
+    const cards = await this.plugin.reviewCatalog.cards();
     this.cards = cards.sort((left, right) => left.label.localeCompare(right.label));
-    this.syntaxByKey = syntaxByKey;
-  }
-
-  private syntaxCard(file: TFile, syntax: ParsedSyntaxCard): ListedCard {
-    return { key: `syntax:${syntax.id}`, file, label: syntax.front, type: "syntax", line: syntax.line };
+    this.syntaxByKey = new Map(cards.filter((card) => card.type === "syntax").map((card) => [card.key, card]));
   }
 
   private dayEvents(): ReviewLogEvent[] {
@@ -96,24 +90,40 @@ export class LexisLogView extends ItemView {
   }
 
   private render(): void {
+    this.libraryCleanup?.(); this.libraryCleanup = null;
+    this.rendering?.reset();
     const root = this.contentEl;
     root.empty();
     root.addClass("lexis-log");
+    this.rendering ||= new ReviewRenderQueue(root);
     const header = root.createDiv({ cls: "lexis-log-header" });
     header.createEl("h2", { text: this.plugin.t("log.title") });
     const tabs = header.createDiv({ cls: "lexis-segments" });
-    for (const [key, label] of [["history", "log.history"], ["unreviewed", "log.unreviewed"]] as const) {
+    for (const [key, label] of [["history", "log.history"], ["unreviewed", "log.unreviewed"], ["reviewed", "library.title"]] as const) {
       const button = tabs.createEl("button", { cls: `lexis-segment${this.tab === key ? " is-active" : ""}`, text: this.plugin.t(label) });
       button.setAttribute("aria-pressed", String(this.tab === key));
+      if (key === "reviewed") button.setAttribute("title", this.plugin.t("library.hint"));
       button.onclick = () => { this.tab = key; this.selectedKey = ""; void this.refresh(); };
     }
-    if (this.tab === "history") this.renderHistory(root);
+    const filters = root.createDiv({ cls: "lexis-log-filters" });
+    this.renderFilter(filters);
+    if (this.tab === "history") this.renderHistory(root, filters);
+    else if (this.tab === "reviewed") {
+      this.libraryCleanup = renderCardLibrary(root, this.cards, this.plugin, this.library, this.filter, this.navigationHost(), this.rendering, true);
+    }
     else this.renderUnreviewed(root);
   }
 
-  private renderHistory(root: HTMLElement): void {
+  private navigationHost(): LibraryNavigation {
+    return { leaf: this.leaf, mode: () => this.plugin.settings.reviewLinkMode || "current",
+      saveSession: () => this.app.workspace.requestSaveLayout(),
+      failed: (error) => new Notice(this.plugin.t("review.openLinkFailed", { error: error instanceof Error ? error.message : typeof error === "string" ? error : "Unknown error" })),
+    };
+  }
+
+  private renderHistory(root: HTMLElement, filters: HTMLElement): void {
     const week = weekStart(this.day);
-    const nav = root.createDiv({ cls: "lexis-log-week-nav" });
+    const nav = filters.createDiv({ cls: "lexis-log-week-nav" });
     const previous = nav.createEl("button", { text: "‹", attr: { "aria-label": this.plugin.t("log.previousWeek") } });
     previous.onclick = () => this.setDay(addDays(this.day, -7));
     nav.createSpan({ text: `${week} — ${addDays(week, 6)}` });
@@ -142,19 +152,17 @@ export class LexisLogView extends ItemView {
     const list = columns.createDiv({ cls: "lexis-log-list" });
     const listHeader = list.createDiv({ cls: "lexis-log-list-header" });
     listHeader.createEl("h3", { text: this.day });
-    this.renderFilter(listHeader);
     if (!events.length) list.createDiv({ cls: "lexis-log-empty", text: this.plugin.t("log.noDayCards") });
     for (const event of events) {
       const source = this.eventCard(event);
-      const row = list.createEl("button", { cls: `lexis-log-row${event.id === this.selectedKey ? " is-active" : ""}` });
-      row.createSpan({ cls: "lexis-log-row-title", text: source?.label || event.label || this.plugin.t("log.unknownCard") });
-      row.createSpan({ cls: "lexis-log-row-meta", text: `${this.plugin.t(`review.${["", "again", "hard", "good", "easy"][event.grade] || "again"}`)} · ${event.precision === "time" ? dateTime(event.timestamp, true).slice(11) : this.plugin.t("log.dateOnly")}${event.type === "syntax" ? ` · ${source?.file.basename || event.filePath}` : ""}` });
-      row.onclick = () => {
+      const row = createReviewRow(list, () => {
         const scroll = this.contentEl.scrollTop;
         this.selectedKey = event.id;
         this.render();
         this.contentEl.scrollTop = scroll;
-      };
+      }, event.id === this.selectedKey);
+      renderReviewTitle(row, source || { label: event.label || this.plugin.t("log.unknownCard"), type: event.type }, this.plugin, this.rendering, this.navigationHost());
+      row.createSpan({ cls: "lexis-log-row-meta", text: `${this.plugin.t(`review.${["", "again", "hard", "good", "easy"][event.grade] || "again"}`)} · ${event.precision === "time" ? dateTime(event.timestamp, true).slice(11) : this.plugin.t("log.dateOnly")}${event.type === "syntax" ? ` · ${source?.file.basename || event.filePath}` : ""}` });
       if (event.id === this.selectedKey && this.contentEl.clientWidth < 700) this.renderCardDetail(list, source, event);
     }
     const side = columns.createDiv({ cls: "lexis-log-side" });
@@ -167,7 +175,7 @@ export class LexisLogView extends ItemView {
   }
 
   private renderFilter(host: HTMLElement): void {
-    const group = host.createDiv({ cls: "lexis-segments" });
+    const group = host.createDiv({ cls: "lexis-segments lexis-log-types" });
     for (const [key, label] of [["all", "common.all"], ["note", "log.notes"], ["syntax", "log.syntax"]] as const) {
       const button = group.createEl("button", { cls: `lexis-segment${this.filter === key ? " is-active" : ""}`, text: this.plugin.t(label) });
       button.setAttribute("aria-pressed", String(this.filter === key));
@@ -215,16 +223,20 @@ export class LexisLogView extends ItemView {
 
   private renderCardDetail(host: HTMLElement, card: ListedCard | null, event?: ReviewLogEvent): void {
     const detail = host.createDiv({ cls: "lexis-log-detail" });
-    detail.createEl("h3", { text: card?.label || event?.label || this.plugin.t("log.unknownCard") });
+    renderReviewTitle(detail.createEl("h3"), card || { label: event?.label || this.plugin.t("log.unknownCard"), type: event?.type || "note" }, this.plugin, this.rendering, this.navigationHost());
     if (!card) { detail.createDiv({ text: this.plugin.t("log.sourceMissing") }); return; }
+    if (card.headingPath?.length) this.stat(detail, "library.category", card.headingPath.join(" / "));
+    const discovered = this.plugin.settings.reviewCardMeta?.[card.key]?.discoveredAt;
+    this.stat(detail, "library.discovered", discovered ? dateTime(discovered, true) : this.plugin.t("log.unknown"));
     const added = this.plugin.settings.reviewAddedAt[card.key];
     if (added) this.stat(detail, "log.added", dateTime(added, true));
     else if (card.type === "note") this.stat(detail, "log.fileCreated", dateTime(new Date(card.file.stat.ctime).toISOString(), false));
     else this.stat(detail, "log.added", this.plugin.t("log.unknown"));
     const history = this.plugin.settings.reviewEvents.filter((item) => item.memberKeys.includes(card.key)).sort((left, right) => left.timestamp.localeCompare(right.timestamp));
     const earliest = history[0];
-    this.stat(detail, earliest?.precision === "time" && added ? "log.firstReview" : "log.earliestReview", earliest ? dateTime(earliest.timestamp, earliest.precision === "time") : this.plugin.t("log.never"));
+    this.stat(detail, "library.firstReview", earliest ? dateTime(earliest.timestamp, earliest.precision === "time") : this.plugin.t("log.never"));
     const state = card.type === "note" ? this.plugin.readCard(card.file) : this.plugin.readSyntaxCardState(card.key.slice(7));
+    renderLibraryMetrics(detail, this.plugin, libraryMetrics(state));
     if (state.due) this.stat(detail, "log.due", state.due);
     const recent = history.slice(-5).reverse();
     if (recent.length) {
@@ -233,58 +245,14 @@ export class LexisLogView extends ItemView {
     }
     const open = detail.createEl("button", { text: this.plugin.t("log.openSource") });
     open.onclick = () => { void this.openSource(card); };
+    renderLibraryPriority(this.plugin, detail, card);
   }
 
   private async openSource(card: ListedCard): Promise<void> {
-    const leaf = this.app.workspace.getLeaf("tab");
-    await leaf.openFile(card.file);
-    await this.app.workspace.revealLeaf(leaf);
-    const editor = (leaf.view as { editor?: { setCursor(position: { line: number; ch: number }): void; scrollIntoView(range: { from: { line: number; ch: number }; to: { line: number; ch: number } }, center: boolean): void } }).editor;
-    if (editor && card.line != null) {
-      const position = { line: card.line, ch: 0 };
-      editor.setCursor(position);
-      editor.scrollIntoView({ from: position, to: position }, true);
-    }
+    await openReviewCardSource({ ...this.navigationHost(), app: this.app, sourcePath: () => card.file.path }, card);
   }
 
   private renderUnreviewed(root: HTMLElement): void {
-    const header = root.createDiv({ cls: "lexis-log-list-header" });
-    header.createEl("h3", { text: this.plugin.t("log.unreviewed") });
-    this.renderFilter(header);
-    const search = root.createEl("input", { cls: "lexis-log-search", attr: { type: "search", placeholder: this.plugin.t("log.search") } });
-    root.createDiv({ cls: "lexis-log-note", text: this.plugin.t("log.unreviewedHint") });
-    const list = root.createDiv({ cls: "lexis-log-unreviewed" });
-    const reviewedKeys = new Set(this.plugin.settings.reviewEvents.flatMap((event) => event.memberKeys));
-    let visibleCount = 100;
-    const renderRows = () => {
-      list.empty();
-      const query = search.value.trim().toLocaleLowerCase();
-      const matches = this.cards.filter((card) => {
-        if (this.filter !== "all" && card.type !== this.filter) return false;
-        if (this.plugin.settings.suspendedReviewItems[`${card.type}:${card.key.replace(/^syntax:/, "")}`]) return false;
-        const state = card.type === "note" ? this.plugin.readCard(card.file) : this.plugin.readSyntaxCardState(card.key.slice(7));
-        return neverReviewed(scheduled(state), reviewedKeys.has(card.key))
-          && (!query || `${card.label} ${card.file.path}`.toLocaleLowerCase().includes(query));
-      });
-      list.createDiv({ cls: "lexis-log-count", text: this.plugin.t("log.count", { count: matches.length }) });
-      if (!matches.length) list.createDiv({ cls: "lexis-log-empty", text: this.plugin.t("log.noUnreviewed") });
-      for (const card of matches.slice(0, visibleCount)) {
-        const entry = list.createDiv();
-        const row = entry.createEl("button", { cls: "lexis-log-row" });
-        row.createSpan({ cls: "lexis-log-row-title", text: card.label });
-        row.createSpan({ cls: "lexis-log-row-meta", text: card.file.path });
-        row.onclick = () => {
-          this.selectedKey = card.key;
-          list.querySelector(".lexis-log-detail")?.remove();
-          this.renderCardDetail(entry, card);
-        };
-      }
-      if (matches.length > visibleCount) {
-        const more = list.createEl("button", { cls: "lexis-log-more", text: this.plugin.t("log.more", { count: matches.length - visibleCount }) });
-        more.onclick = () => { visibleCount += 100; renderRows(); };
-      }
-    };
-    search.oninput = () => { visibleCount = 100; renderRows(); };
-    renderRows();
+    this.libraryCleanup = renderCardLibrary(root, this.cards, this.plugin, this.library, this.filter, this.navigationHost(), this.rendering, false, true);
   }
 }

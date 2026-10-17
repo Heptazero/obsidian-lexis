@@ -16,8 +16,8 @@ export interface DashboardSummary {
 }
 
 export const planOptions = (plan?: ReviewPlan): ReviewOptions => plan
-  ? { sources: plan.sources, content: plan.content }
-  : { scope: "vocab", content: "notes" };
+  ? { ...(plan.dictionaryIds !== undefined ? { dictionaryIds: plan.dictionaryIds } : { sources: plan.sources }), content: plan.content }
+  : { dictionaryIds: null, content: "notes" };
 
 const isFresh = (card: ReviewCardState): boolean => card.s == null || !Number.isFinite(Number(card.s));
 const isDue = (card: ReviewCardState, date: string): boolean => !isFresh(card) && (!card.due || String(card.due).slice(0, 10) <= date);

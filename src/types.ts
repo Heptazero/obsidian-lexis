@@ -24,6 +24,7 @@ export interface ReviewCardState {
 }
 
 export interface ReviewOptions {
+  dictionaryIds?: string[] | null;
   scope?: ReviewScopeMode;
   folder?: string;
   linkSource?: string;
@@ -45,7 +46,8 @@ export interface ReviewSource {
 export interface ReviewPlan {
   id: string;
   name: string;
-  sources: ReviewSource[];
+  dictionaryIds?: string[] | null;
+  sources?: ReviewSource[];
   content: ReviewContentMode;
 }
 
@@ -57,6 +59,7 @@ export interface ReviewDailyTarget {
 }
 
 export interface SyntaxReviewCard {
+  headingPath?: string[];
   id: string;
   memberIds: string[];
   members?: SyntaxReviewMember[];
@@ -98,12 +101,20 @@ export interface ReviewStateSnapshot {
 }
 
 export interface DictionarySetting {
+  id?: string;
+  name?: string;
+  sources?: DictionarySource[];
   folder: string;
   template: string;
   tag?: string;
   highlight?: boolean;
   color?: string;
   opacity?: number;
+}
+
+export interface DictionarySource {
+  kind: "folder" | "tag" | "file" | "links";
+  value: string;
 }
 
 export interface TagRule {
@@ -148,6 +159,10 @@ export interface ReviewLogEvent {
 export interface LexisSettings {
   legacySettingsImported?: boolean;
   language: Language;
+  marginNoteExportFolder: string;
+  marginNoteAutoExport: boolean;
+  marginNoteSources: string[] | null;
+  marginNoteFollowVisibility: boolean;
   statusBarVisible: boolean;
   statusBarExpanded: boolean;
   vocabTags: string;
@@ -171,6 +186,12 @@ export interface LexisSettings {
   inlineFileOrder: string[];
   inlineCategoryOrderByParent: Record<string, string[]>;
   settingsSectionOrder: string[];
+  settingsActiveTab: string;
+  settingsTabOrder: string[];
+  settingsTabAssignments: Record<string, string>;
+  settingsGroupOrder: Record<string, string[]>;
+  settingsTabNames: Record<string, string>;
+  settingsCustomTabs: Array<{ id: string; name: string }>;
   enableHighlight: boolean;
   highlightMode: HighlightMode;
   enableLivePreview: boolean;
@@ -212,6 +233,9 @@ export interface LexisSettings {
   reviewHistory: Record<string, ReviewHistoryEvent[]>;
   reviewEvents: ReviewLogEvent[];
   reviewAddedAt: Record<string, string>;
+  reviewCardMeta: Record<string, { filePath: string; discoveredAt: string | null }>;
+  reviewCatalogInitialized: boolean;
+  reviewPriorities: Record<string, import("./review-priority").ReviewPriority>;
   syntaxCardStates: Record<string, ReviewCardState>;
   suspendedReviewItems: Record<string, boolean>;
   showReviewMetadata: boolean;
@@ -227,6 +251,7 @@ export interface LexisSettings {
   annotationImageFolder: string;
   cardFront: CardFront;
   reviewBottomSpace: number;
+  reviewLinkMode: "current" | "tab";
   lastReviewLinkSource: string;
   lastReviewHub: string;
   bridgeEnabled: boolean;

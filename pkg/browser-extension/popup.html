@@ -29,6 +29,15 @@
     .dictionary-empty { font-size: 11px; opacity: 0.6; }
     hr { border: none; border-top: 1px solid rgba(128,128,128,.25); margin: 12px 0; }
     .hint { font-size: 11px; opacity: 0.6; margin-top: 6px; line-height: 1.4; }
+    .pill-position summary { cursor: pointer; font-weight: 600; }
+    .pill-position-preview { position: relative; height: 180px; margin-top: 8px; overflow: hidden; border: 1px dashed rgba(128,128,128,.4); border-radius: 7px; }
+    .pill-position-selection { position: absolute; left: 50%; top: 72px; transform: translateX(-50%); height: 22px; line-height: 22px; white-space: nowrap; background: color-mix(in srgb, var(--accent) 22%, transparent); }
+    .pill-position-preview .pill-position-handle { position: absolute; width: 116px; height: 30px; padding: 0; border-radius: 999px; background: var(--accent); color: white; cursor: grab; touch-action: none; user-select: none; }
+    .pill-position-handle:active { cursor: grabbing; }
+    .pill-position-controls { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+    .pill-position-controls label { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
+    .pill-position-controls input[type=number] { width: 54px; max-width: 100%; box-sizing: border-box; }
+    .pill-position-reset { flex: 0 0 28px; height: 28px; padding: 0; color: inherit; background: transparent; border: 1px solid rgba(128,128,128,.4); }
   </style>
 </head>
 <body>
@@ -61,6 +70,22 @@
 
   <hr>
 
+  <details class="pill-position" id="pillPosition">
+    <summary>划词弹丸位置</summary>
+    <div class="hint">拖动预览调整；仅此浏览器，不与 Obsidian 同步。</div>
+    <div class="pill-position-preview">
+      <span class="pill-position-selection">选中的文字</span>
+      <button type="button" class="pill-position-handle" aria-label="拖动调整弹丸位置，也可使用方向键">＋　词典　别名</button>
+    </div>
+    <div class="pill-position-controls">
+      <label>横向<input type="number" step="1" data-axis="x" title="正数向右，负数向左（像素）" aria-label="横向偏移（像素，正数向右）"></label>
+      <label>纵向<input type="number" step="1" data-axis="y" title="正数向下，负数向上（像素）" aria-label="纵向偏移（像素，正数向下）"></label>
+      <button type="button" class="pill-position-reset" title="恢复默认位置" aria-label="恢复默认位置">↺</button>
+    </div>
+  </details>
+
+  <hr>
+
   <section id="dictionarySection">
     <div class="section-title">当前网站词典</div>
     <div class="site" id="currentSite"></div>
@@ -68,6 +93,8 @@
   </section>
 
   <script src="config.js"></script>
+  <script src="pill-position.js"></script>
+  <script src="popup-pill-position.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

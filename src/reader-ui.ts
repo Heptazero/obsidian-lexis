@@ -5,12 +5,14 @@ import * as obsidian from "obsidian";
 import type { App, Component as ObsidianComponent, Editor, MarkdownPostProcessorContext, Notice as ObsidianNotice, TFile as ObsidianTFile, WorkspaceLeaf } from "obsidian";
 import type { Occurrence } from "./occurrence-search";
 import { overlayAnchorFor, overlayDocumentFor, readerRectInDocument } from "./reader-frame-geometry";
+import type { ReaderHover } from "./reader-hover";
 import { pdfTargetSource } from "./pdf-highlight-targets";
 import type { InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats, ReviewHistoryEvent } from "./types";
 import { createReaderContent } from "./reader-content";
 import { createReaderHomeBlocks } from "./reader-home-blocks";
 import { renderReaderPopoverControls } from "./reader-popover-controls";
 import { entryColorLabel } from "./entry-colors";
+import { mountCurveView } from "./curve-view";
 
 type CurveCard = { s?: number | null; due?: string | null; last?: string | null; history?: ReviewHistoryEvent[] };
 type BridgeResult = { ok: boolean; error?: string; tags?: string[] };
@@ -20,7 +22,7 @@ type Heading = { title: string; subtitle: string };
 type HighlightSource = { file: ObsidianTFile | null; sentence: string; page?: number };
 interface FsrsDisplayApi { nextInterval(stability: number, retention: number): number; retrievability(elapsedDays: number, stability: number): number }
 interface ReaderUiDependencies {
-  buildCurveSVG: (card: CurveCard, dependencies: { requestRetention: number; nextInterval: FsrsDisplayApi["nextInterval"]; retrievability: FsrsDisplayApi["retrievability"]; addDaysStr: (date: string, days: number) => string; daysBetween: (start: string, end: string) => number; todayStr: () => string }) => string | null;
+  buildCurveSVG: (card: CurveCard, dependencies: { requestRetention: number; nextInterval: FsrsDisplayApi["nextInterval"]; retrievability: FsrsDisplayApi["retrievability"]; addDaysStr: (date: string, days: number) => string; daysBetween: (start: string, end: string) => number; todayStr: () => string }, options?: { limit?: number }) => string | null;
   recentReviewDates: (card: CurveCard, limit?: number) => string[];
   FSRS: FsrsDisplayApi;
   addDaysStr: (date: string, days: number) => string;
@@ -45,7 +47,7 @@ function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, da
   declare index: Map<string, LexisEntry>;
   declare stats: LexisStats;
   declare inlineCategoryOccurrences: InlineCategoryOccurrence[];
-  declare _hideTimer: number;
+  declare readerHover: ReaderHover;
   declare _popover: HTMLElement | null;
   declare _popoverComp: ObsidianComponent | null;
   declare _manualLookupAnchor: HTMLElement | null;
@@ -85,7 +87,7 @@ function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, da
   declare hoverFeedback: (file: ObsidianTFile) => Promise<void>;
   declare setArchived: (file: ObsidianTFile, archived: boolean) => Promise<void>;
   // 遗忘曲线 SVG(FSRS 衰减)
-  buildCurveSVG(card: CurveCard): string | null {
+  buildCurveSVG(card: CurveCard, limit = 8): string | null {
     return buildCurveSVG(card, {
       requestRetention: this.settings.requestRetention,
       nextInterval: (stability, retention) => FSRS.nextInterval(stability, retention),
@@ -93,7 +95,7 @@ function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, da
       addDaysStr,
       daysBetween,
       todayStr,
-    });
+    }, { limit });
   }
   // 笔记内 ```lexis 代码块:曲线 + 相关词 + 出现过的地方
   async renderLexisBlock(el: HTMLElement, ctx: MarkdownPostProcessorContext, src: string): Promise<void> {
@@ -116,11 +118,11 @@ function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, da
       if (svg) {
         const due = card.due ? ` · 下次复习 ${String(card.due).slice(0, 10)}` : "";
         el.createDiv({ cls: "lexis-section-title", text: `🧠 记忆曲线（复习日期 × 保留率${due}）` });
-        const parsed = new DOMParser().parseFromString(svg, "image/svg+xml");
         const curve = el.createDiv({ cls: "lexis-curve" });
         const dates = recentReviewDates(card);
         if (dates.length) curve.createDiv({ cls: "lexis-curve-history", text: this.t("curve.recentReviews", { dates: dates.map((date) => date.slice(5)).join(" · ") }) });
-        curve.appendChild(curve.ownerDocument.importNode(parsed.documentElement, true));
+        const component = new obsidian.MarkdownRenderChild(curve); ctx.addChild(component);
+        mountCurveView(curve, component, () => this.readCard(file), (card, limit) => this.buildCurveSVG(card, limit), this.t.bind(this));
       }
     }
 
@@ -136,7 +138,7 @@ function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, da
       const det = el.createEl("details", { cls: "lexis-occ-details" });
       det.createEl("summary", { text: `📍 出现过的地方 (${list.length})` });
       const occWrap = det.createDiv();
-      const comp = new Component(); comp.load();
+      const comp = new obsidian.MarkdownRenderChild(el); ctx.addChild(comp);
       for (const o of list) {
         const dd = occWrap.createDiv({ cls: "lexis-occ" });
         await this.renderSentence(dd, o.sentence, word, comp);
@@ -148,6 +150,7 @@ function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, da
           if (await this.addExampleToWord(file, o.sentence, o.file, o.page)) { add.setText(" ✓"); add.setCssStyles({ cursor: "default" }); add.removeAttribute("title"); } else delete add.dataset.done;
         })(); });
         const s2 = dd.createSpan({ cls: "lexis-occ-src", text: " ↗ " + this.occurrenceLabel(o) });
+        s2.setAttribute("data-lexis-review-link", o.file.path + (o.page ? `#page=${o.page}` : ""));
         s2.addEventListener("click", () => { void this.openOccurrence(o.file, word, o.page); });
       }
     }
@@ -256,7 +259,7 @@ function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, da
     const key = spanEl.dataset.lexisKey;
     const entry = this.index.get(key);
     if (!entry) return;
-    if (this._popover && this._popover.dataset.lexisKey === key) { window.clearTimeout(this._hideTimer); return; }
+    if (this._popover && this._popover.dataset.lexisKey === key) { this.readerHover.keepOpen(); return; }
     if (this._popover?.dataset.lexisEditing === "1") return;
     if (!entry.inline) { this.recordEncounter(entry.file, "hover"); void this.hoverFeedback(entry.file); }
     this.removePopover();
@@ -290,7 +293,7 @@ function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, da
     }
     const body = scroll.createDiv({ cls: "lexis-popover-body" });
     body.setText(this.t("common.loading"));
-    pop.addEventListener("mouseenter", () => window.clearTimeout(this._hideTimer));
+    pop.addEventListener("mouseenter", () => this.readerHover.keepOpen());
     pop.addEventListener("mouseleave", () => this.scheduleHide());
     spanEl.addEventListener("mouseleave", () => this.scheduleHide(), { once: true });
     this._popover = pop;
@@ -359,18 +362,18 @@ function createReaderUi({ buildCurveSVG, recentReviewDates, FSRS, addDaysStr, da
   applyPopoverAppearance(pop: HTMLElement): void {
     const width = Math.max(260, Number(this.settings.popoverWidth) || 460);
     const height = Math.max(160, Number(this.settings.popoverMaxHeight) || 420);
-    const fontSize = Math.max(11, Number(this.settings.popoverFontSize) || 14);
+    const fontSize = "var(--font-text-size, 16px)";
     pop.setCssProps({
       "--lexis-popover-width": `${width}px`,
       "--lexis-popover-height": `${height}px`,
-      "--lexis-popover-font-size": `${fontSize}px`,
+      "--lexis-popover-font-size": fontSize,
     });
     // 内联值保证主题样式无法盖掉用户设置；桌面实卡恢复上次拖拽后的实际尺寸。
     pop.setCssStyles({
       width: `${width}px`,
       height: "",
       maxHeight: `${height}px`,
-      fontSize: `${fontSize}px`,
+      fontSize,
     });
   }
   }
