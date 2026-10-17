@@ -1,6 +1,6 @@
 {
   "name": "obsidian-lexis",
-  "version": "1.17.25",
+  "version": "1.17.26",
   "private": true,
   "scripts": {
     "dev": "node esbuild.config.mjs",

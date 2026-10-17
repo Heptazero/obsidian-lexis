@@ -48,7 +48,11 @@ export async function checkSettingsNavigation(root: HTMLElement, marginNote: HTM
   check([...sections.values()].every((section) => getComputedStyle(section).backgroundColor === "rgba(0, 0, 0, 0)" && getComputedStyle(section).borderRadius === "8px"), "primary frames follow the showcase without background fill");
   check([...sections.values()].every((section) => section.querySelector(".lexis-settings-section-heading > .lexis-six-dots")), "all sections reuse right-side six-dot handles");
   const arrows = [...root.querySelectorAll<HTMLElement>("summary.lexis-settings-section-heading, summary.lexis-settings-group-heading")];
-  check(arrows.every((heading) => getComputedStyle(heading, "::before").clipPath === "polygon(0px 0px, 100% 50%, 0px 100%)"), "every settings disclosure uses the same solid triangle");
+  check(arrows.every((heading) => {
+    const arrow = getComputedStyle(heading, "::before");
+    return arrow.borderInlineStartStyle === "solid" && parseFloat(arrow.borderInlineStartWidth) > 0
+      && arrow.borderTopColor === "rgba(0, 0, 0, 0)" && arrow.borderBottomColor === "rgba(0, 0, 0, 0)";
+  }), "every settings disclosure uses the same solid triangle");
   for (let index = 1; index < tabs.length; index++) {
     tabs[index].click();
     check(panels[index].checkVisibility() && panels.filter((panel) => !panel.hidden).length === 1, "switching exposes exactly one panel");
@@ -151,8 +155,8 @@ export async function checkSettingsNavigation(root: HTMLElement, marginNote: HTM
   check(!tabs[0].parentElement!.classList.contains("is-dragging"), "canceling a tab hold restores its layout");
   const arrowHeading = sections.get("general")!.querySelector<HTMLElement>("summary")!;
   arrowHeading.style.fontSize = "10px";
-  const small = parseFloat(getComputedStyle(arrowHeading, "::before").width);
+  const small = parseFloat(getComputedStyle(arrowHeading, "::before").borderInlineStartWidth);
   arrowHeading.style.fontSize = "20px";
-  check(parseFloat(getComputedStyle(arrowHeading, "::before").width) > small * 1.9, "disclosure arrows scale with title font size");
+  check(parseFloat(getComputedStyle(arrowHeading, "::before").borderInlineStartWidth) > small * 1.9, "disclosure arrows scale with title font size");
   arrowHeading.style.fontSize = "";
 }

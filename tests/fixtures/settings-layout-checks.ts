@@ -9,6 +9,7 @@ import { checkReviewLogLayout } from "./review-log-layout-checks";
 import { checkSettingsMaintenance } from "./settings-maintenance-checks";
 import { checkReviewCardRows } from "./review-card-row-checks";
 import { checkDictionaryCollections } from "./dictionary-collections-checks";
+import { annotateSettingControlLayouts } from "../../src/settings-control-layout";
 
 const checks: string[] = [];
 function check(value: unknown, message: string): void { if (!value) throw new Error(message); checks.push(message); }
@@ -54,6 +55,10 @@ async function run(): Promise<void> {
   const before = summary.getBoundingClientRect();
   const fixed = createSettingsSection(main.body, "自动更新", { key: "auto", open: true });
   new Setting(fixed.body).setName("自动更新导出词库").setDesc("词库变化时更新文件。").addToggle((toggle) => toggle.setValue(false));
+  const inputSetting = new Setting(fixed.body).setName("导出路径").addText((input) => input.setValue("99_assets/export"));
+  annotateSettingControlLayouts(root);
+  check(fixed.body.querySelector(".setting-item.lexis-setting-has-toggle") !== null, "toggle settings receive an explicit mobile layout class");
+  check(inputSetting.settingEl.classList.contains("lexis-setting-has-wide-control"), "wide controls receive an explicit mobile layout class");
   const changes: boolean[] = [];
   const inline = createSettingsSection(main.body, "词条颜色", { key: "colors", open: true, onToggle: (value) => changes.push(value) });
   new Setting(inline.body).setName("颜色名称 / 别名");

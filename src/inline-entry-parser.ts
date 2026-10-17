@@ -84,7 +84,7 @@ export function parseInlineEntries(content: string, file: TFile, syntax: InlineE
       inline: true,
       annotation,
       colorToken,
-      category: categoryPath.at(-1) || "",
+      category: categoryPath[categoryPath.length - 1] || "",
       categoryPath,
       headingPath,
       line: lineNo,

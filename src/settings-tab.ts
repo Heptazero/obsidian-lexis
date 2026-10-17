@@ -20,6 +20,7 @@ import { createSettingsSection } from "./settings-section";
 import { renderPluginMaintenance } from "./settings-maintenance";
 import { renderDictionarySettings } from "./settings-dictionaries";
 import { inlineEntryConflictsWithFlashcard } from "./flashcard-syntax";
+import { annotateSettingControlLayouts } from "./settings-control-layout";
 
 export interface SettingsRuntime extends Plugin, ManualRuntime {
   settings: LexisSettings;
@@ -324,6 +325,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
       new Setting(dictSection).setName(t("settings.rebuild")).addButton((b) => b.setButtonText(t("settings.rebuildNow")).onClick(() => { void this.plugin.rebuildIndex(true); this.renderStats(); }));
       this.statsEl = dictSection.createEl("p", { cls: "lexis-stats" });
       this.renderStats();
+      annotateSettingControlLayouts(containerEl);
     }
 
     renderStats() {

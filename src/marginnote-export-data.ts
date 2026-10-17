@@ -29,7 +29,8 @@ export async function buildMarginNoteDictionary(
   }
   const entries: MarginNoteEntry[] = [];
   for (const [id, { entry, aliases }] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
-    const heading = entry.inline ? entry.headingPath?.at(-1)?.name : undefined;
+    const headingPath = entry.headingPath || [];
+    const heading = entry.inline ? headingPath[headingPath.length - 1]?.name : undefined;
     const color = options.color?.(entry) || "";
     entries.push({
       id,

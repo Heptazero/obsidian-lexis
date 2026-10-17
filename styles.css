@@ -98,7 +98,7 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     display: grid;
     grid-template-columns: 10px minmax(0, 1fr) auto;
     align-items: center;
-    column-gap: 8px;
+    gap: 8px;
     min-height: 44px;
     padding: 4px 0;
     margin: 0;
@@ -114,10 +114,10 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
 .lexis-settings-section > summary::before {
     content: "";
     justify-self: center;
-    width: .45em;
-    height: .55em;
-    background: var(--text-faint);
-    clip-path: polygon(0 0, 100% 50%, 0 100%);
+    width: 0;
+    height: 0;
+    border-block: .28em solid transparent;
+    border-inline-start: .45em solid var(--text-faint);
     transform: rotate(0deg);
     transform-origin: center;
     transition: transform 120ms ease;
@@ -136,7 +136,7 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     border-top: 1px solid var(--background-modifier-border);
 }
 .lexis-settings-heading-label { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
-.lexis-settings-section-heading > .lexis-settings-heading-label { flex-direction: row; flex-wrap: wrap; align-items: baseline; column-gap: 8px; }
+.lexis-settings-section-heading > .lexis-settings-heading-label { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 8px; }
 .lexis-settings-section-title { color: var(--text-accent); font-size: 1.07em; }
 .lexis-settings-tabs {
     display: flex;
@@ -253,7 +253,7 @@ body:not(.lexis-show-review-metadata) .metadata-property:is(
     display: grid;
     grid-template-columns: 10px minmax(0, 1fr) auto;
     align-items: center;
-    column-gap: 11px;
+    gap: 11px;
     min-height: 48px;
     margin: 0;
     padding: 4px 2px;
@@ -280,15 +280,15 @@ details.lexis-settings-group > .lexis-settings-group-heading:focus-visible {
 .lexis-settings-group > .lexis-settings-group-heading::before {
     content: "";
     justify-self: center;
-    width: .45em;
-    height: .55em;
-    background: transparent;
-    clip-path: polygon(0 0, 100% 50%, 0 100%);
+    width: 0;
+    height: 0;
+    border-block: .28em solid transparent;
+    border-inline-start: .45em solid transparent;
     transform: rotate(0deg);
     transition: transform 120ms ease;
 }
 details.lexis-settings-group > .lexis-settings-group-heading::before {
-    background: var(--text-faint);
+    border-inline-start-color: var(--text-faint);
 }
 details.lexis-settings-group[open] > .lexis-settings-group-heading::before {
     transform: rotate(90deg);
@@ -415,10 +415,10 @@ details.lexis-settings-group[open] > .lexis-settings-group-heading::before {
     flex: 0 0 auto;
     color: var(--text-faint);
     transition: transform 120ms ease;
-    width: .45em;
-    height: .55em;
-    background: var(--text-faint);
-    clip-path: polygon(0 0, 100% 50%, 0 100%);
+    width: 0;
+    height: 0;
+    border-block: .28em solid transparent;
+    border-inline-start: .45em solid var(--text-faint);
 }
 .lexis-inline-group[open] > .lexis-inline-group-row .lexis-inline-chevron {
     transform: rotate(90deg);
@@ -594,21 +594,21 @@ button.lexis-missing-entry-color {
     }
     .lexis-settings-group > .lexis-settings-group-heading {
         min-height: 44px;
-        column-gap: 8px;
+        gap: 8px;
     }
-    .lexis-settings-root .setting-item:not(.setting-item-heading):has(> .setting-item-control > :is(input[type="text"], input[type="number"], input[type="range"], select, textarea)) {
+    .lexis-settings-root .setting-item.lexis-setting-has-wide-control {
         display: flex;
         flex-direction: column;
         align-items: stretch;
         gap: 8px;
     }
-    .lexis-settings-root .setting-item:not(.setting-item-heading):has(> .setting-item-control > :is(input[type="text"], input[type="number"], input[type="range"], select, textarea)) > :is(.setting-item-info, .setting-item-control) {
+    .lexis-settings-root .setting-item.lexis-setting-has-wide-control > :is(.setting-item-info, .setting-item-control) {
         width: 100%;
         min-width: 0;
         max-width: 100%;
         flex: none;
     }
-    .lexis-settings-root .setting-item:not(.setting-item-heading):has(> .setting-item-control > :is(input[type="text"], input[type="number"], input[type="range"], select, textarea)) > .setting-item-control {
+    .lexis-settings-root .setting-item.lexis-setting-has-wide-control > .setting-item-control {
         display: flex;
         align-items: center;
         gap: 8px;
@@ -621,16 +621,16 @@ button.lexis-missing-entry-color {
         max-width: 100%;
         box-sizing: border-box;
     }
-    .lexis-settings-root .setting-item:has(> .setting-item-control > .checkbox-container) {
+    .lexis-settings-root .setting-item.lexis-setting-has-toggle {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
         align-items: center;
-        column-gap: 12px;
+        gap: 12px;
     }
-    .lexis-settings-root .setting-item:has(> .setting-item-control > .checkbox-container) > .setting-item-info {
+    .lexis-settings-root .setting-item.lexis-setting-has-toggle > .setting-item-info {
         min-width: 0;
     }
-    .lexis-settings-root .setting-item:has(> .setting-item-control > .checkbox-container) > .setting-item-control {
+    .lexis-settings-root .setting-item.lexis-setting-has-toggle > .setting-item-control {
         width: auto;
         min-width: 0;
         margin-left: 0;
@@ -1130,8 +1130,6 @@ button.lexis-missing-entry-color {
     padding: 0 0.12em;
     border-radius: 0.22em;
     background: color-mix(in srgb, var(--interactive-accent) 22%, var(--background-modifier-hover));
-    box-decoration-break: clone;
-    -webkit-box-decoration-break: clone;
     transition: color 120ms ease, background-color 120ms ease;
 }
 .lexis-rv-word.is-context.is-masked .lexis-rv-answer-mask,

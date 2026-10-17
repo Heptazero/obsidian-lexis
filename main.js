@@ -119,7 +119,7 @@ function parseInlineEntries(content, file, syntax) {
       inline: true,
       annotation,
       colorToken,
-      category: categoryPath.at(-1) || "",
+      category: categoryPath[categoryPath.length - 1] || "",
       categoryPath,
       headingPath,
       line: lineNo
@@ -2166,7 +2166,8 @@ function libraryMetrics(state, today = localDate(/* @__PURE__ */ new Date())) {
   const validHistory = (Array.isArray(state.history) ? state.history : []).map((event) => ({ date: String(event?.date || "").slice(0, 10), s: Number(event?.s) })).filter((event) => dateValid(event.date) && event.date <= today && Number.isFinite(event.s) && event.s > 0);
   const last = String(state.last || "").slice(0, 10);
   const validLast = dateValid(last) && last <= today;
-  const date = validLast ? last : validHistory.map((event) => event.date.slice(0, 10)).sort().at(-1);
+  const reviewDates = validHistory.map((event) => event.date.slice(0, 10)).sort();
+  const date = validLast ? last : reviewDates[reviewDates.length - 1];
   const elapsed = date ? Math.max(0, (Date.parse(today) - Date.parse(date)) / 864e5) : null;
   const retention = stability != null && elapsed != null ? FSRS.retrievability(elapsed, stability) : null;
   const reps = state.reps != null && Number.isInteger(count) && count >= 0 ? count : null;
@@ -4236,7 +4237,7 @@ ${body}`.trim();
 function inlineClassificationHeading(entry, level) {
   const headings = entry.headingPath || [];
   if (!headings.length) return null;
-  if (!Number.isInteger(level) || level < 1 || level > 6) return headings.at(-1) || null;
+  if (!Number.isInteger(level) || level < 1 || level > 6) return headings[headings.length - 1] || null;
   return [...headings].reverse().find((heading) => heading.level <= level) || headings[0] || null;
 }
 function inlineClassificationPath(entry, level) {
@@ -9524,7 +9525,8 @@ async function buildMarginNoteDictionary(vault, index, read, options = {}) {
   }
   const entries = [];
   for (const [id, { entry, aliases }] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
-    const heading = entry.inline ? entry.headingPath?.at(-1)?.name : void 0;
+    const headingPath = entry.headingPath || [];
+    const heading = entry.inline ? headingPath[headingPath.length - 1]?.name : void 0;
     const color = options.color?.(entry) || "";
     entries.push({
       id,
@@ -10156,6 +10158,22 @@ function renderDictionarySettings(container, plugin, accent, labels, stats) {
   render();
 }
 
+// src/settings-control-layout.ts
+var WIDE_CONTROL_SELECTOR = 'input:not([type]), input[type="text"], input[type="number"], input[type="range"], select, textarea';
+function directControl(setting) {
+  for (const child of setting.children) {
+    if (child.instanceOf(HTMLElement) && child.classList.contains("setting-item-control")) return child;
+  }
+  return null;
+}
+function annotateSettingControlLayouts(root) {
+  for (const setting of root.querySelectorAll(".setting-item:not(.setting-item-heading)")) {
+    const control = directControl(setting);
+    setting.classList.toggle("lexis-setting-has-wide-control", !!control?.querySelector(WIDE_CONTROL_SELECTOR));
+    setting.classList.toggle("lexis-setting-has-toggle", !!control?.querySelector(".checkbox-container"));
+  }
+}
+
 // src/settings-tab.ts
 var createSettingsTab = ({ obsidian: obsidian8, PluginSettingTab: PluginSettingTab2, Setting: Setting13, Notice: Notice18, TFolder: TFolder3, DEFAULT_SETTINGS: DEFAULT_SETTINGS2, cssColorToHex: cssColorToHex2, addAppearanceButton: addAppearanceButton2, createReorderController: createReorderController2, moveItem: moveItem2, LEXIS_HOME_VIEW: LEXIS_HOME_VIEW2, LEXIS_REVIEW_VIEW: LEXIS_REVIEW_VIEW2 }) => {
   const PathSuggest = createPathSuggest(obsidian8);
@@ -10515,6 +10533,7 @@ var createSettingsTab = ({ obsidian: obsidian8, PluginSettingTab: PluginSettingT
       }));
       this.statsEl = dictSection.createEl("p", { cls: "lexis-stats" });
       this.renderStats();
+      annotateSettingControlLayouts(containerEl);
     }
     renderStats() {
       if (!this.statsEl) return;

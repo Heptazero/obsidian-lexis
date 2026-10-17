@@ -50,7 +50,8 @@ export function libraryMetrics(state: ReviewCardState, today = localDate(new Dat
   const validHistory = (Array.isArray(state.history) ? state.history : []).map((event) => ({ date: String(event?.date || "").slice(0, 10), s: Number(event?.s) })).filter((event) => dateValid(event.date) && event.date <= today && Number.isFinite(event.s) && event.s > 0);
   const last = String(state.last || "").slice(0, 10);
   const validLast = dateValid(last) && last <= today;
-  const date = validLast ? last : validHistory.map((event) => event.date.slice(0, 10)).sort().at(-1);
+  const reviewDates = validHistory.map((event) => event.date.slice(0, 10)).sort();
+  const date = validLast ? last : reviewDates[reviewDates.length - 1];
   const elapsed = date ? Math.max(0, (Date.parse(today) - Date.parse(date)) / 86400000) : null;
   const retention = stability != null && elapsed != null ? FSRS.retrievability(elapsed, stability) : null;
   const reps = state.reps != null && Number.isInteger(count) && count >= 0 ? count : null;
