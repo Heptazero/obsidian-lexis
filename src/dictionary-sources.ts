@@ -20,6 +20,15 @@ export function dictionarySources(dictionary: DictionarySetting): DictionarySour
 export const dictionaryId = (dictionary: DictionarySetting): string => dictionary.id || dictionarySources(dictionary).map(sourceKey).join("|");
 export const dictionaryName = (dictionary: DictionarySetting): string => dictionary.name?.trim() || dictionarySources(dictionary).map(sourceLabel).join(" + ");
 
+/** Direct sources can be checked against one file without constructing a vault snapshot. */
+export function dictionarySourceScore(source: DictionarySource, filePath: string, tags?: Set<string>): number {
+    const path = filePath.normalize("NFC");
+    if (source.kind === "file") return path === source.value ? 100000 : 0;
+    if (source.kind === "folder") return path.startsWith(`${source.value}/`) ? source.value.length : 0;
+    if (source.kind === "tag") return tags?.has(source.value) ? 10000 : 0;
+    return 0;
+}
+
 /** Keep collection identity while Obsidian moves a source or one of its parents. */
 export function renameDictionaryPaths(dictionaries: DictionarySetting[], before: string, after: string): boolean {
     const oldPath = sourcePath(before), newPath = sourcePath(after);
@@ -65,11 +74,10 @@ export function resolveDictionaries(app: App, dictionaries: DictionarySetting[],
                     include(file.path, 50000);
             else
                 for (const file of files) {
-                    const path = file.path.normalize("NFC");
                     if (source.kind === "tag" && !tags.has(file.path))
                         tags.set(file.path, getTags(file));
-                    if (source.kind === "file" ? path === source.value : source.kind === "folder" ? path.startsWith(`${source.value}/`) : tags.get(file.path)?.has(source.value))
-                        include(file.path, source.kind === "file" ? 100000 : source.kind === "tag" ? 10000 : source.value.length);
+                    const score = dictionarySourceScore(source, file.path, tags.get(file.path));
+                    if (score) include(file.path, score);
                 }
         }
         paths.set(dictionaryId(dictionary), included);

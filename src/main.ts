@@ -258,7 +258,7 @@ class LexisPlugin extends LexisPluginBase {
     this.app.workspace.onLayoutReady(() => {
       this._workspaceDocuments.activateLeaf(this.app.workspace.getMostRecentLeaf());
       void this.rebuildIndex(false);
-      void this.reviewCatalog.start();
+      this.reviewCatalog.start();
       this.syncActivePageHighlightState();
     });
     this.registerEvent(this.app.vault.on("create", (f) => { if (f instanceof TFile) this.maybeRebuild(f); }));

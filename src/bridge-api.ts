@@ -3,6 +3,7 @@
 import type { App, Component as ObsidianComponent, TFile as ObsidianTFile } from "obsidian";
 import { createBridgeRenderApi } from "./bridge-render-api";
 import { renderOccurrenceContent } from "./occurrence-render";
+import { escapeOccurrenceHashes } from "./occurrence-text";
 import type { Occurrence } from "./occurrence-search";
 import type { HighlightStyle, InlineCategoryOccurrence, LexisEntry, LexisSettings, LexisStats, ReviewHistoryEvent } from "./types";
 import { dictionaryId, dictionaryName, resolveDictionaries } from "./dictionary-sources";
@@ -180,7 +181,7 @@ function createBridgeApi({ DEFAULT_SETTINGS, TFile, Component, todayStr, recentR
         }
         if (occurrence) {
           const cur = await this.app.vault.cachedRead(existing);
-          if (dupKey && cur.includes(dupKey)) return { ok: true, created: false, dup: true, word, file: existing.path, dictionaries: memberships(existing) };
+          if (dupKey && (cur.includes(dupKey) || cur.includes(escapeOccurrenceHashes(dupKey)))) return { ok: true, created: false, dup: true, word, file: existing.path, dictionaries: memberships(existing) };
           const apply = (data: string) => this.insertOccurrence(data, occurrence);
           if (this.app.vault.process) await this.app.vault.process(existing, apply);
           else await this.app.vault.modify(existing, apply(cur));

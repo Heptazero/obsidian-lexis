@@ -16,11 +16,12 @@ const bundle = await build({ entryPoints: ["src/main.ts"], bundle: true, write: 
 });
 
 function fixture() {
+  const layoutReady = [];
   const handlers = new Map(), views = new Map(), viewRegistrations = [], flushed = [], clock = { clearTimeout() {}, setTimeout() { return 1; }, requestAnimationFrame() {}, cancelAnimationFrame() {}, addEventListener() {}, removeEventListener() {} };
   const document = { body: { classList: { toggle() {}, remove() {} } }, defaultView: clock, addEventListener() {}, removeEventListener() {}, querySelectorAll: () => [] };
   const workspace = {
     containerEl: { ownerDocument: document }, getMostRecentLeaf: () => null,
-    on: () => ({}), offref() {}, onLayoutReady() {}, getLeavesOfType: () => [],
+    on: () => ({}), offref() {}, onLayoutReady(callback) { layoutReady.push(callback); }, getLeavesOfType: () => [],
   };
   class Component {
     events = [];
@@ -60,8 +61,26 @@ function fixture() {
     plugin.setupLiveExtension = () => {};
     return plugin;
   };
-  return { create, handlers, views, viewRegistrations, flushed };
+  return { create, handlers, views, viewRegistrations, flushed, layoutReady };
 }
+
+test("layout-ready startup and maintenance do not initialize the review catalog", async () => {
+  const f = fixture(), plugin = f.create();
+  await plugin.onload();
+  let enumerations = 0, reads = 0, saves = 0;
+  plugin.app.vault.getMarkdownFiles = () => { enumerations++; return []; };
+  plugin.app.vault.cachedRead = async () => { reads++; return ""; };
+  plugin.saveSettings = async () => { saves++; };
+  plugin.rebuildIndex = async () => ({});
+  plugin.syncActivePageHighlightState = () => {};
+  plugin._workspaceDocuments.activateLeaf = () => {};
+  for (const ready of f.layoutReady) ready();
+  await plugin.prepareReload();
+  plugin.unload();
+  assert.equal(enumerations, 0);
+  assert.equal(reads, 0);
+  assert.equal(saves, 0);
+});
 
 test("fresh and settings-failed plugin instances unload without initialized reader or encounter state", async () => {
   const f = fixture();

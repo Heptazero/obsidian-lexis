@@ -20,6 +20,12 @@ The entry point creates these services. It does not store EPUB chapter maps or h
 
 `ReaderHover` cancels timers through the same window that created them. Closing a pop-out removes its DOM listeners immediately. Plugin unload removes the remaining listeners, workspace subscriptions and pending timers. Starting an existing workspace session again does not duplicate callbacks.
 
+## Review catalog lifecycle
+
+`ReviewCatalog.start()` registers listeners without enumerating or reading notes. Startup metadata notifications do not trigger parsing. The first explicit `cards()` request shares one bounded full-vault scan across consumers; reopening the library reuses parsed cards. Subsequent metadata bursts coalesce per file, and changed syntax settings invalidate the catalog on the next request. Syntax cards outside dictionary folders remain supported.
+
+The catalog batches discovery writes during initialization and saves only changed metadata. `flush()` waits for existing work and writes; it never starts a scan or rewrites unchanged settings. Queued renames and deletes finish before pruning obsolete catalog keys. Failed file reads remain retryable, and unload prevents in-flight reads from applying new state. Existing review history and FSRS state retain their format and contents.
+
 ## Shared logic and platform adapters
 
 Share term matching, review calculations and card behavior when their semantics are the same. Keep DOM discovery, hit testing and coordinates specific to each reader. Browser, EPUB and PDF do not have interchangeable DOM environments.
@@ -31,6 +37,8 @@ Unload must also work when initialization fails. Encounter buffers and hover tim
 ## Remaining debt
 
 Dictionary membership is resolved by `dictionary-sources.ts`, not reconstructed by each consumer. Highlighting, review, library filters/groups, browser membership and MarginNote exports use that resolver. `dictionary-migration.ts` owns the one-way settings conversion; capture folders remain separate write destinations. See [Dictionary collections](dictionary-collections.md).
+
+Highlight metadata events use the resolver's shared single-file source scores to decide whether an index refresh is needed. They preserve the published membership snapshot and coalesce changes through the existing rebuild timer. Each rebuild resolves one fresh file snapshot for both dictionary and inline indexing. Link-based dictionaries also refresh after changes to potential targets or aliases, so formerly unresolved links can become members without a manual rebuild.
 
 The whole plugin is not yet service-based. Dictionary, review, bridge and some reader UI methods still use runtime prototype composition and share plugin state. `plugin-base.ts` still declares a broad API; `main.ts` still contains commands and settings migration. These should be moved when their ownership can be defined and their behavior tested, rather than hidden behind forwarding-only wrappers.
 

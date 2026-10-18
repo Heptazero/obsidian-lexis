@@ -6,6 +6,7 @@ import type { InlineCategoryOccurrence, InlineColorTokenUsage, LexisEntry, Lexis
 import { DEFAULT_INLINE_ENTRY_DELIMITER, parseInlineEntries } from "./inline-entry-parser";
 import { inlineClassificationHeading, inlineClassificationPath } from "./inline-category";
 import { collectInlineColorTokenUsages } from "./entry-colors";
+import { dictionarySources, dictionarySourceScore, type resolveDictionaries } from "./dictionary-sources";
 
 type TranslationVars = Record<string, string | number | boolean>;
 
@@ -41,7 +42,7 @@ function createHighlightIndex({ Notice, boundedSource, compactMixedScriptSpacing
     declare bridge: { running: boolean } | null;
     declare occurrenceSearch: OccurrenceSearch;
     declare saveSettings: () => Promise<void>;
-    declare isVocabFile: (file: TFile | null | undefined) => boolean;
+    declare dictionaryScopes: () => ReturnType<typeof resolveDictionaries>;
     declare inFolderScope: (path: string) => boolean;
     declare excludeTagSet: () => Set<string>;
     declare dictFolders: () => string[];
@@ -54,7 +55,6 @@ function createHighlightIndex({ Notice, boundedSource, compactMixedScriptSpacing
     selfKeysFor(path: string): Set<string> | null { return (this._selfKeysByPath && this._selfKeysByPath.get(path)) || null; }
 
     maybeRebuild(file: TFile | null, oldPath?: string) {
-      this._dictionaryScopes = null;
       const path = file?.path || "";
       this._occCache.clear();
       if (file?.extension === "pdf") this.occurrenceSearch?.invalidatePdf(file.path);
@@ -81,8 +81,13 @@ function createHighlightIndex({ Notice, boundedSource, compactMixedScriptSpacing
         }
         if (reviewChanged) void this.saveSettings();
       }
-      const hubChanged = this.settings.dicts?.some(row => row.sources?.some(source => source.kind === "links" && source.value.normalize("NFC") === path.normalize("NFC")));
-      if (hubChanged || this.isVocabFile(file) || this.vocabPaths.has(path) || this.isInlineSourceFile(file) || this.inlineSourcePaths?.has(path) || (oldPath && (this.inFolderScope(oldPath) || this.vocabPaths.has(oldPath) || this.inlineSourcePaths?.has(oldPath)))) this.scheduleRebuild();
+      const sources = (this.settings.dicts || []).flatMap(dictionarySources);
+      const tags = file?.extension === "md" && sources.some(source => source.kind === "tag") ? this.getTags(file) : undefined;
+      // Keep the current snapshot until the coalesced rebuild. Resolving all scopes here
+      // multiplies full-vault work by the number of startup metadata events.
+      // Any Markdown change can resolve a formerly missing/aliased Hub link.
+      const matchesSource = file?.extension === "md" && sources.some(source => source.kind === "links" || dictionarySourceScore(source, path, tags) > 0);
+      if (matchesSource || this.vocabPaths.has(path) || this.isInlineSourceFile(file) || this.inlineSourcePaths?.has(path) || (oldPath && (this.inFolderScope(oldPath) || this.vocabPaths.has(oldPath) || this.inlineSourcePaths?.has(oldPath)))) this.scheduleRebuild();
     }
 
     scheduleRebuild() {
@@ -157,7 +162,8 @@ function createHighlightIndex({ Notice, boundedSource, compactMixedScriptSpacing
       const today = todayStr();
       let words = 0, aliases = 0, inlineEntries = 0, due = 0;
       const categoryOccurrences = new Map<string, InlineCategoryOccurrence>();
-      const files = this.app.vault.getMarkdownFiles().filter((file) => this.isVocabFile(file));
+      const scopes = this.dictionaryScopes();
+      const files = scopes.files.filter((file) => scopes.byFile.has(file.path));
       const vocabPaths = new Set(files.map((file) => file.path));
       for (const file of files) {
         const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter || {};
@@ -180,7 +186,7 @@ function createHighlightIndex({ Notice, boundedSource, compactMixedScriptSpacing
         selfKeysByPath.set(file.path, own);
         if (!archived && !retired && (frontmatter["lexis-s"] == null || !frontmatter["lexis-due"] || String(frontmatter["lexis-due"]).slice(0, 10) <= today)) due++;
       }
-      const inlineFiles = this.app.vault.getMarkdownFiles().filter((file) => this.isInlineSourceFile(file));
+      const inlineFiles = scopes.files.filter((file) => this.isInlineSourceFile(file));
       const inlineSourcePaths = new Set(inlineFiles.map((file) => file.path));
       const parsed = await Promise.all(inlineFiles.map(async (file) => {
         try { return this.parseInlineEntries(await this.app.vault.cachedRead(file), file); }

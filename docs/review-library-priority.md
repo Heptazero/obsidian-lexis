@@ -46,7 +46,7 @@ These fields live in the plugin's existing `data.json`; this change does not mov
 }
 ```
 
-The catalog owns startup scanning, incremental metadata events, timers and cleanup. Startup reads at most 16 files concurrently and yields between batches. Opening the library reuses parsed cards. Changing syntax templates rescans; renames migrate discovery/priority/suspension references. Deleted/removed cards lose the new metadata and priority records; retained review history remains historical evidence.
+The catalog owns lazy discovery, incremental metadata events, timers and cleanup. Startup only registers listeners; it does not scan notes or save catalog settings. The first card-list request scans all Markdown, at most 16 files concurrently, yielding between batches. Concurrent requests share that scan; later requests reuse parsed cards. Metadata bursts re-read only the changed file. Changing syntax templates invalidates the next request; renames migrate discovery/priority/suspension references even before the first scan. Discovery writes are batched during scans, and unchanged catalogs are not saved. Deleted/removed cards lose only catalog metadata and priority records; retained review history remains historical evidence. The first library load still needs to read the vault; this change introduces no persistent content cache or new data format.
 
 ## Verification boundary
 

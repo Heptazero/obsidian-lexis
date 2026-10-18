@@ -256,6 +256,13 @@ function dictionarySources(dictionary) {
 }
 var dictionaryId = (dictionary) => dictionary.id || dictionarySources(dictionary).map(sourceKey).join("|");
 var dictionaryName = (dictionary) => dictionary.name?.trim() || dictionarySources(dictionary).map(sourceLabel).join(" + ");
+function dictionarySourceScore(source, filePath, tags) {
+  const path = filePath.normalize("NFC");
+  if (source.kind === "file") return path === source.value ? 1e5 : 0;
+  if (source.kind === "folder") return path.startsWith(`${source.value}/`) ? source.value.length : 0;
+  if (source.kind === "tag") return tags?.has(source.value) ? 1e4 : 0;
+  return 0;
+}
 function renameDictionaryPaths(dictionaries, before, after) {
   const oldPath = sourcePath(before), newPath = sourcePath(after);
   let changed = false;
@@ -302,11 +309,10 @@ function resolveDictionaries(app, dictionaries, getTags, files = app.vault.getMa
           include(file.path, 5e4);
       else
         for (const file of files) {
-          const path = file.path.normalize("NFC");
           if (source.kind === "tag" && !tags.has(file.path))
             tags.set(file.path, getTags(file));
-          if (source.kind === "file" ? path === source.value : source.kind === "folder" ? path.startsWith(`${source.value}/`) : tags.get(file.path)?.has(source.value))
-            include(file.path, source.kind === "file" ? 1e5 : source.kind === "tag" ? 1e4 : source.value.length);
+          const score = dictionarySourceScore(source, file.path, tags.get(file.path));
+          if (score) include(file.path, score);
         }
     }
     paths.set(dictionaryId(dictionary), included);
@@ -3515,6 +3521,12 @@ var ReviewCatalog = class {
     this.started = false;
     this.disposed = false;
     this.signature = "";
+    this.scanTask = null;
+    this.queuedUpdates = /* @__PURE__ */ new Set();
+    this.failedPaths = /* @__PURE__ */ new Set();
+    this.needsReconcile = false;
+    this.dirty = false;
+    this.saving = null;
     this.saveTimer = null;
   }
   templates() {
@@ -3528,25 +3540,31 @@ var ReviewCatalog = class {
     const s = this.host.settings;
     return JSON.stringify({ templates: this.templates(), inlineEntriesEnabled: s.inlineEntriesEnabled, inlineEntryDelimiter: s.inlineEntryDelimiter });
   }
+  // Watching must not read note bodies: metadata emits many changes while a vault opens.
   start() {
-    if (this.started) return this.pending;
+    if (this.started || this.disposed) return;
     this.started = true;
     for (const [key, meta] of Object.entries(this.host.settings.reviewCardMeta)) {
       const keys = this.keysByPath.get(meta.filePath) || /* @__PURE__ */ new Set();
       keys.add(key);
       this.keysByPath.set(meta.filePath, keys);
     }
-    this.host.registerEvent(this.host.app.metadataCache.on("changed", (file) => this.enqueue(() => this.update(file))));
+    this.host.registerEvent(this.host.app.metadataCache.on("changed", (file) => {
+      if (this.signature || this.scanTask !== null) this.queueUpdate(file);
+    }));
     this.host.registerEvent(this.host.app.vault.on("delete", (file) => {
-      this.enqueue(async () => {
-        for (const path of this.keysByPath.keys()) if (path === file.path || path.startsWith(`${file.path}/`)) this.removeFile(path);
-        this.scheduleSave();
+      void this.enqueue(async () => {
+        let changed = false;
+        for (const path of this.keysByPath.keys()) {
+          if (path === file.path || path.startsWith(`${file.path}/`)) changed = this.removeFile(path) || changed;
+        }
+        if (changed) this.scheduleSave();
       });
     }));
     this.host.registerEvent(this.host.app.vault.on("rename", (file, oldPath) => {
-      if (file instanceof import_obsidian14.TFile) this.enqueue(() => this.rename(file, oldPath));
-      else this.enqueue(async () => {
-        for (const path of [...this.parsed.keys()]) {
+      if (file instanceof import_obsidian14.TFile) void this.enqueue(() => this.rename(file, oldPath));
+      else void this.enqueue(async () => {
+        for (const path of /* @__PURE__ */ new Set([...this.parsed.keys(), ...this.keysByPath.keys()])) {
           if (!path.startsWith(`${oldPath}/`)) continue;
           const current = this.host.app.vault.getFileByPath(file.path + path.slice(oldPath.length));
           if (current) await this.rename(current, path);
@@ -3555,60 +3573,118 @@ var ReviewCatalog = class {
     }));
     this.host.register(() => {
       this.disposed = true;
-      if (this.saveTimer) {
-        window.clearTimeout(this.saveTimer);
-        this.saveTimer = null;
-        void this.host.saveSettings().catch((error) => console.warn("[Lexis] Cannot save card discovery", error));
-      }
+      if (this.saveTimer) window.clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+      if (this.dirty) void this.persist().catch((error) => console.warn("[Lexis] Cannot save card discovery", error));
       this.parsed.clear();
       this.keysByPath.clear();
+      this.queuedUpdates.clear();
+      this.failedPaths.clear();
     });
-    this.enqueue(() => this.scan());
-    return this.pending;
   }
   enqueue(task) {
-    this.pending = this.pending.then(async () => {
+    const work = this.pending.then(async () => {
       if (!this.disposed) await task();
-    }).catch((error) => console.warn("[Lexis] Card catalog update failed", error));
+    });
+    this.pending = work.catch((error) => console.warn("[Lexis] Card catalog update failed", error));
+    return work;
+  }
+  queueUpdate(file) {
+    if (this.disposed || this.queuedUpdates.has(file)) return;
+    this.queuedUpdates.add(file);
+    void this.enqueue(async () => {
+      this.queuedUpdates.delete(file);
+      await this.update(file);
+    });
+  }
+  async settle() {
+    let pending;
+    do {
+      pending = this.pending;
+      await pending;
+    } while (pending !== this.pending);
+  }
+  async ensureLoaded() {
+    this.start();
+    for (const path of this.failedPaths) {
+      const file = this.host.app.vault.getFileByPath(path);
+      if (file) this.queueUpdate(file);
+      else this.failedPaths.delete(path);
+    }
+    do {
+      if (!this.disposed && this.scanTask === null && this.signature !== this.parsingSignature()) {
+        if (this.saveTimer) window.clearTimeout(this.saveTimer);
+        this.saveTimer = null;
+        this.scanTask = this.enqueue(() => this.scan()).finally(() => {
+          this.scanTask = null;
+          if (this.dirty) this.scheduleSave();
+        });
+      }
+      if (this.scanTask !== null) await this.scanTask;
+      await this.settle();
+    } while (!this.disposed && this.signature !== this.parsingSignature());
+    if (!this.disposed && this.needsReconcile && !this.failedPaths.size) this.reconcile();
   }
   async flush() {
-    await this.start();
+    await this.settle();
     if (this.saveTimer) window.clearTimeout(this.saveTimer);
     this.saveTimer = null;
-    await this.host.saveSettings();
+    do {
+      await this.persist();
+    } while (this.dirty || this.saving !== null);
+    if (this.saveTimer) window.clearTimeout(this.saveTimer);
+    this.saveTimer = null;
+  }
+  async persist() {
+    if (this.saving !== null) await this.saving;
+    if (!this.dirty) return;
+    this.dirty = false;
+    this.saving = this.host.saveSettings();
+    try {
+      await this.saving;
+    } catch (error) {
+      this.dirty = true;
+      throw error;
+    } finally {
+      this.saving = null;
+    }
   }
   scheduleSave() {
-    if (this.saveTimer || this.disposed) return;
+    this.dirty = true;
+    if (this.saveTimer || this.disposed || this.scanTask !== null) return;
     this.saveTimer = window.setTimeout(() => {
       this.saveTimer = null;
-      void this.host.saveSettings().catch((error) => console.warn("[Lexis] Cannot save card discovery", error));
+      void this.persist().catch((error) => console.warn("[Lexis] Cannot save card discovery", error));
     }, 1e3);
   }
   async scan() {
-    this.signature = this.parsingSignature();
+    const signature = this.parsingSignature();
     const files = this.host.app.vault.getMarkdownFiles();
-    const paths = new Set(files.map((file) => file.path));
-    let complete = true;
+    this.needsReconcile = false;
     for (let index = 0; index < files.length && !this.disposed; index += 16) {
-      const results = await Promise.all(files.slice(index, index + 16).map((file) => this.update(file)));
-      if (results.some((result) => !result)) complete = false;
+      await Promise.all(files.slice(index, index + 16).map((file) => this.update(file)));
       await new Promise((resolve) => window.setTimeout(resolve, 0));
     }
     if (this.disposed) return;
-    for (const path of this.parsed.keys()) if (!paths.has(path)) this.removeFile(path);
-    for (const path of this.keysByPath.keys()) if (!paths.has(path)) this.removeFile(path);
-    if (complete) {
-      const syntaxKeys = new Set([...this.parsed.values()].flatMap((cards) => cards.map((card) => `syntax:${card.id}`)));
-      for (const key of Object.keys(this.host.settings.reviewPriorities)) {
-        if (key.startsWith("syntax:") ? syntaxKeys.has(key) : paths.has(key)) continue;
-        delete this.host.settings.reviewPriorities[key];
-        this.scheduleSave();
-      }
+    this.signature = signature;
+    this.needsReconcile = true;
+  }
+  reconcile() {
+    const paths = new Set(this.host.app.vault.getMarkdownFiles().map((file) => file.path));
+    for (const path of /* @__PURE__ */ new Set([...this.parsed.keys(), ...this.keysByPath.keys()])) {
+      if (!paths.has(path) && this.removeFile(path)) this.scheduleSave();
     }
-    if (complete && !this.host.settings.reviewCatalogInitialized) {
+    const syntaxKeys = new Set([...this.parsed.values()].flatMap((cards) => cards.map((card) => `syntax:${card.id}`)));
+    for (const key of Object.keys(this.host.settings.reviewPriorities)) {
+      if (key.startsWith("syntax:") ? syntaxKeys.has(key) : paths.has(key)) continue;
+      delete this.host.settings.reviewPriorities[key];
+      this.scheduleSave();
+    }
+    if (!this.host.settings.reviewCatalogInitialized) {
       this.host.settings.reviewCatalogInitialized = true;
       this.scheduleSave();
     }
+    this.needsReconcile = false;
   }
   fileCards(file) {
     const cards = (this.parsed.get(file.path) || []).map((syntax) => ({
@@ -3623,16 +3699,19 @@ var ReviewCatalog = class {
     if (this.host.isVocabFile(file)) cards.unshift({ key: file.path, file, label: file.basename, type: "note" });
     return cards;
   }
-  async update(file) {
+  async update(file, markdown) {
     if (file.extension !== "md" || this.disposed) return true;
-    let markdown;
+    if (this.host.app.vault.getFileByPath(file.path) !== file) return true;
     try {
-      markdown = await this.host.app.vault.cachedRead(file);
+      markdown ??= await this.host.app.vault.cachedRead(file);
     } catch (error) {
+      if (this.disposed) return false;
+      this.failedPaths.add(file.path);
       console.warn("[Lexis] Cannot index review cards", file.path, error);
       return false;
     }
     if (this.disposed || this.host.app.vault.getFileByPath(file.path) !== file) return true;
+    this.failedPaths.delete(file.path);
     this.parsed.set(file.path, parseSyntaxCards(markdown, file.path, this.templates(), this.parseOptions(file)));
     const cards = this.fileCards(file);
     const keys = new Set(cards.map((card) => card.key));
@@ -3649,21 +3728,27 @@ var ReviewCatalog = class {
   }
   removeFile(path) {
     this.parsed.delete(path);
-    delete this.host.settings.reviewPriorities[path];
-    for (const key of this.keysByPath.get(path) || []) {
+    this.failedPaths.delete(path);
+    let changed = false;
+    for (const key of /* @__PURE__ */ new Set([path, ...this.keysByPath.get(path) || []])) {
+      if (key in this.host.settings.reviewCardMeta || key in this.host.settings.reviewPriorities) changed = true;
       delete this.host.settings.reviewCardMeta[key];
       delete this.host.settings.reviewPriorities[key];
     }
     this.keysByPath.delete(path);
+    return changed;
   }
   async rename(file, oldPath) {
+    if (this.disposed) return;
     if (file.extension !== "md") {
-      this.removeFile(oldPath);
-      this.scheduleSave();
+      if (this.removeFile(oldPath)) this.scheduleSave();
       return;
     }
-    const previous = this.parsed.get(oldPath) || [];
-    const current = parseSyntaxCards(await this.host.app.vault.cachedRead(file), file.path, this.templates(), this.parseOptions(file));
+    if (!this.signature && this.scanTask === null && !this.keysByPath.has(oldPath)) return;
+    const markdown = await this.host.app.vault.cachedRead(file);
+    if (this.disposed) return;
+    const previous = this.parsed.get(oldPath) || parseSyntaxCards(markdown, oldPath, this.templates(), this.parseOptions(file));
+    const current = parseSyntaxCards(markdown, file.path, this.templates(), this.parseOptions(file));
     const pairs = [[oldPath, file.path], ...previous.flatMap((before, index) => {
       const after = current[index];
       return after && before.kind === after.kind && before.front === after.front && before.back === after.back ? [[`syntax:${before.id}`, `syntax:${after.id}`]] : [];
@@ -3686,15 +3771,12 @@ var ReviewCatalog = class {
       }
     }
     this.removeFile(oldPath);
-    await this.update(file);
+    await this.update(file, markdown);
     this.scheduleSave();
   }
   async cards() {
-    await this.start();
-    if (this.signature !== this.parsingSignature()) {
-      this.enqueue(() => this.scan());
-      await this.pending;
-    }
+    await this.ensureLoaded();
+    if (this.disposed) return [];
     const cards = this.host.app.vault.getMarkdownFiles().flatMap((file) => this.fileCards(file));
     if (rememberReviewCards(this.host.settings, cards, !this.host.settings.reviewCatalogInitialized)) this.scheduleSave();
     for (const card of cards) {
@@ -4608,12 +4690,28 @@ function createBridgeRenderApi({ TFile: TFile10, Component: Component8, recentRe
   return descriptors;
 }
 
+// src/occurrence-text.ts
+var HASH_TOKENS = new RegExp([
+  String.raw`\\[\s\S]`,
+  "(`+)(?!`)[\\s\\S]*?\\1(?!`)",
+  String.raw`(~{3,})[^\n]*\n[\s\S]*?\2`,
+  String.raw`\$\$[\s\S]*?\$\$|\$(?:\\[\s\S]|[^$\\\n])+\$`,
+  String.raw`\[\[[^\n]*?\]\]`,
+  String.raw`\]\((?:\\[\s\S]|[^()\\]|\([^()]*\))*\)`,
+  String.raw`(?:https?|obsidian):\/\/[^\s<>]+`,
+  "#"
+].join("|"), "g");
+function escapeOccurrenceHashes(text) {
+  return text.replace(HASH_TOKENS, (token) => token === "#" ? "\\#" : token);
+}
+
 // src/occurrence-render.ts
 function renderOccurrenceContent(template, values) {
   return template.split("\n").map((line) => line.replace(/\{\{(\w+)\}\}/g, (_token, key, offset) => {
     const raw = values[key];
     if (!(key in values)) return _token;
     let value = typeof raw === "string" || typeof raw === "number" ? String(raw) : "";
+    if (key === "sentence") value = escapeOccurrenceHashes(value);
     if (key === "sourceSuffix" && value && typeof values.sentence === "string" && /\n\$\$\s*$/.test(values.sentence)) value = `
 
 ${value.trimStart()}`;
@@ -4693,7 +4791,7 @@ ${line}---` + data.slice(fm.index + fm[0].length);
           }
           if (occurrence) {
             const cur = await this.app.vault.cachedRead(existing);
-            if (dupKey && cur.includes(dupKey)) return { ok: true, created: false, dup: true, word, file: existing.path, dictionaries: memberships(existing) };
+            if (dupKey && (cur.includes(dupKey) || cur.includes(escapeOccurrenceHashes(dupKey)))) return { ok: true, created: false, dup: true, word, file: existing.path, dictionaries: memberships(existing) };
             const apply = (data) => this.insertOccurrence(data, occurrence);
             if (this.app.vault.process) await this.app.vault.process(existing, apply);
             else await this.app.vault.modify(existing, apply(cur));
@@ -5058,7 +5156,6 @@ function createHighlightIndex({ Notice: Notice18, boundedSource: boundedSource2,
       return this._selfKeysByPath && this._selfKeysByPath.get(path) || null;
     }
     maybeRebuild(file, oldPath) {
-      this._dictionaryScopes = null;
       const path = file?.path || "";
       this._occCache.clear();
       if (file?.extension === "pdf") this.occurrenceSearch?.invalidatePdf(file.path);
@@ -5088,8 +5185,10 @@ function createHighlightIndex({ Notice: Notice18, boundedSource: boundedSource2,
         }
         if (reviewChanged) void this.saveSettings();
       }
-      const hubChanged = this.settings.dicts?.some((row) => row.sources?.some((source) => source.kind === "links" && source.value.normalize("NFC") === path.normalize("NFC")));
-      if (hubChanged || this.isVocabFile(file) || this.vocabPaths.has(path) || this.isInlineSourceFile(file) || this.inlineSourcePaths?.has(path) || oldPath && (this.inFolderScope(oldPath) || this.vocabPaths.has(oldPath) || this.inlineSourcePaths?.has(oldPath))) this.scheduleRebuild();
+      const sources2 = (this.settings.dicts || []).flatMap(dictionarySources);
+      const tags = file?.extension === "md" && sources2.some((source) => source.kind === "tag") ? this.getTags(file) : void 0;
+      const matchesSource = file?.extension === "md" && sources2.some((source) => source.kind === "links" || dictionarySourceScore(source, path, tags) > 0);
+      if (matchesSource || this.vocabPaths.has(path) || this.isInlineSourceFile(file) || this.inlineSourcePaths?.has(path) || oldPath && (this.inFolderScope(oldPath) || this.vocabPaths.has(oldPath) || this.inlineSourcePaths?.has(oldPath))) this.scheduleRebuild();
     }
     scheduleRebuild() {
       window.clearTimeout(this._rebuildTimer);
@@ -5163,7 +5262,8 @@ function createHighlightIndex({ Notice: Notice18, boundedSource: boundedSource2,
       const today = todayStr();
       let words = 0, aliases = 0, inlineEntries = 0, due = 0;
       const categoryOccurrences = /* @__PURE__ */ new Map();
-      const files = this.app.vault.getMarkdownFiles().filter((file) => this.isVocabFile(file));
+      const scopes = this.dictionaryScopes();
+      const files = scopes.files.filter((file) => scopes.byFile.has(file.path));
       const vocabPaths = new Set(files.map((file) => file.path));
       for (const file of files) {
         const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter || {};
@@ -5192,7 +5292,7 @@ function createHighlightIndex({ Notice: Notice18, boundedSource: boundedSource2,
         selfKeysByPath.set(file.path, own);
         if (!archived && !retired && (frontmatter["lexis-s"] == null || !frontmatter["lexis-due"] || String(frontmatter["lexis-due"]).slice(0, 10) <= today)) due++;
       }
-      const inlineFiles = this.app.vault.getMarkdownFiles().filter((file) => this.isInlineSourceFile(file));
+      const inlineFiles = scopes.files.filter((file) => this.isInlineSourceFile(file));
       const inlineSourcePaths = new Set(inlineFiles.map((file) => file.path));
       const parsed = await Promise.all(inlineFiles.map(async (file) => {
         try {
@@ -14144,7 +14244,7 @@ var LexisPlugin = class extends LexisPluginBase {
     this.app.workspace.onLayoutReady(() => {
       this._workspaceDocuments.activateLeaf(this.app.workspace.getMostRecentLeaf());
       void this.rebuildIndex(false);
-      void this.reviewCatalog.start();
+      this.reviewCatalog.start();
       this.syncActivePageHighlightState();
     });
     this.registerEvent(this.app.vault.on("create", (f) => {
