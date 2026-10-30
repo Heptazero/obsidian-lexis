@@ -6,7 +6,7 @@ import { openAliasCombobox, type AliasComboboxController } from "./alias-combobo
 import { collectAliasTargets } from "./alias-search";
 import type { LexisEntry, LexisSettings } from "./types";
 import { pdfHighlightAt } from "./pdf-highlight-targets";
-import { positionSelectionPill } from "./selection-pill-position";
+import { normalizePillScale, positionSelectionPill } from "./selection-pill-position";
 import { selectionPillActions } from "./selection-pill-order";
 import { canvasHighlightAt } from "./canvas-highlight-target";
 import type { ExcalidrawHighlights } from "./excalidraw-highlights";
@@ -305,6 +305,7 @@ function createReaderInteractions(): PropertyDescriptorMap {
     })();
     const selectedPage = Number(host.closest("[data-page-number]")?.getAttribute("data-page-number")) || 0;
     const pill = overlayDoc.body.createDiv({ cls: "lexis-sel-pill" });
+    pill.style.setProperty("--lexis-pill-scale", String(normalizePillScale(this.settings.selectionPillScale)));
     // 阻止 mousedown 收起选区/夺焦(事件冒泡到 pill 即可覆盖子按钮)
     pill.addEventListener("mousedown", (ev) => ev.preventDefault());
     if (known) {

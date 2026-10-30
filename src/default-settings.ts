@@ -57,7 +57,9 @@ export const DEFAULT_SETTINGS: DefaultLexisSettings = {
   hoverFeedback: true,
   hoverFeedbackDays: 3,
   retireCandidateDays: 90,
-  encounterFolder: "",
+  dataFolder: "",
+  reviewEventsRetentionDays: 90,
+  reviewRetentionConfirmed: false,
   homeRetireCollapsed: true,
   homeSuspendedCollapsed: true,
   homeArchivedCollapsed: true,
@@ -108,6 +110,7 @@ export const DEFAULT_SETTINGS: DefaultLexisSettings = {
   selectionPillOrder: "add-dictionary-alias",
   selectionPillOffsetX: 0,
   selectionPillOffsetY: 0,
+  selectionPillScale: 1,
   lastSelectionFolder: "",
   enablePdfHighlight: true,
 };

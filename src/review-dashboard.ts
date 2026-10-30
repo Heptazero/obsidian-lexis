@@ -42,20 +42,21 @@ export class ReviewDashboard {
     const { settings } = this.plugin;
     const date = localDate(new Date());
     const plans = await Promise.all(settings.reviewPlans.map(async (plan) => ({ plan, items: await this.plugin.collectReviewItems(planOptions(plan), true) })));
-    const globalItems = plans.length ? mergeReviewItems(plans.map((plan) => plan.items)) : await this.plugin.collectReviewItems(planOptions(), true);
-    const globalOptions: ReviewOptions = plans.length
-      ? { dictionaryIds: plans.some(({plan}) => plan.dictionaryIds === null) ? null : [...new Set(plans.flatMap(({plan}) => plan.dictionaryIds || []))], content: "both" }
+    const scheduled = plans.filter(({plan})=>plan.mode !== "cram");
+    const globalItems = scheduled.length ? mergeReviewItems(scheduled.map((plan) => plan.items)) : await this.plugin.collectReviewItems(planOptions(), true);
+    const globalOptions: ReviewOptions = scheduled.length
+      ? { sources:[...new Set(globalItems.map(item=>item.file.path))].map(value=>({scope:"file",value})), content: "both" }
       : planOptions();
-    const globalId = `global:${plans.map(({ plan }) => plan.id).join(",")}`;
+    const globalId = `global:${scheduled.map(({ plan }) => plan.id).join(",")}`;
     let changed = false;
     const summary = (id: string, items: ReviewItem[], options: ReviewOptions): DashboardSummary => {
       let target = settings.reviewDailyTargets[id];
       if (!target || target.date !== date) {
-        target = createDailyTarget(items, settings, date);
+        target = createDailyTarget(items, settings, date, options);
         settings.reviewDailyTargets[id] = target;
         changed = true;
       } else if (!target.keys.length) {
-        const next = createDailyTarget(items, settings, date);
+        const next = createDailyTarget(items, settings, date, options);
         if (next.keys.length) { target = next; settings.reviewDailyTargets[id] = target; changed = true; }
       }
       return dashboardSummary(items, settings, target, options);

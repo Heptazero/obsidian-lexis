@@ -1,7 +1,7 @@
 {
   "id": "lexis",
   "name": "Lexis",
-  "version": "1.17.27",
+  "version": "1.17.28",
   "minAppVersion": "1.8.7",
   "description": "Turn Markdown atomic notes into a personal glossary with automatic term highlighting, hover definitions, and PDF, EPUB, browser, and Zotero reading support.",
   "author": "Hz & Claude",

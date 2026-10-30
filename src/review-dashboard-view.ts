@@ -5,6 +5,8 @@ import { reviewItemKeys } from "./review-item";
 import { ReviewPlanEditor, type PlanEditorHost } from "./review-plan-editor";
 import type { TranslationVars } from "./i18n";
 import type { ReviewItem, ReviewOptions, ReviewPlan } from "./types";
+import { deadlineDays } from "./review-setup-model";
+import { reviewRounds } from "./review-batch";
 
 export interface DashboardViewHost extends PlanEditorHost {
   app: App;
@@ -57,6 +59,7 @@ class RemovePlanModal extends Modal {
     actions.createEl("button", { text: this.plugin.t("dashboard.removePlan"), cls: "mod-warning" }).onclick = () => { void (async () => {
       this.plugin.settings.reviewPlans = this.plugin.settings.reviewPlans.filter((plan) => plan.id !== this.plan.id);
       delete this.plugin.settings.reviewDailyTargets[this.plan.id];
+      if (this.plugin.settings.reviewPracticeProgress) delete this.plugin.settings.reviewPracticeProgress[this.plan.id];
       await this.plugin.saveSettings(); this.plugin.reviewDashboard.refresh(); this.close();
     })(); };
   }
@@ -106,14 +109,16 @@ function renderPlans(parent: HTMLElement, plugin: DashboardViewHost, plans: Arra
   header.createEl("h4", { text: t("dashboard.plans") });
   header.createEl("button", { text: t("dashboard.addPlan"), attr: { type: "button" } }).onclick = () => new ReviewPlanEditor(plugin.app, plugin).open();
   if (!plans.length) section.createDiv({ cls: "lexis-dim", text: t("dashboard.noPlans") });
-  for (const { plan, summary, items } of plans) {
+  for (const { plan, summary, items } of [...plans].sort((left,right)=>(left.plan.deadline || "9999").localeCompare(right.plan.deadline || "9999"))) {
     const details = section.createEl("details", { cls: "lexis-plan-row" });
     details.dataset.lexisExpand = plan.id;
     details.open = expanded.has(plan.id);
     const heading = details.createEl("summary");
     const info = heading.createDiv({ cls: "lexis-plan-info" });
     info.createEl("strong", { text: plan.name });
-    info.createSpan({ cls: "lexis-dim", text: t("dashboard.counts", { total: summary.total, due: summary.due, fresh: summary.fresh }) });
+    const days = deadlineDays(plan.deadline,summary.date);
+    info.createSpan({cls:"lexis-dim",text:days == null ? t("setup.longTerm") : days === 0 ? t("setup.dueToday") : t(days < 0 ? "setup.overdue" : "setup.daysLeft",{days:Math.abs(days)})});
+    info.createSpan({ cls: "lexis-dim", text: plan.mode === "cram" ? t("setup.practiceGoal",{count:summary.goal/reviewRounds(plan),rounds:reviewRounds(plan)}) : t("dashboard.counts", { total: summary.total, due: summary.due, fresh: summary.fresh }) });
     info.createSpan({ cls: "lexis-dim", text: t("dashboard.progress", { done: summary.completed, goal: summary.goal, left: summary.remaining }) });
     const start = heading.createEl("button", { text: summary.remaining ? t("dashboard.start") : "✓", attr: { type: "button", "aria-label": t("dashboard.start") } });
     start.disabled = !summary.remaining;
@@ -149,8 +154,8 @@ export function mountReviewDashboard(parent: HTMLElement, plugin: DashboardViewH
       const today = top.createDiv({ cls: "lexis-dashboard-today" });
       today.createEl("h4", { text: options.planName || t("dashboard.today") });
       today.createDiv({ cls: "lexis-dashboard-main-count", text: selected.goal ? t("dashboard.progress", { done: selected.completed, goal: selected.goal, left: selected.remaining }) : t("dashboard.empty") });
-      today.createDiv({ cls: "lexis-dim", text: t("dashboard.counts", { total: selected.total, due: selected.due, fresh: selected.fresh }) });
-      renderGoal(today, selected.completed, selected.minimum, t("dashboard.minimum"));
+      today.createDiv({ cls: "lexis-dim", text: selected.options.mode === "cram" ? t("setup.practice") : t("dashboard.counts", { total: selected.total, due: selected.due, fresh: selected.fresh }) });
+      if (selected.options.mode !== "cram") renderGoal(today, selected.completed, selected.minimum, t("dashboard.minimum"));
       renderGoal(today, selected.completed, selected.goal, t("dashboard.goal"));
       const start = today.createEl("button", { cls: "mod-cta lexis-dashboard-start", text: selected.remaining ? t("dashboard.continue", { count: selected.remaining }) : t(selected.goal ? "dashboard.done" : "dashboard.empty") });
       start.disabled = !selected.remaining;

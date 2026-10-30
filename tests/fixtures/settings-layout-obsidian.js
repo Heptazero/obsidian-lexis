@@ -49,7 +49,9 @@ export class AbstractInputSuggest {
 export class Notice { constructor(message) { (globalThis.__lexisFixtureNotices ||= []).push(message); } }
 export class TextComponent {
   constructor(container) { this.inputEl = container.createEl("input"); }
+  setPlaceholder(value) { this.inputEl.placeholder = value; return this; }
   setValue(value) { this.inputEl.value = value; return this; }
+  getValue() { return this.inputEl.value; }
   setDisabled(value) { this.inputEl.disabled = value; return this; }
   onChange(callback) { this.inputEl.addEventListener("input", () => callback(this.inputEl.value)); return this; }
 }
@@ -57,6 +59,7 @@ export class ExtraButtonComponent {
   constructor(container) { this.extraSettingsEl = container.createEl("button", { cls: "clickable-icon" }); }
   setIcon(icon) { this.extraSettingsEl.dataset.icon = icon; return this; }
   setTooltip(label) { this.extraSettingsEl.setAttribute("aria-label", label); return this; }
+  setDisabled(value) { this.extraSettingsEl.disabled = value; return this; }
   onClick(callback) { this.extraSettingsEl.addEventListener("click", callback); return this; }
 }
 // Match the native runtime's constructor contract, not only the SDK declaration.
@@ -89,6 +92,16 @@ export class Setting {
   setDesc(description) { this.descEl.textContent = description; return this; }
   addText(build) { build(new TextComponent(this.controlEl)); return this; }
   addSearch(build) { return this.addText(build); }
+  addSlider(build) {
+    const inputEl = this.controlEl.createEl("input", { type: "range" });
+    build({ inputEl,
+      setLimits(min, max, step) { inputEl.min = min; inputEl.max = max; inputEl.step = step; return this; },
+      setValue(value) { inputEl.value = value; return this; },
+      setInstant() { return this; },
+      onChange(callback) { inputEl.addEventListener("input", () => callback(Number(inputEl.value))); return this; },
+    });
+    return this;
+  }
   addButton(build) {
     const buttonEl = this.controlEl.createEl("button");
     const button = { buttonEl, setButtonText(value) { buttonEl.textContent = value; return this; },

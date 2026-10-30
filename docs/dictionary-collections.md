@@ -27,9 +27,9 @@ The new-entry folder is automatically filled when choosing a folder source and f
 
 ## Storage and migration
 
-Dictionary definitions and review plans remain in the existing plugin `data.json`; learning storage is not moved. Loading older settings converts folder/tag rows and plan source rules once. A previously independent plan rule gets its own dictionary if no identical dictionary exists. Such migrated plan-only dictionaries start with highlighting off. Old MarginNote folder/tag selections become dictionary IDs; inline-file selections stay unchanged.
+Dictionary definitions remain in the plugin configuration; review plans and learning records use the visible [learning data folder](learning-storage.md). Loading older settings converts folder/tag rows and plan source rules once. A previously independent plan rule gets its own dictionary if no identical dictionary exists. Such migrated plan-only dictionaries start with highlighting off. Old MarginNote folder/tag selections become dictionary IDs; inline-file selections stay unchanged.
 
-Migration preserves dictionary appearance, templates, plan IDs/names/content, daily targets, card IDs and learning records. It does not solve concurrent `data.json` sync overwrites or add a new cross-device merge protocol.
+Dictionary migration preserves appearance, templates, plan IDs/names/content, daily targets and card IDs. Learning storage has its own one-time conversion and retention rules; see the linked storage document.
 
 ## Verification
 

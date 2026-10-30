@@ -29,7 +29,7 @@ function adapter() {
 }
 
 test("uses vault-relative folders, never a file or an outside path", () => {
-  assert.equal(encounterFolder("", ".obsidian", "lexis"), ".obsidian/plugins/lexis/encounters");
+  assert.equal(encounterFolder("", ".obsidian", "lexis"), "Lexis-data");
   assert.equal(encounterFolder("99_assets/Lexis/", ".obsidian", "lexis"), "99_assets/Lexis");
   for (const invalid of ["/tmp/Lexis", "../Lexis", "C:\\Lexis", "Lexis/data.json"]) assert.throws(() => encounterFolder(invalid, ".obsidian", "lexis"));
 });

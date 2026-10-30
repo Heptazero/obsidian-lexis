@@ -11,6 +11,9 @@ import { renderReviewProgressBar } from "./review-progress-bar";
 import { ReviewMobileLayout, isMobileReview } from "./review-mobile-layout";
 import { ReviewNavigation } from "./review-navigation";
 import { renderReviewActions } from "./review-actions";
+import { createReviewImagePreview } from "./review-image-preview";
+import { ReviewBatch, practiceCounts, restorePracticeStore, type PracticeUndo } from "./review-batch";
+import { renderBatchContinuation } from "./review-batch-controls";
 import type { LexisSettings, ReviewCardState, ReviewItem, ReviewOptions, ReviewStateSnapshot } from "./types";
 
 interface ReviewSchedule {
@@ -29,6 +32,7 @@ interface ReviewUndo {
   pos: number;
   requeued: boolean;
   eventId: string;
+  practice?: PracticeUndo;
 }
 
 interface ReviewSession {
@@ -38,6 +42,7 @@ interface ReviewSession {
   revealed: boolean;
   undoStack: ReviewUndo[];
   options: ReviewOptions;
+  batch?: ReviewBatch;
 }
 
 interface ReviewRuntime {
@@ -50,6 +55,8 @@ interface ReviewRuntime {
   buildQueue(options: ReviewOptions): Promise<ReviewItem[]>;
   getTags(file: TFile): Set<string>;
   openReview(options?: ReviewOptions): Promise<void>;
+  configureReview(options: ReviewOptions): void;
+  reviewDashboard?: {refresh():void};
   scheduleCard(card: ReviewCardState, grade: number): ReviewSchedule;
   humanInterval(days: number): string;
   renderNoteInto(container: HTMLElement, file: TFile, component: Component, reviewMode?: boolean, maskAnswers?: boolean): Promise<void>;
@@ -83,6 +90,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
   revealed: boolean;
   undoStack: ReviewUndo[];
   options: ReviewOptions;
+  batch: ReviewBatch | null = null;
   currentItem: ReviewItem | null = null;
   wordEl: HTMLElement | null = null;
   backEl: HTMLElement | null = null;
@@ -114,6 +122,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
     if (!saved) { await this.refresh(); return; }
     this.queue = saved.queue; this.pos = saved.pos; this.reviewed = saved.reviewed;
     this.undoStack = saved.undoStack; this.options = saved.options;
+    this.batch = saved.batch || null;
     this.render();
     if (saved.revealed) await this.reveal();
   }
@@ -121,7 +130,10 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
   async refresh() {
     this.contentEl.empty();
     this.contentEl.createDiv({ cls: "lexis-rv-loading", text: this.plugin.t("common.loading") });
-    this.queue = await this.plugin.buildQueue(this.options);
+    const pool = await this.plugin.buildQueue({...this.options,batchSize:null,targetKeys:undefined,dailyCardLimit:undefined});
+    const options = {...this.options,batchSize:this.options.batchSize !== undefined ? this.options.batchSize : this.options.mode === "cram" ? null : this.plugin.settings.maxReviewsPerSession || 200};
+    this.batch = new ReviewBatch(pool,options,this.options.mode === "cram" ? practiceCounts(this.plugin.settings,this.options.planId,todayStr()) : {});
+    this.queue = this.batch.queue();
     this.pos = 0; this.reviewed = 0; this.revealed = false; this.undoStack = [];
     this.render();
   }
@@ -129,12 +141,17 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
   render() {
     const c = this.contentEl;
     c.empty(); this.rateBar = null; c.addClass("lexis-review"); c.setCssStyles({ paddingBottom: "" });
+    if (this.pos >= this.queue.length && this.options.mode === "cram" && this.batch) {
+      const next = this.batch.nextRound(this.plugin.settings.suspendedReviewItems);
+      if (next.length) {this.queue=next;this.pos=0;this.undoStack=[];}
+    }
     if (this.pos >= this.queue.length) { this.renderDone(c); return; }
     if (this._frontComp) { this._frontComp.unload(); this._frontComp = null; }
     this.revealed = false;
     const item = this.currentItem = this.queue[this.pos];
     const topbar = c.createDiv({ cls: "lexis-rv-topbar" });
-    renderReviewProgressBar(topbar, sessionReviewProgress(this.queue, this.pos, this.plugin.settings.reviewEvents, todayStr(), this.plugin.settings.suspendedReviewItems), (key, vars) => this.plugin.t(key, vars));
+    if (this.options.mode === "cram" && this.batch) topbar.createDiv({cls:"lexis-dim",text:this.plugin.t("setup.round",{round:this.batch.round,rounds:this.batch.rounds})});
+    renderReviewProgressBar(topbar, this.sessionProgress(), (key, vars) => this.plugin.t(key, vars));
     const topbtns = topbar.createDiv({ cls: "lexis-rv-topbtns" });
     if (this.undoStack.length) {
       const ub = topbtns.createEl("button", { cls: "lexis-rv-undo", text: `↩ ${this.plugin.t("review.undo")}` });
@@ -177,7 +194,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
       for (const t of tagsSet) {
         const pill = tw.createSpan({ cls: "lexis-tag", text: "#" + t });
         pill.setAttribute("title", this.plugin.t("review.onlyTag", { tag: t }));
-        pill.addEventListener("click", () => { void this.plugin.openReview({ ...this.options, sources: undefined, targetKeys: undefined, dailyCardLimit: undefined, scope: "tag", tag: t }); });
+        pill.addEventListener("click", () => { this.plugin.configureReview({ content:this.options.content,mode:this.options.mode,scope:"tag",tag:t,batchSize:null,rounds:1 }); });
       }
     }
     this.backEl = card.createDiv({ cls: "lexis-rv-back" });
@@ -205,10 +222,10 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
     this.rateBar.empty();
     const grades: Array<[number, string]> = [[1, "review.again"], [2, "review.hard"], [3, "review.good"], [4, "review.easy"]];
     for (const [g, key] of grades) {
-      const ivl = this.plugin.scheduleCard(item.card, g).interval;
+      const ivl = this.options.mode === "cram" ? null : this.plugin.scheduleCard(item.card, g).interval;
       const b = this.rateBar.createEl("button", { cls: "lexis-rv-btn lexis-rv-g" + g });
       b.createSpan({ cls: "lexis-rv-label", text: `${this.plugin.t(key)} (${g})` });
-      b.createSpan({ cls: "lexis-rv-ivl", text: this.plugin.humanInterval(ivl) });
+      if (ivl != null) b.createSpan({ cls: "lexis-rv-ivl", text: this.plugin.humanInterval(ivl) });
       b.addEventListener("click", () => { void this.grade(g); });
     }
   }
@@ -270,6 +287,11 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
     const item = this.currentItem;
     this.grading = true;
     try {
+      if (this.options.mode === "cram" && this.batch) {
+        const practice = await this.batch.grade(item,g,this.plugin,this.options,todayStr());
+        this.undoStack.push({item,practice,snapshot:{},previousCard:{...item.card},pos:this.pos,requeued:g===1,eventId:""});
+        this.reviewed++;if(g===1) this.queue.push(item);this.pos++;this.render();return;
+      }
       const snapshot = this.plugin.snapshotReviewItem(item);
       const previousCard = { ...item.card };
       const retentionBefore = this.plugin.cardRetrievability(item.card);
@@ -292,8 +314,19 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
     const u = this.undoStack.pop();
     if (!u) { new Notice(this.plugin.t("review.nothingUndo")); return; }
     try {
-      await this.plugin.restoreReviewItem(u.item, u.snapshot);
-      await this.plugin.undoReviewItemLog(u.item, u.eventId);
+      if (u.practice && this.batch) {
+        const id = this.options.planId;
+        if (id) {
+          const store = this.plugin.settings.reviewPracticeProgress ||= {}, previous=store[id];
+          restorePracticeStore(store,id,u.practice);
+          try {await this.plugin.saveSettings();} catch(error) {if(previous)store[id]=previous;else delete store[id];this.undoStack.push(u);throw error;}
+        }
+        this.batch.restore(u.practice);
+        this.plugin.reviewDashboard?.refresh();
+      } else {
+        await this.plugin.restoreReviewItem(u.item, u.snapshot);
+        await this.plugin.undoReviewItemLog(u.item, u.eventId);
+      }
       u.item.card = { ...u.previousCard };
       if (u.requeued && this.queue.length) this.queue.pop();
       this.pos = u.pos;
@@ -304,7 +337,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
   saveSession(): void {
     this.plugin.saveReviewSession(this.leaf, {
       queue: this.queue, pos: this.pos, reviewed: this.reviewed, revealed: this.revealed,
-      undoStack: this.undoStack, options: this.options,
+      undoStack: this.undoStack, options: this.options, batch:this.batch || undefined,
     });
   }
   async openSource(item: ReviewItem) {
@@ -372,80 +405,7 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
   }
   openImagePreview(source: HTMLImageElement) {
     this.closeImagePreview();
-    const overlay = this.containerEl.doc.body.createDiv({ cls: "lexis-rv-image-preview" });
-    const image = overlay.createEl("img");
-    image.src = source.currentSrc || source.src;
-    image.alt = source.alt || "";
-    const pointers = new Map<number, { x: number; y: number }>();
-    let scale = 1, translateX = 0, translateY = 0;
-    let startScale = 1, startTranslateX = 0, startTranslateY = 0, startDistance = 0;
-    let startCenter = { x: 0, y: 0 };
-    let startPan = { x: 0, y: 0 };
-    const clampScale = (value: number) => Math.max(1, Math.min(5, value));
-    const point = (event: PointerEvent) => ({ x: event.clientX, y: event.clientY });
-    const pair = () => [...pointers.values()].slice(0, 2);
-    const distance = (points: Array<{ x: number; y: number }>) => Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y);
-    const center = (points: Array<{ x: number; y: number }>) => ({ x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 });
-    const applyTransform = () => {
-      if (scale === 1) { translateX = 0; translateY = 0; }
-      image.setCssStyles({ transform: `translate3d(${translateX}px, ${translateY}px, 0) scale(${scale})` });
-      overlay.classList.toggle("is-zoomed", scale > 1);
-    };
-    const beginPinch = () => {
-      const points = pair();
-      if (points.length < 2) return;
-      startDistance = distance(points);
-      startCenter = center(points);
-      startScale = scale;
-      startTranslateX = translateX;
-      startTranslateY = translateY;
-    };
-    image.addEventListener("pointerdown", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      image.setPointerCapture(event.pointerId);
-      pointers.set(event.pointerId, point(event));
-      if (pointers.size === 1) {
-        startPan = point(event);
-        startTranslateX = translateX;
-        startTranslateY = translateY;
-      } else if (pointers.size === 2) beginPinch();
-    });
-    image.addEventListener("pointermove", (event) => {
-      if (!pointers.has(event.pointerId)) return;
-      event.preventDefault();
-      pointers.set(event.pointerId, point(event));
-      if (pointers.size >= 2) {
-        const points = pair();
-        const currentCenter = center(points);
-        scale = clampScale(startScale * (distance(points) / Math.max(1, startDistance)));
-        translateX = startTranslateX + currentCenter.x - startCenter.x;
-        translateY = startTranslateY + currentCenter.y - startCenter.y;
-      } else if (scale > 1) {
-        translateX = startTranslateX + event.clientX - startPan.x;
-        translateY = startTranslateY + event.clientY - startPan.y;
-      }
-      applyTransform();
-    });
-    const endPointer = (event: PointerEvent) => {
-      if (!pointers.delete(event.pointerId)) return;
-      if (pointers.size === 1) {
-        const remaining = [...pointers.values()][0];
-        startPan = remaining;
-        startTranslateX = translateX;
-        startTranslateY = translateY;
-      }
-    };
-    image.addEventListener("pointerup", endPointer);
-    image.addEventListener("pointercancel", endPointer);
-    image.addEventListener("click", (event) => event.stopPropagation());
-    const close = overlay.createEl("button", { cls: "lexis-rv-image-close" });
-    close.type = "button";
-    close.textContent = "×";
-    close.setAttribute("aria-label", this.plugin.t("review.closeImage"));
-    close.addEventListener("click", () => this.closeImagePreview());
-    overlay.addEventListener("click", (event) => { if (event.target === overlay) this.closeImagePreview(); });
-    this._imagePreview = overlay;
+    this._imagePreview = createReviewImagePreview(this.containerEl.doc, source, this.plugin.t("review.closeImage"), () => this.closeImagePreview());
   }
   closeImagePreview() {
     if (this._imagePreview) this._imagePreview.remove();
@@ -468,17 +428,23 @@ const createReviewView = ({ reviewViewType, todayStr, renderLexisMarkdown }: Rev
     }
   }
   renderDone(c: HTMLElement) {
-    const progress = sessionReviewProgress(this.queue, this.pos, this.plugin.settings.reviewEvents, todayStr(), this.plugin.settings.suspendedReviewItems);
+    const progress = this.sessionProgress();
     renderReviewProgressBar(c, progress, (key, vars) => this.plugin.t(key, vars));
     const d = c.createDiv({ cls: "lexis-rv-done" });
     d.createDiv({ cls: "lexis-rv-done-emoji", text: "🎉" });
     d.createDiv({ text: progress.completed ? this.plugin.t("review.done", { count: progress.completed }) : this.plugin.t("review.noneDue") });
-    const b = d.createEl("button", { cls: "mod-cta", text: this.plugin.t("review.checkAgain") });
-    b.onclick = () => { void this.plugin.rebuildIndex(false); void this.refresh(); };
+    if (this.options.mode !== "cram") {
+      const b = d.createEl("button", { cls: "mod-cta", text: this.plugin.t("review.checkAgain") });
+      b.onclick = () => { void this.plugin.rebuildIndex(false); void this.refresh(); };
+    }
+    renderBatchContinuation(d,this.options,this.batch,(key,vars)=>this.plugin.t(key,vars),options=>this.plugin.configureReview(options));
     this.plugin.renderHeatmap(d.createDiv({ cls: "lexis-hm-wrap" }));
     const isPhone = isMobileReview(this.containerEl.doc);
     c.setCssStyles({ paddingBottom: isPhone ? "" : `${this.plugin.settings.reviewBottomSpace ?? 70}px` });
     this.updateMobileReviewLayout();
+  }
+  sessionProgress() {
+    return sessionReviewProgress(this.queue,this.pos,this.plugin.settings.reviewEvents,todayStr(),this.plugin.settings.suspendedReviewItems,this.options.mode === "cram" ? new Map(Object.entries(this.batch?.grades || {})) : undefined);
   }
 };
 

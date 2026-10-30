@@ -52,7 +52,7 @@ export function migrateDictionaryCollections(settings: LexisSettings): boolean {
         return row.id;
     };
     for (const plan of settings.reviewPlans || []) {
-        if (plan.dictionaryIds !== undefined)
+        if (plan.dictionaryIds !== undefined || plan.scope !== undefined)
             continue;
         let all = false;
         const selected = new Set<string>();

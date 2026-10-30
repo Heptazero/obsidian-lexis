@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import vm from "node:vm";
 import { build } from "esbuild";
+import { memoryAdapter } from "./helpers/learning-adapter.mjs";
 
 // Execute the actual composed entry point; native hosts and independent visual services are simulated.
 const bundle = await build({ entryPoints: ["src/main.ts"], bundle: true, write: false, format: "cjs", platform: "node",
@@ -31,7 +32,7 @@ function fixture() {
     unload() { while (this.events.length) this.events.pop()(); this.onunload?.(); }
   }
   class Plugin extends Component {
-    constructor() { super(); this.app = { workspace, vault: { adapter: {}, configDir: ".obsidian", on: () => ({}) }, metadataCache: { on: () => ({}) },
+    constructor() { super(); this.app = { workspace, vault: { adapter: memoryAdapter(), configDir: ".obsidian", on: () => ({}) }, metadataCache: { on: () => ({}) },
       loadLocalStorage: () => "a".repeat(32) }; this.manifest = { id: "lexis", dir: ".obsidian/plugins/lexis", version: "fixture" }; }
     async loadData() { return { legacySettingsImported: true, bridgeEnabled: false, enableHighlight: false, enablePdfHighlight: false }; }
     async saveData() {}

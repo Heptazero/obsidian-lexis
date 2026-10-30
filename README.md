@@ -140,7 +140,7 @@ The interface language can be switched between Chinese and English in Lexis sett
 
 ### Where data lives
 
-Dictionary notes and FSRS fields stay in vault Markdown files. Lexis settings and review history stay in Obsidian's fixed `.obsidian/plugins/lexis/data.json`. Encounter history defaults to `.obsidian/plugins/lexis/encounters/`; *Settings → Lexis → Data storage → Encounter data folder* accepts a dedicated vault-relative **folder** path. Editing does nothing until the check button is pressed; the undo button discards the draft. The switch copies only the active encounter baseline and per-device, per-day `.jsonl` files, leaving old copies for manual cleanup. It does not move `data.json` or dictionary notes. Browser settings and its temporary dictionary cache live in the browser's extension storage.
+Dictionary notes and note-level FSRS fields stay in vault Markdown files. Encounters, review states, plans and history live in the visible **Data folder** under *Settings → Lexis → Data storage* (default `Lexis-data`; existing visible encounter folders are reused). Directory changes require the check button; undo discards the draft. Existing users' history is migrated without age pruning until they confirm a retention period there (suggested: 90 days). Current schedules are not reset. The hidden `.obsidian/plugins/lexis/data.json` contains configuration only, not learning records. Browser settings and its temporary dictionary cache remain in extension storage. Update every device before reviewing with the [new storage format](docs/learning-storage.md); sync both configuration and the visible data folder.
 
 ## Note blocks
 

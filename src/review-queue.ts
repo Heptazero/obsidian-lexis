@@ -4,6 +4,7 @@ import { noteSuspensionKey, syntaxSuspensionKey, restrictReviewItem, reviewItemK
 import type { LexisSettings, ReviewCardState, ReviewItem, ReviewOptions, ReviewSortKey, SuspendedReviewEntry } from "./types";
 import { orderByReviewPriority } from "./review-priority";
 import { linkedMarkdownFiles, resolveDictionaries } from "./dictionary-sources";
+import { renamePracticeKey, takeReviewBatch } from "./review-batch";
 
 interface ReviewQueueDependencies {
   todayStr: () => string;
@@ -136,12 +137,13 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
       if (options.sources) {
         const files = new Map<string, TFile>();
         for (const source of options.sources) {
-          for (const file of this.reviewScopeFiles({ scope: source.scope, folder: source.value, linkSource: source.value, tag: source.value })) files.set(file.path, file);
+          for (const file of this.reviewScopeFiles({ scope: source.scope === "file" ? "current" : source.scope, file: source.value, folder: source.value, linkSource: source.value, tag: source.value })) files.set(file.path, file);
         }
         return [...files.values()];
       }
       const scope = options.scope || "vocab";
-      let files = this.app.vault.getMarkdownFiles();
+      const current = scope === "current" ? this.app.vault.getFileByPath(options.file || "") : null;
+      let files = scope === "current" ? (current?.extension === "md" ? [current] : []) : this.app.vault.getMarkdownFiles();
       if (scope === "vocab") {
         files = files.filter((file) => this.inVocabFolder(file.path));
         const dictionary = this.normalizeFolder(options.folder || "");
@@ -156,7 +158,6 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
         const tag = String(options.tag || "").toLowerCase().replace(/^#/, "");
         files = tag ? files.filter((file) => this.getTags(file).has(tag)) : [];
       }
-      if (scope === "current") files = files.filter((file) => file.path === options.file);
       return files.filter((file) => {
         const lifecycle = this.readLifecycle(file);
         return !lifecycle.archived && !lifecycle.retired;
@@ -215,7 +216,7 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
       const options = this.isInlineSourceFile?.(file) ? { inlineEntryDelimiter: this.settings.inlineEntryDelimiter } : {};
       const previous = parseSyntaxCards(markdown, oldPath, templates, options);
       const current = parseSyntaxCards(markdown, file.path, templates, options);
-      let changed = false;
+      let changed = renamePracticeKey(this.settings,oldPath,file.path);
       for (let index = 0; index < Math.min(previous.length, current.length); index++) {
         const before = previous[index], after = current[index];
         if (before.kind !== after.kind || before.front !== after.front || before.back !== after.back) continue;
@@ -233,6 +234,7 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
         }
         const oldKey = `syntax:${before.id}`;
         const newKey = `syntax:${after.id}`;
+        changed = renamePracticeKey(this.settings,oldKey,newKey) || changed;
         for (const event of this.settings.reviewEvents) {
           if (!event.memberKeys.includes(oldKey)) continue;
           event.memberKeys = event.memberKeys.map((key) => key === oldKey ? newKey : key);
@@ -280,7 +282,12 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
       const sortBy = resolved.sortBy || "due";
       const direction = resolved.sortDirection === "desc" ? -1 : 1;
       const today = todayStr();
-      let candidates = await this.collectReviewItems(resolved);
+      const practice = resolved.mode === "cram";
+      let candidates = await this.collectReviewItems(resolved, practice);
+      if (resolved.excludedKeys?.length) {
+        const excluded = new Set(resolved.excludedKeys);
+        candidates = candidates.map(item => restrictReviewItem(item, new Set(reviewItemKeys(item).filter(key => !excluded.has(key))))).filter((item): item is ReviewItem => !!item);
+      }
       if (resolved.targetKeys) {
         const allowed = new Set(resolved.targetKeys);
         candidates = candidates.map((item) => restrictReviewItem(item, allowed)).filter((item): item is ReviewItem => !!item);
@@ -293,7 +300,7 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
 
       const due = candidates.filter((item) => !isFresh(item.card) && (!item.card.due || String(item.card.due).slice(0, 10) <= today));
       const fresh = candidates.filter((item) => isFresh(item.card));
-      let queue = due.concat(fresh);
+      let queue = practice ? candidates : due.concat(fresh);
       if (sortBy === "random") {
         for (let index = queue.length - 1; index > 0; index--) {
           const target = Math.floor(Math.random() * (index + 1));
@@ -323,7 +330,7 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
       const newLimit = Math.max(0, this.settings.newPerDay ?? 20);
       queue = orderByReviewPriority(queue, this.settings.reviewPriorities);
       let admittedFresh = 0;
-      queue = queue.filter((item) => !isFresh(item.card) || admittedFresh++ < newLimit);
+      if (!practice) queue = queue.filter((item) => !isFresh(item.card) || admittedFresh++ < newLimit);
       if (resolved.dailyCardLimit != null) {
         let left = Math.max(0, resolved.dailyCardLimit);
         queue = queue.map((item) => {
@@ -332,7 +339,8 @@ export function createReviewQueue({ todayStr }: ReviewQueueDependencies): Proper
           return restrictReviewItem(item, new Set(keys));
         }).filter((item): item is ReviewItem => !!item);
       }
-      return queue.slice(0, this.settings.maxReviewsPerSession || 200);
+      if (resolved.batchSize !== undefined) return takeReviewBatch(queue, resolved.batchSize).selected;
+      return practice ? queue : queue.slice(0, this.settings.maxReviewsPerSession || 200);
     }
   }
 

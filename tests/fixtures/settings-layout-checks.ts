@@ -10,6 +10,7 @@ import { checkSettingsMaintenance } from "./settings-maintenance-checks";
 import { checkReviewCardRows } from "./review-card-row-checks";
 import { checkDictionaryCollections } from "./dictionary-collections-checks";
 import { annotateSettingControlLayouts } from "../../src/settings-control-layout";
+import { checkStorageSettings } from "./storage-settings-checks";
 
 const checks: string[] = [];
 function check(value: unknown, message: string): void { if (!value) throw new Error(message); checks.push(message); }
@@ -106,6 +107,7 @@ async function run(): Promise<void> {
   await checkReviewCardRows(check);
   await checkReviewLogLayout(check);
   await checkDictionaryCollections(check);
+  await checkStorageSettings(check);
 }
 
 run().then(() => {

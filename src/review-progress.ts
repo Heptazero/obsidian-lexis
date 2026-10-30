@@ -26,11 +26,11 @@ export function progressForKeys(keys: Iterable<string>, grades: Map<string, numb
   return { completed, retry, remaining: unique.size - completed - retry, total: unique.size };
 }
 
-export function sessionReviewProgress(queue: ReviewItem[], pos: number, events: ReviewLogEvent[], date: string, suspended: Record<string, boolean> = {}): ReviewProgress {
+export function sessionReviewProgress(queue: ReviewItem[], pos: number, events: ReviewLogEvent[], date: string, suspended: Record<string, boolean> = {}, practiceGrades?: Map<string, number>): ReviewProgress {
   const active = (key: string) => !suspended[key.startsWith("syntax:") ? key : `note:${key}`];
   const all = new Set(queue.flatMap(reviewItemKeys).filter(active));
   const pending = new Set(queue.slice(pos).flatMap(reviewItemKeys).filter(active));
-  const grades = latestReviewGrades(events, date);
+  const grades = practiceGrades ?? latestReviewGrades(events, date);
   let retry = 0;
   for (const key of pending) if (grades.get(key) === 1) retry++;
   return { total: all.size, completed: all.size - pending.size, retry, remaining: pending.size - retry };

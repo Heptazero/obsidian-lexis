@@ -18,6 +18,7 @@ import type { ReviewDashboard } from "./review-dashboard";
 import type { ReviewCatalog } from "./review-catalog";
 import type { MarginNoteExport } from "./marginnote-export";
 import type { resolveDictionaries } from "./dictionary-sources";
+import type { PluginDataStorage } from "./plugin-data-storage";
 
 export type TranslationVars = Record<string, string | number | boolean | null | undefined>;
 export type ReviewCard = ReviewCardState & { history?: ReviewHistoryEvent[] };
@@ -35,6 +36,7 @@ export const errorMessage = (error: unknown): string => error instanceof Error ?
 export class LexisPluginBase extends Plugin {
   declare _dictionaryScopes: ReturnType<typeof resolveDictionaries> | null;
   declare settings: LexisSettings;
+  declare dataStorage: PluginDataStorage;
   declare index: Map<string, LexisEntry>;
   declare stats: LexisStats;
   declare inlineCategoryOccurrences: InlineCategoryOccurrence[];
@@ -84,6 +86,7 @@ export class LexisPluginBase extends Plugin {
   declare renderHeatmap: (el: HTMLElement) => void;
   declare buildCurveSVG: (card: ReviewCardState, limit?: number) => string | null;
   declare renderHomeBlock: (el: HTMLElement, source?: string, context?: obsidian.MarkdownPostProcessorContext) => void;
+  declare refreshAllViews: () => void;
   declare setupLiveExtension: () => void;
   declare setupPdfHighlight: (document?: Document) => void;
   declare teardownPdfHighlight: () => void;

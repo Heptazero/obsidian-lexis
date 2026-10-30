@@ -1,5 +1,5 @@
 import type { LexisSettings } from "./types";
-import { positionSelectionPill, type PillOffset } from "./selection-pill-position";
+import { normalizePillScale, positionSelectionPill, type PillOffset } from "./selection-pill-position";
 
 interface Dependencies {
   Setting: typeof import("obsidian").Setting;
@@ -10,9 +10,11 @@ interface Dependencies {
 
 export function addSelectionPillPosition(container: HTMLElement, { Setting, settings, t, save }: Dependencies): void {
   let offset: PillOffset = { x: settings.selectionPillOffsetX ?? 0, y: settings.selectionPillOffsetY ?? 0 };
+  let scale = normalizePillScale(settings.selectionPillScale);
   new Setting(container).setName(t("settings.pillPosition")).setDesc(t("settings.pillPositionDesc"))
     .addExtraButton(button => button.setIcon("reset").setTooltip(t("settings.pillReset")).onClick(() => {
       offset = { x: 0, y: 0 };
+      scale = 1;
       render();
       void persist();
     }));
@@ -39,15 +41,30 @@ export function addSelectionPillPosition(container: HTMLElement, { Setting, sett
       render();
     });
   }
+  const scaleRow = controls.createEl("label", { cls: "lexis-pill-scale-control" });
+  scaleRow.createSpan({ text: t("settings.pillSize") });
+  const scaleInput = scaleRow.createEl("input", { type: "range" });
+  scaleInput.min = "75"; scaleInput.max = "150"; scaleInput.step = "5";
+  scaleInput.setAttribute("aria-label", t("settings.pillSize"));
+  const scaleValue = scaleRow.createEl("output");
+  scaleInput.addEventListener("input", () => {
+    scale = normalizePillScale(scaleInput.valueAsNumber / 100);
+    render();
+  });
+  scaleInput.addEventListener("change", () => { void persist(); });
   function render() {
+    preview.style.setProperty("--lexis-pill-scale", String(scale));
     preview.style.setProperty("--lexis-pill-x", `${offset.x}px`);
     preview.style.setProperty("--lexis-pill-y", `${offset.y}px`);
     inputs.x.value = String(offset.x);
     inputs.y.value = String(offset.y);
+    scaleInput.value = String(Math.round(scale * 100));
+    scaleValue.textContent = `${Math.round(scale * 100)}%`;
   }
   async function persist() {
     settings.selectionPillOffsetX = offset.x;
     settings.selectionPillOffsetY = offset.y;
+    settings.selectionPillScale = scale;
     await save();
   }
 

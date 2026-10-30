@@ -7,12 +7,13 @@ import { FSRS } from "./fsrs";
 import { LexisHomeView, type RetireCandidate } from "./home-view";
 import { LexisLogView } from "./review-log-view";
 import { scheduleReviewCard } from "./review-scheduler";
-import { EncounterStore, encounterFolder, type ActiveEncounterKind } from "./encounter-store";
+import type { ActiveEncounterKind } from "./encounter-store";
 import { addDaysString as addDaysStr, boundedSource, daysBetween, escapeRe, formatDate as fmtDate, todayString as todayStr } from "./shared-utils";
 import type { ReviewOptions } from "./types";
 import { LexisPluginDictionary } from "./plugin-dictionary";
 import { LexisReviewView } from "./plugin-views";
 import type { HomeOpenLocation, Lifecycle, ReviewCard, Schedule } from "./plugin-base";
+import { ReviewStartModal } from "./review-start-modal";
 
 export class LexisPluginReview extends LexisPluginDictionary {
   // ---------- 生命周期(归档/常驻/淘汰) ----------
@@ -54,37 +55,22 @@ export class LexisPluginReview extends LexisPluginDictionary {
     const loaded = await this._encounterStore.load();
     if (revision === this._encRevision) this._encounters = loaded;
   }
-  async setEncounterFolder(input: string): Promise<void> {
-    const target = encounterFolder(input, this.app.vault.configDir, this.manifest.id);
-    const setting = input.trim().replaceAll("\\", "/").replace(/\/+$/, "");
-    if (target === this._encounterStore.folder) {
-      if (setting !== this.settings.encounterFolder) { this.settings.encounterFolder = setting; await this.saveSettings(); }
-      return;
-    }
+  async setDataFolder(input: string): Promise<void> {
     if (this._encSaveTimer) window.clearTimeout(this._encSaveTimer);
     await this.saveEncounters();
     if (this._encPending.length) throw new Error("Could not save pending encounters");
-    const previousSetting = this.settings.encounterFolder;
-    const previousStore = this._encounterStore;
     this._encRelocating = true;
     try {
-      await this._encounterStore.copyTo(target);
-      const nextStore = new EncounterStore(this.app.vault.adapter, target, this._encounterStore.deviceId, this._encounterStore.deviceLabel);
+      const nextStore = await this.dataStorage.move(input, this._encounterStore);
       const revision = this._encRevision;
       const loaded = await nextStore.load();
-      this.settings.encounterFolder = setting;
-      await this.saveSettings();
       this._encounterStore = nextStore;
       if (revision === this._encRevision) this._encounters = loaded;
-    } catch (error) {
-      this.settings.encounterFolder = previousSetting;
-      this._encounterStore = previousStore;
-      throw error;
     } finally {
       this._encRelocating = false;
       if (this._encPending.length) this._encSaveTimer = window.setTimeout(() => { void this.saveEncounters(); }, 500);
     }
-    await previousStore.removeOwn();
+    await this.saveSettings();
   }
   // 只记录主动相遇；同一词条与相遇类型在 60 秒内去重。
   recordEncounter(file: TFile, type: ActiveEncounterKind): void {
@@ -153,6 +139,7 @@ export class LexisPluginReview extends LexisPluginDictionary {
   async prepareReload(): Promise<void> {
     if (this._encRelocating) throw new Error(this.t("maintenance.pendingData"));
     await this.reviewCatalog.flush();
+    await this.dataStorage?.flush();
     if (this._encSaveTimer) window.clearTimeout(this._encSaveTimer);
     await this.saveEncounters();
     if (this._encRelocating || this._encPending.length) throw new Error(this.t("maintenance.pendingData"));
@@ -265,6 +252,9 @@ export class LexisPluginReview extends LexisPluginDictionary {
     if (!this.settings.suspendedReviewItems?.[key]) return;
     delete this.settings.suspendedReviewItems[key];
     await this.saveSettings();
+  }
+  configureReview(options: ReviewOptions): void {
+    new ReviewStartModal(this.app, this, options, options.scope === "current" ? options.file : undefined).open();
   }
   async openReview(options: ReviewOptions = {}): Promise<void> {
     let leaf = this.app.workspace.getLeavesOfType(LEXIS_REVIEW_VIEW)[0];

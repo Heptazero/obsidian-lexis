@@ -32,7 +32,7 @@ This gradually returns a card to its chosen order; sorting only by weight would 
 
 ## Storage and ownership
 
-These fields live in the plugin's existing `data.json`; this change does not move encounter files:
+These are logical learning fields. They are serialized in device-owned snapshots in the configured visible [learning data folder](learning-storage.md), not the hidden plugin configuration:
 
 ```json
 {

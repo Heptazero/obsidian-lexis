@@ -1,4 +1,5 @@
 import type { DataAdapter } from "obsidian";
+import { dataFolder } from "./data-folder";
 
 export type ActiveEncounterKind = "hover" | "add" | "open";
 
@@ -44,15 +45,12 @@ const NAMED_SNAPSHOT = /^([a-z][a-z0-9-]{0,31})--([a-f0-9]{32})\.json$/;
 const LEGACY_EVENT_FILE = /^\d{4}-\d{2}-\d{2}\.jsonl$/;
 const ACTIVE_KINDS = new Set(["hover", "add", "open"]);
 
-export function encounterFolder(input: string, configDir: string, pluginId: string): string {
-  const value = input.trim().replaceAll("\\", "/").replace(/\/+$/, "");
-  if (!value) return `${configDir}/plugins/${pluginId}/encounters`;
-  const parts = value.split("/");
-  if (value.startsWith("/") || /^[A-Za-z]:/.test(value) || parts.some((part) => !part || part === "." || part === "..") || /\.jsonl?$/i.test(value)) {
-    throw new Error("Enter a vault-relative folder path, not a file name or absolute path.");
-  }
-  return value;
+export function encounterSnapshotName(file: string): string | null {
+  const name = file.slice(file.lastIndexOf("/") + 1);
+  return LEGACY_SNAPSHOT.test(name) || SHORT_NAMED_SNAPSHOT.test(name) || NAMED_SNAPSHOT.test(name) ? name : null;
 }
+
+export const encounterFolder = (input: string, _configDir?: string, _pluginId?: string): string => dataFolder(input);
 
 function validMutation(value: unknown): value is EncounterMutation {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -96,8 +94,7 @@ export class EncounterStore {
   }
 
   private snapshotName(file: string): string | null {
-    const name = file.slice(file.lastIndexOf("/") + 1);
-    return LEGACY_SNAPSHOT.test(name) || SHORT_NAMED_SNAPSHOT.test(name) || NAMED_SNAPSHOT.test(name) ? name : null;
+    return encounterSnapshotName(file);
   }
 
   private async readSnapshot(file: string): Promise<EncounterSnapshot> {
@@ -226,7 +223,7 @@ export class EncounterStore {
     await this.writeSnapshot(file, snapshot);
   }
 
-  async copyTo(folder: string): Promise<void> {
+  async copyTo(folder: string, created = new Map<string, string>()): Promise<void> {
     if (folder === this.folder || !(await this.adapter.exists(this.folder))) return;
     await this.migrateOwnSnapshotName();
     await this.migrateLegacyEvents();
@@ -235,10 +232,11 @@ export class EncounterStore {
     await this.migrateLegacyEvents(folder);
     const destination = await this.adapter.list(folder);
     const unrelated = destination.files.find((file) => !this.snapshotName(file) && !file.endsWith("/.DS_Store"));
-    if (unrelated || destination.folders.length) throw new Error("Choose an empty folder dedicated to Lexis encounter records.");
+    if (unrelated || destination.folders.some(path => path !== `${folder}/reviews`)) throw new Error("Choose an empty folder dedicated to Lexis data.");
     for (const { name, snapshot } of await this.snapshots()) {
       const target = `${folder}/${name}`;
       if (!(await this.adapter.exists(target))) {
+        created.set(target, JSON.stringify(snapshot));
         await this.writeSnapshot(target, snapshot);
         continue;
       }
@@ -269,5 +267,18 @@ export class EncounterStore {
       for (const file of remaining.files) await this.adapter.remove(file);
       await this.adapter.rmdir(this.folder, false);
     }
+  }
+
+  async removeCopiedTo(folder: string): Promise<void> {
+    for (const { name, snapshot } of await this.snapshots()) {
+      const destination = `${folder}/${name}`;
+      if (!(await this.adapter.exists(destination))) throw new Error("Encounter data has not finished moving");
+      const target = await this.readSnapshot(destination);
+      if (Object.entries(snapshot.entries).every(([key, value]) => target.entries[key] && newer(target.entries[key], value) === target.entries[key])) {
+        await this.adapter.remove(`${this.folder}/${name}`);
+      } else throw new Error("Encounter data changed during the move; source was retained");
+    }
+    const root = await this.adapter.list(this.folder);
+    if (!root.files.length && !root.folders.length) await this.adapter.rmdir(this.folder, false);
   }
 }

@@ -2,7 +2,7 @@
 
 import type { EntryColor, LexisSettings } from "./types";
 
-type StoredSettings = Partial<LexisSettings> & { colorRoles?: EntryColor[] };
+type StoredSettings = Partial<LexisSettings> & { colorRoles?: EntryColor[]; encounterFolder?: string };
 
 interface LegacyMigrationResult {
   settings: StoredSettings;

@@ -9,6 +9,7 @@ export type EmptyNotePreset = "blank" | "occ";
 export type CardFront = "note" | "cloze";
 export type AnnotationImageLocation = "obsidian" | "custom";
 export type ReviewContentMode = "notes" | "context" | "syntax" | "both";
+export type ReviewMode = "scheduled" | "cram";
 export type ReviewScopeMode = "vocab" | "folder" | "links" | "tag" | "current";
 export type ReviewSortKey = "due" | "wordCount" | "modified" | "created" | "frequency" | "random";
 export type ReviewSortDirection = "asc" | "desc";
@@ -31,33 +32,47 @@ export interface ReviewCardState {
   history?: ReviewHistoryEvent[];
 }
 
-export interface ReviewOptions {
+export interface ReviewRange {
   dictionaryIds?: string[] | null;
   scope?: ReviewScopeMode;
   folder?: string;
   linkSource?: string;
   tag?: string;
   file?: string;
+  sources?: ReviewSource[];
+}
+
+export interface ReviewOptions extends ReviewRange {
   content?: ReviewContentMode;
+  mode?: ReviewMode;
+  batchSize?: number | null;
+  rounds?: number;
+  planId?: string;
+  excludedKeys?: string[];
   sortBy?: ReviewSortKey;
   sortDirection?: ReviewSortDirection;
-  sources?: ReviewSource[];
   targetKeys?: string[];
   dailyCardLimit?: number;
 }
 
 export interface ReviewSource {
-  scope: "vocab" | "folder" | "links" | "tag";
+  scope: "vocab" | "folder" | "links" | "tag" | "file";
   value: string;
 }
 
-export interface ReviewPlan {
+export interface ReviewPlan extends ReviewRange {
   id: string;
   name: string;
-  dictionaryIds?: string[] | null;
-  sources?: ReviewSource[];
   content: ReviewContentMode;
+  mode?: ReviewMode;
+  batchSize?: number | null;
+  rounds?: number;
+  deadline?: string;
+  sortBy?: ReviewSortKey;
+  sortDirection?: ReviewSortDirection;
 }
+
+export interface ReviewPracticeProgress { date: string; counts: Record<string, number> }
 
 export interface ReviewDailyTarget {
   date: string;
@@ -218,7 +233,10 @@ export interface LexisSettings {
   hoverFeedback: boolean;
   hoverFeedbackDays: number;
   retireCandidateDays: number;
-  encounterFolder: string;
+  dataFolder: string;
+  learningStorageVersion?: number;
+  reviewEventsRetentionDays: number;
+  reviewRetentionConfirmed: boolean;
   homeRetireCollapsed: boolean;
   homeSuspendedCollapsed: boolean;
   homeArchivedCollapsed: boolean;
@@ -235,6 +253,7 @@ export interface LexisSettings {
   reviewDailyGoal: number;
   reviewMinimumGoal: number;
   reviewPlans: ReviewPlan[];
+  reviewPracticeProgress?: Record<string, ReviewPracticeProgress>;
   reviewDailyTargets: Record<string, ReviewDailyTarget>;
   reviewGoalHistory: Record<string, { goal: number; minimum: number }>;
   reviewLog: Record<string, number>;
@@ -269,6 +288,7 @@ export interface LexisSettings {
   selectionPillOrder: SelectionPillOrder;
   selectionPillOffsetX: number;
   selectionPillOffsetY: number;
+  selectionPillScale: number;
   lastSelectionFolder: string;
   enablePdfHighlight: boolean;
   dicts: DictionarySetting[];

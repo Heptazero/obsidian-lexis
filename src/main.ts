@@ -21,7 +21,8 @@ import { LexisLogView } from "./review-log-view";
 import { ReviewCatalog } from "./review-catalog";
 import { migrateReviewEvents } from "./review-log-data";
 import { createOccurrenceSearch } from "./occurrence-search";
-import { EncounterStore, encounterFolder } from "./encounter-store";
+import { EncounterStore } from "./encounter-store";
+import { PluginDataStorage } from "./plugin-data-storage";
 import { createBridgeServer } from "./bridge-server";
 import { createBridgeApi } from "./bridge-api";
 import { createHighlightEngine } from "./highlight-engine";
@@ -33,6 +34,8 @@ import { createTemplateProvider } from "./template-provider";
 import { createSettingsTab } from "./settings-tab";
 import { createReviewState } from "./review-state";
 import { createReviewQueue } from "./review-queue";
+import { currentFileReviewCommand } from "./review-current-file-command";
+import { renameReviewPlanPaths } from "./review-setup-model";
 import { relationBlockSource } from "./relation-sections";
 import { repairReviewHistory } from "./review-scheduler";
 import { migrateEntryColors, migrateLegacySettings, pluginFolderName, type StoredSettings } from "./settings-migration";
@@ -74,15 +77,6 @@ import type { PdfJsRuntime } from "./occurrence-search";
 import type { LexisSettings } from "./types";
 
 type MenuItemWithSubmenu = obsidian.MenuItem & { setSubmenu(): obsidian.Menu };
-
-function encounterDeviceLabel(): string {
-  if (Platform.isIosApp) return "ios";
-  if (Platform.isAndroidApp) return "android";
-  if (Platform.isWin) return "windows";
-  if (Platform.isLinux) return "linux";
-  if (Platform.isMacOS) return "macos";
-  return Platform.isMobile ? "mobile" : "desktop";
-}
 
 const LexisBridge = createBridgeServer({ Notice, Platform });
 
@@ -137,17 +131,27 @@ class LexisPlugin extends LexisPluginBase {
     this._encWriting = null;
     this._encRevision = 0;
     this._encRelocating = false;
-    let deviceId = this.app.loadLocalStorage("lexis:encounter-device-id") as string | null;
-    if (!deviceId || !/^[a-f0-9]{32}$/.test(deviceId)) {
-      deviceId = crypto.randomUUID().replaceAll("-", "");
-      this.app.saveLocalStorage("lexis:encounter-device-id", deviceId);
-    }
-    this._encounterStore = new EncounterStore(this.app.vault.adapter, encounterFolder(this.settings.encounterFolder, this.app.vault.configDir, this.manifest.id), deviceId, encounterDeviceLabel());
+    const { id: deviceId, label: deviceLabel } = this.dataStorage.device;
+    this._encounterStore = new EncounterStore(this.app.vault.adapter, this.settings.dataFolder, deviceId, deviceLabel);
     this._encounterDedup = {};
     this._pageHighlightState = new WeakMap();
     this._reviewSessions = new WeakMap();
     try { await this.loadEncounters(); }
     catch (error) { console.warn("[Lexis] Cannot load encounter history", error); }
+    let syncTimer = 0;
+    const refreshData = (file: { path: string }) => {
+      if (!this.dataStorage.isDataPath(file.path) || this.dataStorage.relocating) return;
+      this.dataStorage.invalidate(file.path);
+      window.clearTimeout(syncTimer);
+      syncTimer = window.setTimeout(() => {
+        void this.dataStorage.refresh().then(() => this.reviewDashboard?.refresh())
+          .catch(error => console.warn("[Lexis] Cannot refresh learning data", error));
+      }, 500);
+    };
+    this.registerEvent(this.app.vault.on("create", refreshData));
+    this.registerEvent(this.app.vault.on("modify", refreshData));
+    this.registerEvent(this.app.vault.on("delete", refreshData));
+    this.register(() => window.clearTimeout(syncTimer));
     this.registerEvent(this.app.workspace.on("file-open", (file) => {
       if (file instanceof TFile && this.inVocabFolder(file.path)) this.recordEncounter(file, "open");
       window.requestAnimationFrame(() => this.syncActivePageHighlightState());
@@ -158,6 +162,7 @@ class LexisPlugin extends LexisPluginBase {
 
     this.addCommand({ id: "rebuild-index", name: this.t("command.rebuild"), callback: () => this.rebuildIndex(true) });
     this.addCommand({ id: "open-review", name: this.t("command.review"), callback: () => this.openHome() });
+    this.addCommand(currentFileReviewCommand(this));
     this.addCommand({ id: "open-review-log", name: this.t("log.title"), callback: () => this.openReviewLog() });
     this.addCommand({ id: "add-selected-word", name: this.t("command.addSelection"), callback: () => this.addSelectedWordCommand() });
     this.addCommand({ id: "open-home", name: this.t("command.home"), callback: () => this.openHome("center") });
@@ -268,7 +273,9 @@ class LexisPlugin extends LexisPluginBase {
       this.maybeRebuild(f);
     }));
     this.registerEvent(this.app.vault.on("rename", (f, old) => {
-      if (renameDictionaryPaths(this.settings.dicts, old, f.path)) { void this.saveSettings(); this.scheduleRebuild(); }
+      const dictionariesChanged = renameDictionaryPaths(this.settings.dicts, old, f.path);
+      const plansChanged = renameReviewPlanPaths(this.settings.reviewPlans, old, f.path);
+      if (dictionariesChanged || plansChanged) { void this.saveSettings(); this.scheduleRebuild(); this.reviewDashboard.refresh(); }
       if (f instanceof TFile) {
         this.renameEncounterPath(old, f.path);
         this.maybeRebuild(f, old);
@@ -335,15 +342,20 @@ class LexisPlugin extends LexisPluginBase {
     this._workspaceDocuments?.dispose();
   }
 
+  async onExternalSettingsChange(): Promise<void> {
+    if (!this.dataStorage) return;
+    try { await this.dataStorage.externalSettingsChanged(); this.refreshAllViews(); }
+    catch (error) { new Notice(`Lexis: ${error instanceof Error ? error.message : "Could not sync configuration"}`, 15000); }
+  }
+
   async loadStoredSettings(): Promise<StoredSettings> {
     const current = ((await this.loadData()) || {}) as StoredSettings;
-    if (pluginFolderName(this.manifest.dir, this.manifest.id) !== this.manifest.id || current.legacySettingsImported) return current;
+    if (pluginFolderName(this.manifest.dir, this.manifest.id) !== this.manifest.id || current.legacySettingsImported || current.learningStorageVersion != null) return current;
     const legacyPath = `${this.app.vault.configDir}/plugins/lexis-local/data.json`;
     if (!(await this.app.vault.adapter.exists(legacyPath))) return current;
     try {
       const legacy = JSON.parse(await this.app.vault.adapter.read(legacyPath)) as StoredSettings;
       const result = migrateLegacySettings(current, legacy);
-      if (result.migrated) await this.saveData(result.settings);
       return result.settings;
     } catch {
       return current;
@@ -353,7 +365,6 @@ class LexisPlugin extends LexisPluginBase {
   async loadSettings() {
     const entryColorMigration = migrateEntryColors(await this.loadStoredSettings());
     const stored = entryColorMigration.settings;
-    if (entryColorMigration.migrated) await this.saveData(stored);
     this.settings = Object.assign({}, DEFAULT_SETTINGS, stored) as LexisSettings;
     this.settings.reviewCardMeta = { ...this.settings.reviewCardMeta };
     this.settings.reviewPriorities = { ...this.settings.reviewPriorities };
@@ -361,7 +372,6 @@ class LexisPlugin extends LexisPluginBase {
     if ((!this.settings.tagRules || !this.settings.tagRules.length) && this.settings.tagRulesText) {
       this.settings.tagRules = this.parseTagRulesText(this.settings.tagRulesText);
       delete this.settings.tagRulesText;
-      await this.saveData(this.settings);
     }
     if (!Array.isArray(this.settings.tagRules)) this.settings.tagRules = [];
     if (!Array.isArray(this.settings.entryColors)) this.settings.entryColors = [];
@@ -380,11 +390,10 @@ class LexisPlugin extends LexisPluginBase {
     if (!this.settings.inlineCategoryOrderByParent || typeof this.settings.inlineCategoryOrderByParent !== "object" || Array.isArray(this.settings.inlineCategoryOrderByParent)) this.settings.inlineCategoryOrderByParent = {};
     if (!this.settings.reviewLog) this.settings.reviewLog = {};
     if (!this.settings.reviewHistory || typeof this.settings.reviewHistory !== "object" || Array.isArray(this.settings.reviewHistory)) this.settings.reviewHistory = {};
-    const historyRepaired = repairReviewHistory(this.settings.reviewHistory);
+    repairReviewHistory(this.settings.reviewHistory);
     const eventsMigrated = !Array.isArray(stored.reviewEvents);
     this.settings.reviewEvents = eventsMigrated ? migrateReviewEvents(this.settings.reviewHistory) : stored.reviewEvents;
     if (!this.settings.reviewAddedAt || typeof this.settings.reviewAddedAt !== "object" || Array.isArray(this.settings.reviewAddedAt)) this.settings.reviewAddedAt = {};
-    if (historyRepaired || eventsMigrated) await this.saveData(this.settings);
     if (!this.settings.syntaxCardStates || typeof this.settings.syntaxCardStates !== "object" || Array.isArray(this.settings.syntaxCardStates)) this.settings.syntaxCardStates = {};
     // 单值 → 多值迁移(收录文件夹 / 网页排除标签)。旧键不在 DEFAULT_SETTINGS,故能区分"未迁移"。
     if (this.settings.vocabFolders == null) this.settings.vocabFolders = this.settings.vocabFolder != null ? this.settings.vocabFolder : "01-word";
@@ -394,7 +403,13 @@ class LexisPlugin extends LexisPluginBase {
     if (!Array.isArray(this.settings.dicts)) {
       this.settings.dicts = this.parseFolders(this.settings.vocabFolders).map((f) => ({ folder: f, template: "" }));
     }
-    if (migrateDictionaryCollections(this.settings)) await this.saveData(this.settings);
+    migrateDictionaryCollections(this.settings);
+    this.dataStorage = new PluginDataStorage(this);
+    try { await this.dataStorage.initialize(stored); }
+    catch (error) {
+      new Notice(`Lexis: ${error instanceof Error ? error.message : "Could not load learning data"}`, 15000);
+      throw error;
+    }
   }
 
 

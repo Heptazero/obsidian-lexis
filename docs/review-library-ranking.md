@@ -32,9 +32,9 @@ The visible sort menu has only these four choices. Discovery dates, first record
 
 ## Plan storage and synchronization
 
-Named plans are `reviewPlans` in the installed plugin's `data.json`, saved via the existing settings save boundary. In the user's current vault this is `.obsidian/plugins/lexis/data.json`; `encounterFolder` only relocates encounter snapshots and does not relocate plans/configuration. Plan names, sources and content mode are saved, not only a view-state selection. Today targets and goal histories are separate fields in the same configuration file.
+Named plans, today's targets and retained daily goals use the configured visible [learning data folder](learning-storage.md). Plan names, sources and content mode are saved, not just a view selection. `data.json` contains preferences and the directory pointer only.
 
-Settings load during plugin startup and saves replace the whole settings object. There is currently no live reload or field-level merge for an externally synchronized `data.json`. Therefore file synchronization alone does not guarantee that an already-running second device displays or preserves a newly edited plan. The Mac ignore file does not exclude Lexis data, but the phone's configuration directory, file contents and sync status have not been inspected. This UI change does not relocate, merge or overwrite personal plan data.
+Learning snapshots merge per record; a device does not rewrite other devices' active state files. Synced configuration changes update retention; a remote directory move requires a reload after sync completes. Mixed old/new clients must not continue reviewing. This does not guarantee native mobile sync behavior or resolve concurrent Markdown note edits; see the storage document for limitations.
 
 ## Checks
 

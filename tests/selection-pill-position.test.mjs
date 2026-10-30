@@ -4,10 +4,20 @@ import test from "node:test";
 import { build } from "esbuild";
 
 const bundle = await build({ entryPoints: ["src/selection-pill-position.ts"], bundle: true, write: false, format: "esm", platform: "node" });
-const { positionSelectionPill, normalizePillOffset, positionBrowserSelectionPill } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
+const { positionSelectionPill, normalizePillOffset, normalizePillScale, positionBrowserSelectionPill } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
 const anchor = { left: 120, bottom: 100 };
 const pill = { width: 90, height: 30 };
 const viewport = { width: 400, height: 300 };
+
+test("size defaults safely, clamps, and participates in screen-edge placement", () => {
+  for (const value of [null, undefined, "1.2", NaN, Infinity]) assert.equal(normalizePillScale(value), 1);
+  assert.equal(normalizePillScale(0), .75);
+  assert.equal(normalizePillScale(2), 1.5);
+  assert.equal(normalizePillScale(1.249), 1.25);
+  const large = { width: 135, height: 45 };
+  const point = positionBrowserSelectionPill({left:380,top:270,bottom:290,width:20},large,viewport,{x:100,y:0});
+  assert.ok(point.left + large.width <= viewport.width - 6 && point.top + large.height <= viewport.height - 6);
+});
 
 test("keeps default placement and allows offsets in every direction", () => {
   assert.deepEqual(positionSelectionPill(anchor, pill, viewport, { x: 0, y: 0 }), { left: 120, top: 106 });

@@ -3,6 +3,12 @@ interface SelectionAnchor { left: number; bottom: number }
 interface SelectionRect extends SelectionAnchor { top: number; width: number }
 export interface PillOffset { x: number; y: number }
 
+/** Client-local visual size; never read from the bridge's shared style config. */
+export function normalizePillScale(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(1.5, Math.max(0.75, Math.round(value * 100) / 100)) : 1;
+}
+
 /** Offsets are measured from the selection's bottom-left corner, with a 6px gap. */
 export function positionSelectionPill(anchor: SelectionAnchor, pill: Size, viewport: Size, offset: PillOffset): { left: number; top: number } {
   const clamp = (value: number, extent: number, size: number) => Math.max(6, Math.min(value, extent - size - 6));

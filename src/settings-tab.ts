@@ -21,6 +21,7 @@ import { renderPluginMaintenance } from "./settings-maintenance";
 import { renderDictionarySettings } from "./settings-dictionaries";
 import { inlineEntryConflictsWithFlashcard } from "./flashcard-syntax";
 import { annotateSettingControlLayouts } from "./settings-control-layout";
+import { DEFAULT_DATA_FOLDER } from "./data-folder";
 
 export interface SettingsRuntime extends Plugin, ManualRuntime {
   settings: LexisSettings;
@@ -42,7 +43,7 @@ export interface SettingsRuntime extends Plugin, ManualRuntime {
   t(key: string, vars?: TranslationVars): string;
   saveSettings(): Promise<void>;
   prepareReload(): Promise<void>;
-  setEncounterFolder(folder: string): Promise<void>;
+  setDataFolder(folder: string): Promise<void>;
   refreshAllViews(): void;
   rebuildIndex(notify?: boolean): Promise<void>;
   collectVocabTags(): string[];
@@ -186,7 +187,7 @@ const createSettingsTab = ({ obsidian, PluginSettingTab, Setting, Notice, TFolde
         } catch { /* Suggestions are optional. */ }
         return [];
       })();
-      const defaultEncounterFolder = `${this.app.vault.configDir}/plugins/${this.plugin.manifest.id}/encounters`;
+      const defaultEncounterFolder = DEFAULT_DATA_FOLDER;
       renderStorageSettings.call(this, {
         obsidian, Setting, Notice, PathSuggest, topSection, t, save, folders, hasSuggest, defaultEncounterFolder,
       });

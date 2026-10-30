@@ -1916,12 +1916,13 @@ body:is(.is-phone, .is-tablet, .is-mobile) .workspace-leaf-content[data-type="le
     position: fixed;
     z-index: var(--layer-popover, 50);
     display: flex;
+    max-width: calc(100vw - 12px);
     align-items: stretch;
     border-radius: 999px;
     overflow: hidden;
     background: var(--interactive-accent);
     color: var(--text-on-accent);
-    font-size: 12px;
+    font-size: calc(12px * var(--lexis-pill-scale, 1));
     font-weight: 600;
     line-height: 1.4;
     white-space: nowrap;
@@ -1929,8 +1930,16 @@ body:is(.is-phone, .is-tablet, .is-mobile) .workspace-leaf-content[data-type="le
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
 }
 .lexis-sel-pill-btn {
-    padding: 4px 11px;
+    flex-shrink: 0;
+    padding: calc(4px * var(--lexis-pill-scale, 1)) calc(11px * var(--lexis-pill-scale, 1));
     cursor: pointer;
+}
+.lexis-sel-pill-folder {
+    flex-shrink: 1;
+    min-width: 0;
+    max-width: calc(140px * var(--lexis-pill-scale, 1));
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 .lexis-sel-pill-btn + .lexis-sel-pill-btn {
     border-left: 1px solid color-mix(in srgb, var(--text-on-accent) 35%, transparent);
@@ -2014,10 +2023,11 @@ body:is(.is-phone, .is-tablet, .is-mobile) .workspace-leaf-content[data-type="le
 }
 .lexis-pill-position-preview .lexis-pill-position-handle {
     position: absolute;
-    left: clamp(6px, calc(45% + var(--lexis-pill-x)), calc(100% - 102px));
-    top: clamp(6px, calc(110px + var(--lexis-pill-y)), 178px);
-    width: 96px;
-    height: 36px;
+    left: clamp(6px, calc(45% + var(--lexis-pill-x)), calc(100% - 96px * var(--lexis-pill-scale, 1) - 6px));
+    top: clamp(6px, calc(110px + var(--lexis-pill-y)), calc(100% - 36px * var(--lexis-pill-scale, 1) - 6px));
+    width: calc(96px * var(--lexis-pill-scale, 1));
+    height: calc(36px * var(--lexis-pill-scale, 1));
+    font-size: calc(12px * var(--lexis-pill-scale, 1));
     padding: 0;
     border-radius: 999px;
     background: var(--interactive-accent);
@@ -2044,6 +2054,9 @@ body:is(.is-phone, .is-tablet, .is-mobile) .workspace-leaf-content[data-type="le
 .lexis-pill-position-inputs input {
     width: 80px;
 }
+.lexis-pill-position-inputs .lexis-pill-scale-control { flex: 1 1 100%; }
+.lexis-pill-scale-control input[type="range"] { flex: 1; min-width: 80px; }
+.lexis-pill-scale-control output { min-width: 4ch; text-align: right; }
 
 /* PDF 高亮独立层:叠在 Canvas 上、textLayer 下,不沾 textLayer 的 opacity */
 .textLayer.lexis-pdf-source-layer > span {
@@ -2290,6 +2303,32 @@ body:is(.is-phone, .is-tablet, .is-mobile) .workspace-leaf-content[data-type="le
     display: flex;
     justify-content: flex-end;
     gap: 8px;
+}
+.lexis-review-setup .setting-item {
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.lexis-review-setup .setting-item-info {
+    min-width: 0;
+    flex: 1 1 10em;
+}
+.lexis-review-setup .setting-item-control {
+    max-width: 100%;
+    flex-wrap: wrap;
+}
+.lexis-review-setup input {
+    min-width: 0;
+    max-width: 100%;
+}
+.lexis-review-setup input[type="number"] {
+    width: 6em;
+}
+.lexis-rv-batch-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    margin-block: 12px;
 }
 @media (prefers-reduced-motion: reduce) {
     .lexis-progress-segment { transition: none; }

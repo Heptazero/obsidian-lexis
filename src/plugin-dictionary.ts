@@ -8,11 +8,16 @@ import { cssColorToHex, escapeRe, todayString as todayStr } from "./shared-utils
 import { LexisPluginBase, errorMessage, type RelationBag, type TranslationVars } from "./plugin-base";
 import { resolveEntryColorToken } from "./entry-colors";
 import { dictionarySources, resolveDictionaries } from "./dictionary-sources";
+import { settingsOnly } from "./learning-data";
 
 export abstract class LexisPluginDictionary extends LexisPluginBase {
   abstract recordEncounter(file: TFile, type: "hover" | "add" | "open"): void;
   t(key: string, vars?: TranslationVars): string { return this.i18n ? this.i18n.t(key, vars) : key; }
-  async saveSettings() { this._dictionaryScopes = null; await this.saveData(this.settings); }
+  async saveSettings() {
+    this._dictionaryScopes = null;
+    if (this.dataStorage) await this.dataStorage.save();
+    else await this.saveData(settingsOnly(this.settings));
+  }
   dictionaryScopes() {
     return this._dictionaryScopes ??= resolveDictionaries(this.app, this.settings.dicts || [], file => this.getTags(file));
   }

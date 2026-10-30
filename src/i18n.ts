@@ -6,6 +6,8 @@ import { marginNoteMessages } from "./marginnote-i18n";
 import { settingsMessages } from "./settings-i18n";
 import { reviewLibraryMessages } from "./review-library-i18n";
 import { dictionaryMessages } from "./dictionary-i18n";
+import { reviewSetupMessages } from "./review-setup-i18n";
+import { selectionPillMessages } from "./selection-pill-i18n";
 
 interface TranslationPair {
   zh: string;
@@ -17,10 +19,12 @@ export type TranslationVars = Record<string, string | number | boolean | null | 
 // Keep both translations beside each other. UI code refers only to semantic keys.
 const MESSAGES: Record<string, TranslationPair> = {
   ...dictionaryMessages,
+  ...reviewSetupMessages,
   ...dashboardMessages,
   ...marginNoteMessages,
   ...settingsMessages,
   ...reviewLibraryMessages,
+  ...selectionPillMessages,
   "language.name": { zh: "界面语言", en: "Interface language" },
   "language.zh": { zh: "中文", en: "中文" },
   "language.en": { zh: "English", en: "English" },
@@ -40,7 +44,6 @@ const MESSAGES: Record<string, TranslationPair> = {
   "common.done": { zh: "完成", en: "Done" },
 
   "command.rebuild": { zh: "重建词条索引", en: "Rebuild entry index" },
-  "command.review": { zh: "开始复习", en: "Start review" },
   "log.title": { zh: "复习记录", en: "Review log" },
   "log.history": { zh: "记录", en: "History" },
   "log.unreviewed": { zh: "未背过", en: "Never reviewed" },
@@ -401,14 +404,6 @@ const MESSAGES: Record<string, TranslationPair> = {
   "settings.occurrenceScopeDesc": { zh: "逗号分隔；留空为全库。", en: "Comma-separated; blank searches the whole vault." },
   "settings.wholeVault": { zh: "留空=全库", en: "Blank = whole vault" },
   "settings.selectionAdd": { zh: "划词添加", en: "Add from selection" },
-  "settings.pillPosition": { zh: "药丸位置", en: "Selection pill position" },
-  "settings.pillPositionDesc": { zh: "拖动预览药丸，或调整像素偏移。负值向左／上，正值向右／下；靠近屏幕边缘时自动收回。", en: "Drag the preview pill or adjust pixel offsets. Negative values move left/up, positive values right/down. The pill stays within screen edges." },
-  "settings.pillPreviewText": { zh: "选中的文字", en: "Selected text" },
-  "settings.pillDrag": { zh: "拖动药丸", en: "Drag pill" },
-  "settings.pillDragLabel": { zh: "拖动调整位置，方向键微调，Shift 加速", en: "Drag to reposition, or use arrow keys; hold Shift for larger steps" },
-  "settings.pillOffsetX": { zh: "横向偏移 (px)", en: "Horizontal offset (px)" },
-  "settings.pillOffsetY": { zh: "纵向偏移 (px)", en: "Vertical offset (px)" },
-  "settings.pillReset": { zh: "重置位置", en: "Reset position" },
   "settings.emptyNotePreset": { zh: "无模板时", en: "When no template is selected" },
   "settings.emptyNotePresetDesc": { zh: "仅用于没有选择模板文件的词典。", en: "Used only for dictionaries without a template file." },
   "settings.emptyNoteBlank": { zh: "纯空白", en: "Blank note" },
@@ -448,14 +443,7 @@ const MESSAGES: Record<string, TranslationPair> = {
   "settings.retireDays": { zh: "淘汰候选阈值（天）", en: "Retirement threshold (days)" },
   "settings.retireDaysDesc": { zh: "入库与未相遇均达到此天数。", en: "Both added and unseen ages must reach this value." },
   "settings.dataStorage": { zh: "数据存储", en: "Data storage" },
-  "settings.encounterFolder": { zh: "相遇记录文件夹", en: "Encounter data folder" },
-  "settings.encounterFolderDesc": { zh: "使用专用文件夹；只有点勾才移动相遇状态，原位置不保留副本。", en: "Use a dedicated folder. Only the check button moves encounter state; no copy remains at the old path." },
   "settings.encounterFolderUndo": { zh: "还原未确认的路径", en: "Discard the unconfirmed path" },
-  "settings.encounterFolderConfirm": { zh: "确认切换相遇记录文件夹", en: "Confirm encounter folder change" },
-  "settings.pluginDataPath": { zh: "插件设置与复习日志", en: "Settings and review history" },
-  "settings.pluginDataPathDesc": { zh: "Obsidian 固定位置：{path}。不随相遇记录迁移。", en: "Obsidian-managed path: {path}. This does not move with encounter data." },
-  "settings.encounterFolderSaved": { zh: "相遇记录已切换文件夹", en: "Encounter folder updated" },
-  "settings.encounterFolderError": { zh: "无法切换相遇记录文件夹：{error}", en: "Could not change encounter folder: {error}" },
   "home.encounterDataError": { zh: "相遇记录读取失败，暂不计算淘汰候选。", en: "Encounter history could not be read. Retirement candidates are unavailable." },
   "settings.bridge": { zh: "本机桥接", en: "Local bridge" },
   "settings.bridgeDesc": { zh: "供浏览器与 Zotero 连接", en: "Connects the browser and Zotero companions" },

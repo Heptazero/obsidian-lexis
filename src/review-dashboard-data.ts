@@ -1,5 +1,7 @@
 import { reviewItemKeys } from "./review-item";
 import { completedOnDate, latestReviewGrades, progressForKeys } from "./review-progress";
+import { practiceCounts, reviewRounds } from "./review-batch";
+import { reviewRange } from "./review-setup-model";
 import type { LexisSettings, ReviewCardState, ReviewDailyTarget, ReviewItem, ReviewOptions, ReviewPlan } from "./types";
 
 export interface DashboardSummary {
@@ -15,9 +17,15 @@ export interface DashboardSummary {
   options: ReviewOptions;
 }
 
-export const planOptions = (plan?: ReviewPlan): ReviewOptions => plan
-  ? { ...(plan.dictionaryIds !== undefined ? { dictionaryIds: plan.dictionaryIds } : { sources: plan.sources }), content: plan.content }
-  : { dictionaryIds: null, content: "notes" };
+export const planOptions = (plan?: ReviewPlan): ReviewOptions => {
+  if (!plan) return {dictionaryIds:null,content:"notes"};
+  return {...reviewRange(plan),content:plan.content,
+    ...(plan.mode ? {mode:plan.mode} : {}),
+    ...(plan.sortBy ? {sortBy:plan.sortBy} : {}),...(plan.sortDirection ? {sortDirection:plan.sortDirection} : {}),
+    ...(plan.batchSize !== undefined ? {batchSize:plan.batchSize} : {}),
+    ...(plan.mode === "cram" ? {planId:plan.id,rounds:reviewRounds(plan)} : {}),
+  };
+};
 
 const isFresh = (card: ReviewCardState): boolean => card.s == null || !Number.isFinite(Number(card.s));
 const isDue = (card: ReviewCardState, date: string): boolean => !isFresh(card) && (!card.due || String(card.due).slice(0, 10) <= date);
@@ -31,14 +39,18 @@ function inventory(items: ReviewItem[]): Map<string, ReviewCardState> {
   return result;
 }
 
-export function createDailyTarget(items: ReviewItem[], settings: LexisSettings, date: string): ReviewDailyTarget {
+export function createDailyTarget(items: ReviewItem[], settings: LexisSettings, date: string, options: ReviewOptions = {}): ReviewDailyTarget {
   const grades = latestReviewGrades(settings.reviewEvents, date);
   const entries = [...inventory(items)];
+  if (options.mode === "cram") {
+    const keys = entries.map(([key])=>key).slice(0,options.batchSize ?? entries.length);
+    return {date,keys,goal:keys.length*reviewRounds(options),minimum:0};
+  }
   const completed = entries.filter(([key]) => (grades.get(key) || 0) > 1).map(([key]) => key);
   const due = entries.filter(([key, card]) => isDue(card, date) || grades.get(key) === 1).map(([key]) => key);
   const fresh = entries.filter(([key, card]) => isFresh(card) && !grades.has(key)).map(([key]) => key).slice(0, Math.max(0, settings.newPerDay));
   const keys = [...new Set([...completed, ...due, ...fresh])];
-  const goal = Math.min(keys.length, Math.max(0, settings.reviewDailyGoal));
+  const goal = Math.min(keys.length, Math.max(0, options.batchSize ?? settings.reviewDailyGoal));
   return { date, keys, goal, minimum: Math.min(goal, Math.max(0, settings.reviewMinimumGoal)) };
 }
 
@@ -46,6 +58,13 @@ export function dashboardSummary(items: ReviewItem[], settings: LexisSettings, t
   const grades = latestReviewGrades(settings.reviewEvents, target.date);
   const entries = inventory(items);
   const keys = target.keys.filter((key) => entries.has(key));
+  if (options.mode === "cram") {
+    const counts = practiceCounts(settings,options.planId,target.date), rounds = reviewRounds(options);
+    const completed = keys.reduce((sum,key)=>sum+Math.min(rounds,counts[key] || 0),0), goal = keys.length*rounds;
+    return {date:target.date,goal,minimum:0,completed,remaining:Math.max(0,goal-completed),retry:0,due:0,fresh:0,total:entries.size,
+      options:{...options,targetKeys:keys,batchSize:null},
+    };
+  }
   const progress = progressForKeys(entries.keys(), grades);
   const goal = Math.min(target.goal, keys.length);
   const uncompleted = [...entries].filter(([key]) => (grades.get(key) || 0) <= 1);
