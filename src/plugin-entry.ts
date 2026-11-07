@@ -5,6 +5,7 @@ import { Notice, TFile } from "obsidian";
 import { todayString as todayStr } from "./shared-utils";
 import { LexisPluginReview } from "./plugin-review";
 import { errorMessage, type AddSelectionOptions } from "./plugin-base";
+import { appendTermContent, termAliases, webSourceMarkdown, webSourceUrl, type ManualTermDraft } from "./manual-term-data";
 
 export class LexisPluginEntry extends LexisPluginReview {
   sanitizeName(name: string): string { return (name || "").replace(/[\\/:*?"<>|#^[\]]/g, "").replace(/\s+/g, " ").trim(); }
@@ -27,6 +28,43 @@ export class LexisPluginEntry extends LexisPluginReview {
   }
   // 无模板可选纯空白，或只放一个内置的出处面板；用户自己的模板始终优先。
   minimalSkeleton() { return this.settings.emptyNotePreset === "occ" ? "```lexis\nocc\n```\n" : ""; }
+  private async writeCapturedEntry(word: string, folder: string, path: string, transform: (content: string) => string): Promise<TFile> {
+    await this.ensureFolder(folder);
+    const template = await this.templateForFolder(folder);
+    const content = this.renderTemplate(template ?? this.minimalSkeleton(), { word, date: todayStr() });
+    return this.createEntryFile(path, folder, content, transform);
+  }
+
+  async saveManualTerm(draft: ManualTermDraft): Promise<void> {
+    const word = draft.term.trim();
+    const fileName = this.sanitizeName(word);
+    if (!fileName) throw new Error(this.t("notice.invalidWord"));
+    const folder = draft.folder;
+    if (!this.dictFolders().includes(folder)) throw new Error(this.t("manualTerm.noDictionary"));
+    const path = `${folder}/${fileName}.md`;
+    const existing = this.app.vault.getAbstractFileByPath(path) ?? this.index.get(this.resolveIndexKey(word))?.file;
+    if (existing) throw new Error(this.t("notice.existsNoOpen", { word: existing.name }));
+    const url = webSourceUrl(draft.sourceUrl);
+    if (draft.sourceUrl.trim() && !url) throw new Error(this.t("manualTerm.invalidUrl"));
+    const source = url ? webSourceMarkdown(url) : "";
+    const file = await this.writeCapturedEntry(word, folder, path, (content) => {
+      let next = draft.definition.trim() ? appendTermContent(content, draft.definition) : content;
+      if (draft.aliases.trim()) {
+        const info = obsidian.getFrontMatterInfo(next);
+        const parsed: unknown = info.exists ? obsidian.parseYaml(info.frontmatter) : null;
+        const props = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+        props.aliases = termAliases(draft.aliases, props.aliases, word);
+        next = `---\n${obsidian.stringifyYaml(props).trimEnd()}\n---\n${next.slice(info.contentStart)}`;
+      }
+      if (source) {
+        next = this.insertOccurrence(next, { word, sentence: "", source, date: todayStr() });
+        if (!next.includes(source)) next = appendTermContent(next, source);
+      }
+      return next;
+    });
+    await this.rebuildIndex(false);
+    new Notice(this.t("notice.created", { word: file.basename }));
+  }
   getSelectionSentence(editor: obsidian.Editor | null): string {
     if (!editor) return "";
     try { const from = editor.getCursor("from"); const line = editor.getLine(from.line) || ""; return this.extractSentence(line, from.ch || 0); } catch { return ""; }
@@ -83,9 +121,6 @@ export class LexisPluginEntry extends LexisPluginReview {
       return;
     }
     try {
-      await this.ensureFolder(folder);
-      const tpl = await this.templateForFolder(folder);
-      const content = this.renderTemplate(tpl != null ? tpl : this.minimalSkeleton(), { word: clean, date: todayStr() });
       const addOccurrence = (templateContent: string) => {
         let next = templateContent;
         // 出处写进正文(而不是 frontmatter 属性),好看且笔记里直接可见
@@ -101,7 +136,7 @@ export class LexisPluginEntry extends LexisPluginReview {
         next = this.insertOccurrence(next, { word: clean, sentence: sentence || "", source, date: todayStr() });
         return next;
       };
-      const file = await this.createEntryFile(targetPath, folder, content, addOccurrence);
+      const file = await this.writeCapturedEntry(clean, folder, targetPath, addOccurrence);
       if (alias) await this.addAliasToFile(file, alias);
       this.recordEncounter(file, "add");
       // 划词添加只写入并留在原文；"添加"不再暗含一次页面跳转。

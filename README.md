@@ -134,7 +134,7 @@ After the first manual installation, Zotero can update the add-on from its updat
 1. In *Settings → Lexis*, add one or more dictionary folders.
 2. Read a Markdown, PDF, or EPUB document. Matching entries are highlighted; hover to open the card.
 3. Select unfamiliar text and add it to a dictionary. Lexis can save the surrounding sentence as an occurrence.
-4. Keep reading. Open **Lexis Home** only if you want to review selected entries or inspect long-unseen ones.
+4. Open **Lexis Home** to review entries or use **Add term** without selecting text. Only the term is required; aliases, a definition, and a webpage source are optional. The command palette also has **Lexis: Add term**.
 
 The interface language can be switched between Chinese and English in Lexis settings. Translations are kept together by message key in `src/i18n.ts`, so adding another language does not require searching through the UI code.
 

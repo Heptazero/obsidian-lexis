@@ -1345,6 +1345,30 @@ button.lexis-missing-entry-color {
 }
 
 /* 主页 */
+.lexis-home-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--size-4-2);
+    margin-block-end: var(--size-4-3);
+}
+.lexis-home-heading h3 { margin: 0; }
+.lexis-manual-term-form,
+.lexis-manual-term-field {
+    display: grid;
+    gap: var(--size-4-2);
+}
+.lexis-manual-term-form { gap: var(--size-4-3); }
+.lexis-manual-term-field[hidden] { display: none; }
+.lexis-manual-term-field :is(input, textarea, select) { width: 100%; }
+.lexis-manual-term-source {
+    display: flex;
+    align-items: center;
+    gap: var(--size-4-2);
+}
+.lexis-manual-term-error { color: var(--text-error); }
+.lexis-manual-term-error:empty { display: none; }
 .lexis-home {
     padding: 12px 14px;
 }

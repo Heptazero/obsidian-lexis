@@ -15,6 +15,7 @@ import { migrateDictionaryCollections } from "./dictionary-migration";
 import { renameDictionaryPaths } from "./dictionary-sources";
 import { FSRS } from "./fsrs";
 import { LexisHomeView } from "./home-view";
+import { openManualTerm } from "./manual-term-modal";
 import { createI18n } from "./i18n";
 import { buildCurveSVG, recentReviewDates } from "./curve";
 import { LexisLogView } from "./review-log-view";
@@ -165,6 +166,7 @@ class LexisPlugin extends LexisPluginBase {
     this.addCommand(currentFileReviewCommand(this));
     this.addCommand({ id: "open-review-log", name: this.t("log.title"), callback: () => this.openReviewLog() });
     this.addCommand({ id: "add-selected-word", name: this.t("command.addSelection"), callback: () => this.addSelectedWordCommand() });
+    this.addCommand({ id: "add-term", name: this.t("manualTerm.add"), callback: () => openManualTerm(this) });
     this.addCommand({ id: "open-home", name: this.t("command.home"), callback: () => this.openHome("center") });
     this.addCommand({ id: "open-home-sidebar", name: this.t("command.homeSidebar"), callback: () => this.openHome("sidebar") });
     this.addCommand({
