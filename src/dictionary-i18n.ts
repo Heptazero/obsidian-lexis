@@ -4,6 +4,7 @@ export const dictionaryMessages = {
     "collection.name": { zh: "名称", en: "Name" },
     "collection.sources": { zh: "收录范围", en: "Sources" },
     "collection.sourcesHint": { zh: "来源取并集，允许与其他词典重叠；复习时同一卡片只算一次。", en: "Sources are combined. Dictionaries may overlap; a review card is counted once." },
+    "collection.priorityHint": { zh: "同名词按词典从上到下优先；同一词典内，词条名优先于别名。", en: "Earlier dictionaries win name conflicts; within one dictionary, entry names take precedence over aliases." },
     "collection.folder": { zh: "文件夹", en: "Folder" },
     "collection.tag": { zh: "标签", en: "Tag" },
     "collection.file": { zh: "单个文件", en: "Single file" },

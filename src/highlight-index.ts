@@ -7,6 +7,7 @@ import { DEFAULT_INLINE_ENTRY_DELIMITER, parseInlineEntries } from "./inline-ent
 import { inlineClassificationHeading, inlineClassificationPath } from "./inline-category";
 import { collectInlineColorTokenUsages } from "./entry-colors";
 import { dictionarySources, dictionarySourceScore, type resolveDictionaries } from "./dictionary-sources";
+import { createEntryIndex } from "./entry-index";
 
 type TranslationVars = Record<string, string | number | boolean>;
 
@@ -157,12 +158,12 @@ function createHighlightIndex({ Notice, boundedSource, compactMixedScriptSpacing
       this._dictionaryScopes = null;
       const buildId = (this._indexBuildId || 0) + 1;
       this._indexBuildId = buildId;
-      const index = new Map<string, LexisEntry>();
       const selfKeysByPath = new Map<string, Set<string>>();
       const today = todayStr();
       let words = 0, aliases = 0, inlineEntries = 0, due = 0;
       const categoryOccurrences = new Map<string, InlineCategoryOccurrence>();
       const scopes = this.dictionaryScopes();
+      const { index, add } = createEntryIndex(this.settings.dicts || [], scopes);
       const files = scopes.files.filter((file) => scopes.byFile.has(file.path));
       const vocabPaths = new Set(files.map((file) => file.path));
       for (const file of files) {
@@ -177,11 +178,11 @@ function createHighlightIndex({ Notice, boundedSource, compactMixedScriptSpacing
         const colorToken = typeof frontmatter["lexis-color"] === "string" ? frontmatter["lexis-color"].trim() : "";
         const stability = Number(frontmatter["lexis-s"]);
         const cardS = frontmatter["lexis-s"] == null || isNaN(stability) ? null : stability;
-        if (!index.has(key)) { index.set(key, { display, file, isAlias: false, tags, archived, retired, pinned, cardS, colorToken }); words++; }
+        add({ display, file, isAlias: false, tags, archived, retired, pinned, cardS, colorToken });
         if (this.settings.includeAliases) for (const alias of this.extractAliases(file)) {
           const aliasKey = alias.toLowerCase();
           own.add(aliasKey);
-          if (!index.has(aliasKey)) { index.set(aliasKey, { display: alias, file, isAlias: true, tags, archived, retired, pinned, cardS, colorToken }); aliases++; }
+          add({ display: alias, file, isAlias: true, tags, archived, retired, pinned, cardS, colorToken });
         }
         selfKeysByPath.set(file.path, own);
         if (!archived && !retired && (frontmatter["lexis-s"] == null || !frontmatter["lexis-due"] || String(frontmatter["lexis-due"]).slice(0, 10) <= today)) due++;
@@ -195,7 +196,7 @@ function createHighlightIndex({ Notice, boundedSource, compactMixedScriptSpacing
       if (buildId !== this._indexBuildId) return this.stats;
       this.inlineColorTokenUsages = collectInlineColorTokenUsages(parsed.flat());
       for (const entries of parsed) {
-        const own = new Set<string>();
+        const own = new Set<string>(entries.length ? selfKeysByPath.get(entries[0].file.path) : []);
         for (const entry of entries) {
           const key = entry.display.toLowerCase();
           own.add(key);
@@ -208,14 +209,11 @@ function createHighlightIndex({ Notice, boundedSource, compactMixedScriptSpacing
             node.count++;
             categoryOccurrences.set(id, node);
           }
-          if (!index.has(key)) { index.set(key, entry); inlineEntries++; }
+          add(entry);
           if (this.settings.includeAliases) for (const alias of entry.aliases || []) {
             const aliasKey = alias.toLowerCase();
             own.add(aliasKey);
-            if (!index.has(aliasKey)) {
-              index.set(aliasKey, { ...entry, display: alias, canonical: entry.display, isAlias: true });
-              aliases++;
-            }
+            add({ ...entry, display: alias, canonical: entry.display, isAlias: true });
           }
         }
         if (entries.length) selfKeysByPath.set(entries[0].file.path, own);
@@ -241,6 +239,11 @@ function createHighlightIndex({ Notice, boundedSource, compactMixedScriptSpacing
       });
       this.index = index;
       this._selfKeysByPath = selfKeysByPath;
+      for (const entry of index.values()) {
+        if (entry.isAlias) aliases++;
+        else if (entry.inline) inlineEntries++;
+        else words++;
+      }
       this.stats = { words, aliases, inlineEntries, due };
       this._occCache.clear();
       this.buildMatcher();

@@ -8,7 +8,7 @@ export function renderDictionarySettings(container: HTMLElement, plugin: Setting
     const t = (key: string) => plugin.t(key);
     const list = container.createDiv({ cls: "lexis-dictionary-list" });
     const changed = async () => { await plugin.saveSettings(); await plugin.rebuildIndex(false); stats(); };
-    const header = new Setting(container).setDesc(t("collection.sourcesHint")).setHeading();
+    const header = new Setting(container).setDesc(t("collection.priorityHint")).setHeading();
     header.addButton(button => {
       button.setIcon("plus").setTooltip(t("collection.add"));
       button.buttonEl.setAttribute("aria-label",t("collection.add"));

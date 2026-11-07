@@ -4,7 +4,7 @@ import vm from "node:vm";
 import { build } from "esbuild";
 
 const bundled = await build({
-  stdin: { contents: 'export { createHighlightIndex } from "./src/highlight-index"; export { LexisPluginDictionary } from "./src/plugin-dictionary";', resolveDir: process.cwd(), loader: "ts" },
+  stdin: { contents: 'export { createHighlightIndex } from "./src/highlight-index"; export { LexisPluginDictionary } from "./src/plugin-dictionary"; export { createBridgeApi } from "./src/bridge-api";', resolveDir: process.cwd(), loader: "ts" },
   bundle: true, write: false, format: "cjs", platform: "node", external: ["obsidian"],
 });
 class TFile {
@@ -25,7 +25,7 @@ function fixture(paths = ["Words/A.md", "Outside/B.md"], dicts = [dictionary([{ 
   const context = { module: { exports: {} }, require: () => ({ Plugin: class {}, TFile, Component: class {}, Notice: class {} }), console, window: clock };
   context.exports = context.module.exports;
   vm.runInNewContext(bundled.outputFiles[0].text, context);
-  const { createHighlightIndex, LexisPluginDictionary } = context.module.exports;
+  const { createHighlightIndex, LexisPluginDictionary, createBridgeApi } = context.module.exports;
   const host = {
     settings: { dicts, includeAliases: true, excludeTags: "", vocabTags: "", inlineEntriesEnabled: false, reviewHistory: {}, reviewAddedAt: {}, reviewEvents: [] },
     app: {
@@ -59,7 +59,7 @@ function fixture(paths = ["Words/A.md", "Outside/B.md"], dicts = [dictionary([{ 
     return task;
   };
   return {
-    host, files, metadata, contents, stats, timers, invalidatedPdfs,
+    host, files, metadata, contents, stats, timers, invalidatedPdfs, createBridgeApi,
     async flush() {
       const callbacks = [...timers.values()]; timers.clear();
       for (const callback of callbacks) callback();
@@ -199,4 +199,113 @@ test("renames preserve learning records and refresh the new term without eager s
   await f.flush();
   assert.deepEqual([...f.host.index.keys()], ["renamed"]);
   assert.equal(f.stats.saves, 1);
+});
+
+const folderDictionary = name => ({ ...dictionary([{ kind: "folder", value: name }], name), id: name });
+
+test("dictionary order wins over vault order and a lower dictionary's literal name", async () => {
+  const f = fixture(["English/Field.md", "Math/场.md"], [folderDictionary("Math"), folderDictionary("English")]);
+  f.metadata.set("Math/场.md", { frontmatter: { aliases: ["field"] } });
+  await f.host.rebuildIndex(false);
+  assert.equal(f.host.index.get("field").file.path, "Math/场.md");
+  assert.equal(f.host.index.get("field").isAlias, true);
+  assert.deepEqual(plain(f.host.stats), { words: 1, aliases: 1, inlineEntries: 0, due: 2 });
+  f.host.settings.dicts.reverse();
+  await f.host.rebuildIndex(false);
+  assert.equal(f.host.index.get("field").file.path, "English/Field.md");
+  assert.equal(f.host.index.get("field").isAlias, false);
+  assert.deepEqual(plain(f.host.stats), { words: 2, aliases: 0, inlineEntries: 0, due: 2 });
+  assert.equal(f.files.size, 2, "collision resolution must not delete either note");
+});
+
+test("a literal name wins over an alias within one folder regardless of vault order", async () => {
+  const f = fixture(["Words/场.md", "Words/Field.md"]);
+  f.metadata.set("Words/场.md", { frontmatter: { aliases: ["FIELD"] } });
+  await f.host.rebuildIndex(false);
+  assert.equal(f.host.index.get("field").file.path, "Words/Field.md");
+  assert.equal(f.host.index.get("field").isAlias, false);
+  assert.equal(f.host.selfKeysFor("Words/场.md").has("field"), true);
+});
+
+test("equal names and equal aliases use stable paths, not file enumeration order", async () => {
+  for (const paths of [["Words/Z/Field.md", "Words/A/Field.md"], ["Words/A/Field.md", "Words/Z/Field.md"]]) {
+    const f = fixture(paths);
+    for (const path of paths) f.metadata.set(path, { frontmatter: { aliases: ["Shared"] } });
+    await f.host.rebuildIndex(false);
+    assert.equal(f.host.index.get("field").file.path, "Words/A/Field.md");
+    assert.equal(f.host.index.get("shared").file.path, "Words/A/Field.md");
+    assert.equal(f.host.stats.words + f.host.stats.aliases + f.host.stats.inlineEntries, f.host.index.size);
+  }
+});
+
+test("overlapping folder, tag and link dictionaries use the earliest membership", async () => {
+  const tagged = { ...dictionary([{ kind: "tag", value: "math" }]), id: "tagged" };
+  const linked = { ...dictionary([{ kind: "links", value: "Directory.md" }]), id: "linked" };
+  const f = fixture(["Words/Field.md", "Words/场.md", "Directory.md"], [tagged, linked, folderDictionary("Words")]);
+  f.metadata.set("Words/场.md", { frontmatter: { tags: ["math"], aliases: ["field"] } });
+  f.metadata.set("Directory.md", { links: [{ link: "Field" }] });
+  await f.host.rebuildIndex(false);
+  assert.equal(f.host.index.get("field").file.path, "Words/场.md");
+  f.host.settings.dicts = [linked, tagged, folderDictionary("Words")];
+  await f.host.rebuildIndex(false);
+  assert.equal(f.host.index.get("field").file.path, "Words/Field.md");
+});
+
+test("inline entries and atomic notes share dictionary and literal-name precedence", async () => {
+  const f = fixture(["English/Field.md", "Math/Terms.md"], [folderDictionary("Math"), folderDictionary("English")]);
+  f.host.settings.inlineEntriesEnabled = true;
+  f.metadata.set("Math/Terms.md", { frontmatter: { "lexis-inline": true, aliases: ["AtomicAlias"] } });
+  f.contents.set("Math/Terms.md", "场 / field=>specialized definition\nField=>literal inline definition\nOther=>another definition");
+  await f.host.rebuildIndex(false);
+  assert.equal(f.host.index.get("field").file.path, "Math/Terms.md");
+  assert.equal(f.host.index.get("field").isAlias, false);
+  assert.equal(f.host.index.get("field").annotation, "literal inline definition");
+  assert.ok(f.host.selfKeysFor("Math/Terms.md").has("terms"));
+  assert.ok(f.host.selfKeysFor("Math/Terms.md").has("atomicalias"));
+  assert.ok(f.host.selfKeysFor("Math/Terms.md").has("field"));
+  f.host.settings.dicts.reverse();
+  await f.host.rebuildIndex(false);
+  assert.equal(f.host.index.get("field").file.path, "English/Field.md");
+});
+
+test("unlisted inline sources remain available with deterministic name and line tie breaks", async () => {
+  const f = fixture(["Z.md", "A.md", "Words/Field.md"]);
+  f.host.settings.inlineEntriesEnabled = true;
+  for (const path of ["Z.md", "A.md"]) {
+    f.metadata.set(path, { frontmatter: { "lexis-inline": true } });
+    f.contents.set(path, "概念 / shared=>alias\nShared=>first literal\nShared=>second literal\nField=>unlisted definition");
+  }
+  await f.host.rebuildIndex(false);
+  assert.equal(f.host.index.get("shared").file.path, "A.md");
+  assert.equal(f.host.index.get("shared").annotation, "first literal");
+  assert.equal(f.host.index.get("field").file.path, "Words/Field.md");
+});
+
+test("disabling aliases and removing a winning note reveal the next matching entry", async () => {
+  const f = fixture(["English/Field.md", "Math/场.md"], [folderDictionary("Math"), folderDictionary("English")]);
+  f.metadata.set("Math/场.md", { frontmatter: { aliases: ["field"] } });
+  f.host.settings.includeAliases = false;
+  await f.host.rebuildIndex(false);
+  assert.equal(f.host.index.get("field").file.path, "English/Field.md");
+  f.host.settings.includeAliases = true;
+  await f.host.rebuildIndex(false);
+  assert.equal(f.host.index.get("field").file.path, "Math/场.md");
+  const removed = f.files.get("Math/场.md"); f.files.delete(removed.path);
+  f.host.maybeRebuild(removed); await f.flush();
+  assert.equal(f.host.index.get("field").file.path, "English/Field.md");
+});
+
+test("the browser and Zotero bridge exports the same collision winner after reordering", async () => {
+  const f = fixture(["English/Field.md", "Math/场.md"], [folderDictionary("Math"), folderDictionary("English")]);
+  f.metadata.set("Math/场.md", { frontmatter: { aliases: ["field"] } });
+  Object.assign(f.host, {
+    manifest: { version: "fixture" }, colorForEntry: () => "#abc", highlightAlphaForEntry: () => .4,
+    highlightVisibleForEntry: () => true, styleKindForEntry: () => "background", dictColorMap: () => ({}), effectiveHighlightColor: () => "#abc",
+  });
+  const exportWords = f.createBridgeApi({}).bridgeWordList.value.bind(f.host);
+  await f.host.rebuildIndex(false);
+  assert.equal(exportWords().words.find(word => word.key === "field").file, "Math/场.md");
+  f.host.settings.dicts.reverse();
+  await f.host.rebuildIndex(false);
+  assert.equal(exportWords().words.find(word => word.key === "field").file, "English/Field.md");
 });
