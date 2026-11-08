@@ -1345,6 +1345,15 @@ button.lexis-missing-entry-color {
 }
 
 /* 主页 */
+.lexis-home-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--size-4-2);
+    margin-block-end: var(--size-4-3);
+}
+.lexis-home-heading h3 { margin: 0; }
 .lexis-manual-term-form,
 .lexis-manual-term-field {
     display: grid;

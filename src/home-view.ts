@@ -3,6 +3,8 @@ import { LEXIS_HOME_VIEW } from "./constants";
 import type { TranslationVars } from "./i18n";
 import { mountReviewDashboard, type DashboardViewHost } from "./review-dashboard-view";
 import { renderCollectionReview } from "./review-collection-controls";
+import { openManualTerm } from "./manual-term-modal";
+import type { ManualTermDraft } from "./manual-term-data";
 import type { LexisSettings, ReviewOptions, SuspendedReviewEntry } from "./types";
 
 export interface RetireCandidate {
@@ -21,6 +23,7 @@ interface HomeViewHost extends DashboardViewHost {
   computeStats(): { due: number; fresh: number; total: number };
   renderHeatmap(element: HTMLElement): void;
   dictFolders(): string[];
+  saveManualTerm(draft: ManualTermDraft): Promise<void>;
   collectReviewFolders(): string[];
   collectReviewTags(): string[];
   collectSuspendedReviewItems(): Promise<SuspendedReviewEntry[]>;
@@ -40,6 +43,7 @@ export class LexisHomeView extends ItemView {
   private dashboardComponent: Component | null = null;
   private retireRenderTimer: number | undefined;
   sourceFilePath = "";
+  sourceWebUrl = "";
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: HomeViewHost) {
     super(leaf);
@@ -57,7 +61,10 @@ export class LexisHomeView extends ItemView {
     const container = this.contentEl;
     container.empty();
     container.addClass("lexis-home");
-    container.createEl("h3", { text: "📕 Lexis" });
+    const heading = container.createDiv({ cls: "lexis-home-heading" });
+    heading.createEl("h3", { text: "📕 Lexis" });
+    heading.createEl("button", { type: "button", cls: "mod-cta", text: this.plugin.t("manualTerm.add") })
+      .onclick = () => openManualTerm(this.plugin, this.sourceWebUrl);
     const dashboard = container.createDiv();
     this.dashboardCleanup = mountReviewDashboard(dashboard, this.plugin, this.dashboardComponent);
     const history = container.createEl("details", { cls: "lexis-home-section" });
