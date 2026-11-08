@@ -38,10 +38,29 @@
     .pill-position-controls label { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
     .pill-position-controls input[type=number] { width: 54px; max-width: 100%; box-sizing: border-box; }
     .pill-position-reset { flex: 0 0 28px; height: 28px; padding: 0; color: inherit; background: transparent; border: 1px solid rgba(128,128,128,.4); }
+    #manualTerm { margin-bottom: 12px; }
+    #manualTerm summary, #manualTerm button { padding: 8px; border-radius: 7px; background: var(--accent); color: white; font-weight: 600; cursor: pointer; }
+    #manualTerm form { margin-top: 8px; display: grid; gap: 8px; }
+    #manualTerm .capture-field:not([hidden]) { display: grid; gap: 4px; }
+    #manualTerm textarea { box-sizing: border-box; width: 100%; resize: vertical; font: inherit; color: inherit; background: transparent; border: 1px solid #8888; border-radius: 6px; padding: 4px 6px; }
+    #manualTerm .toggle { margin: 0; }
+    #manualTerm .status { margin: 0; min-height: 0; }
   </style>
 </head>
 <body>
   <h1>Lexis Web</h1>
+  <details id="manualTerm">
+    <summary>添加词条</summary>
+    <form>
+      <label class="capture-field">词条名<input type="text" name="term" required></label>
+      <label class="capture-field">别名（选填）<input type="text" name="aliases" placeholder="用逗号分隔"></label>
+      <label class="capture-field">解释（选填）<textarea name="definition" rows="2"></textarea></label>
+      <label class="capture-field" hidden>保存到<select name="folder"></select></label>
+      <label class="toggle"><input type="checkbox" name="includeSource" disabled>附上当前网页作为出处</label>
+      <button type="submit" disabled>保存词条</button>
+      <div class="status" role="status"></div>
+    </form>
+  </details>
 
   <div class="row"><label>主机</label><input type="text" id="host" placeholder="127.0.0.1"></div>
   <div class="row"><label for="port">端口</label><input type="number" id="port" min="1024" max="65535" inputmode="numeric" placeholder="12345"></div>
@@ -95,6 +114,7 @@
   <script src="config.js"></script>
   <script src="pill-position.js"></script>
   <script src="popup-pill-position.js"></script>
+  <script src="popup-manual-term.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

@@ -459,7 +459,7 @@ var FSRS = {
 };
 
 // src/home-view.ts
-var import_obsidian8 = require("obsidian");
+var import_obsidian7 = require("obsidian");
 
 // src/review-dashboard-view.ts
 var import_obsidian5 = require("obsidian");
@@ -1401,134 +1401,14 @@ function renderCollectionReview(parent, app, host, component) {
   });
 }
 
-// src/manual-term-modal.ts
-var import_obsidian7 = require("obsidian");
-
-// src/manual-term-data.ts
-function webSourceUrl(value) {
-  if (typeof value !== "string" || !/^https?:\/\//i.test(value.trim())) return null;
-  try {
-    const url = new URL(value.trim());
-    return url.username || url.password ? null : url;
-  } catch {
-    return null;
-  }
-}
-function currentWebSource(leaf) {
-  const state = leaf?.getViewState();
-  if (state?.type !== "webviewer") return "";
-  const viewData = state.state;
-  const url = viewData && typeof viewData === "object" && "url" in viewData ? viewData.url : null;
-  return webSourceUrl(url)?.href ?? "";
-}
-function webSourceMarkdown(url) {
-  const label = url.hostname.replaceAll("[", "\\[").replaceAll("]", "\\]");
-  const destination = url.href.replaceAll("<", "%3C").replaceAll(">", "%3E");
-  return `[${label}](<${destination}>)`;
-}
-function termAliases(value, existing, term) {
-  const separator = /[,，;；\n]/;
-  const all = Array.isArray(existing) ? existing : typeof existing === "string" ? existing.split(separator) : [existing];
-  const seen = /* @__PURE__ */ new Set([term.normalize("NFKC").toLowerCase()]);
-  const aliases = [];
-  for (const item of [...all, ...value.split(separator)]) {
-    if (typeof item !== "string" && typeof item !== "number") continue;
-    const alias = String(item).trim();
-    const key = alias.normalize("NFKC").toLowerCase();
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    aliases.push(alias);
-  }
-  return aliases;
-}
-function appendTermContent(content, extra) {
-  return [content.trimEnd(), extra.trim()].filter(Boolean).join("\n\n") + "\n";
-}
-
-// src/manual-term-modal.ts
-function openManualTerm(host, sourceUrl = currentWebSource(host.app.workspace.getMostRecentLeaf())) {
-  const folders = host.dictFolders();
-  if (!folders.length) {
-    new import_obsidian7.Notice(host.t("manualTerm.noDictionary"));
-    return;
-  }
-  new ManualTermModal(host, folders, sourceUrl).open();
-}
-var ManualTermModal = class extends import_obsidian7.Modal {
-  constructor(host, folders, sourceUrl) {
-    super(host.app);
-    this.host = host;
-    this.folders = folders;
-    this.sourceUrl = sourceUrl;
-  }
-  onOpen() {
-    const t = (key) => this.host.t(key);
-    this.setTitle(t("manualTerm.add"));
-    const form = this.contentEl.createEl("form", { cls: "lexis-manual-term-form" });
-    const field = (key) => form.createEl("label", { text: t(key), cls: "lexis-manual-term-field" });
-    const term = field("manualTerm.name").createEl("input", { type: "text", attr: { required: "true" } });
-    const aliases = field("manualTerm.aliases").createEl("input", { type: "text", attr: { placeholder: t("manualTerm.aliasPlaceholder") } });
-    const definition = field("manualTerm.definition").createEl("textarea", { attr: { rows: "3" } });
-    const last = this.host.settings.lastSelectionFolder;
-    let folder = this.folders.includes(last) ? last : this.folders[0];
-    if (this.folders.length > 1) {
-      const target = field("selection.chooseDictionary").createEl("select", { cls: "dropdown" });
-      for (const path of this.folders) target.createEl("option", { value: path, text: path });
-      target.value = folder;
-      target.onchange = () => {
-        folder = target.value;
-      };
-    }
-    const sourceLabel2 = form.createEl("label", { cls: "lexis-manual-term-source" });
-    const includeSource = sourceLabel2.createEl("input", { type: "checkbox" });
-    sourceLabel2.createSpan({ text: t("manualTerm.includeSource") });
-    const urlLabel = field("manualTerm.sourceUrl");
-    const url = urlLabel.createEl("input", { type: "url" });
-    url.value = this.sourceUrl;
-    url.required = true;
-    const updateSource = () => {
-      urlLabel.hidden = !includeSource.checked;
-      url.disabled = !includeSource.checked;
-    };
-    includeSource.onchange = updateSource;
-    updateSource();
-    const error = form.createDiv({ cls: "lexis-manual-term-error", attr: { role: "alert" } });
-    const actions = form.createDiv({ cls: "modal-button-container" });
-    const cancel = actions.createEl("button", { type: "button", text: t("common.cancel") });
-    cancel.onclick = () => this.close();
-    const save = actions.createEl("button", { type: "submit", text: t("common.save"), cls: "mod-cta" });
-    form.addEventListener("submit", (event) => {
-      event.preventDefault();
-      if (save.disabled) return;
-      save.disabled = cancel.disabled = true;
-      error.setText("");
-      void this.host.saveManualTerm({
-        term: term.value,
-        aliases: aliases.value,
-        definition: definition.value,
-        folder,
-        sourceUrl: includeSource.checked ? url.value : ""
-      }).then(() => this.close(), (failure) => {
-        error.setText(failure instanceof Error ? failure.message : t("common.failed"));
-        save.disabled = cancel.disabled = false;
-      });
-    });
-    term.focus();
-  }
-  onClose() {
-    this.contentEl.empty();
-  }
-};
-
 // src/home-view.ts
-var LexisHomeView = class extends import_obsidian8.ItemView {
+var LexisHomeView = class extends import_obsidian7.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.plugin = plugin;
     this.dashboardCleanup = null;
     this.dashboardComponent = null;
     this.sourceFilePath = "";
-    this.sourceWebUrl = "";
   }
   getViewType() {
     return LEXIS_HOME_VIEW;
@@ -1545,13 +1425,11 @@ var LexisHomeView = class extends import_obsidian8.ItemView {
   render() {
     this.dashboardCleanup?.();
     if (this.dashboardComponent) this.removeChild(this.dashboardComponent);
-    this.dashboardComponent = this.addChild(new import_obsidian8.Component());
+    this.dashboardComponent = this.addChild(new import_obsidian7.Component());
     const container = this.contentEl;
     container.empty();
     container.addClass("lexis-home");
-    const heading = container.createDiv({ cls: "lexis-home-heading" });
-    heading.createEl("h3", { text: "\u{1F4D5} Lexis" });
-    heading.createEl("button", { type: "button", cls: "mod-cta", text: this.plugin.t("manualTerm.add") }).onclick = () => openManualTerm(this.plugin, this.sourceWebUrl);
+    container.createEl("h3", { text: "\u{1F4D5} Lexis" });
     const dashboard = container.createDiv();
     this.dashboardCleanup = mountReviewDashboard(dashboard, this.plugin, this.dashboardComponent);
     const history = container.createEl("details", { cls: "lexis-home-section" });
@@ -1681,7 +1559,7 @@ var LexisHomeView = class extends import_obsidian8.ItemView {
       this.plugin.settings.homeRetireCollapsed = !section.open;
       void this.plugin.saveSettings();
     });
-    new import_obsidian8.Setting(wrapper).setName(this.plugin.t("home.retireThreshold")).setDesc(this.plugin.t("home.retireThresholdDesc")).addSlider((slider) => slider.setLimits(14, 365, 1).setValue(days).onChange((value) => {
+    new import_obsidian7.Setting(wrapper).setName(this.plugin.t("home.retireThreshold")).setDesc(this.plugin.t("home.retireThresholdDesc")).addSlider((slider) => slider.setLimits(14, 365, 1).setValue(days).onChange((value) => {
       this.plugin.settings.retireCandidateDays = value;
       void this.plugin.saveSettings();
       if (this.retireRenderTimer) window.clearTimeout(this.retireRenderTimer);
@@ -1752,7 +1630,7 @@ var LexisHomeView = class extends import_obsidian8.ItemView {
       const paths = [...selected];
       for (const path of paths) {
         const file = this.plugin.app.vault.getAbstractFileByPath(path);
-        if (file instanceof import_obsidian8.TFile) await operation(file);
+        if (file instanceof import_obsidian7.TFile) await operation(file);
       }
       removeRows(paths);
     };
@@ -1768,6 +1646,125 @@ var LexisHomeView = class extends import_obsidian8.ItemView {
   }
   async onClose() {
     this.dashboardCleanup?.();
+  }
+};
+
+// src/manual-term-modal.ts
+var import_obsidian8 = require("obsidian");
+
+// src/manual-term-data.ts
+function webSourceUrl(value) {
+  if (typeof value !== "string" || !/^https?:\/\//i.test(value.trim())) return null;
+  try {
+    const url = new URL(value.trim());
+    return url.username || url.password ? null : url;
+  } catch {
+    return null;
+  }
+}
+function currentWebSource(leaf) {
+  const state = leaf?.getViewState();
+  if (state?.type !== "webviewer") return "";
+  const viewData = state.state;
+  const url = viewData && typeof viewData === "object" && "url" in viewData ? viewData.url : null;
+  return webSourceUrl(url)?.href ?? "";
+}
+function webSourceMarkdown(url) {
+  const label = url.hostname.replaceAll("[", "\\[").replaceAll("]", "\\]");
+  const destination = url.href.replaceAll("<", "%3C").replaceAll(">", "%3E");
+  return `[${label}](<${destination}>)`;
+}
+function termAliases(value, existing, term) {
+  const separator = /[,，;；\n]/;
+  const all = Array.isArray(existing) ? existing : typeof existing === "string" ? existing.split(separator) : [existing];
+  const seen = /* @__PURE__ */ new Set([term.normalize("NFKC").toLowerCase()]);
+  const aliases = [];
+  for (const item of [...all, ...value.split(separator)]) {
+    if (typeof item !== "string" && typeof item !== "number") continue;
+    const alias = String(item).trim();
+    const key = alias.normalize("NFKC").toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    aliases.push(alias);
+  }
+  return aliases;
+}
+function appendTermContent(content, extra) {
+  return [content.trimEnd(), extra.trim()].filter(Boolean).join("\n\n") + "\n";
+}
+
+// src/manual-term-modal.ts
+function openManualTerm(host, sourceUrl = currentWebSource(host.app.workspace.getMostRecentLeaf())) {
+  const folders = host.dictFolders();
+  if (!folders.length) {
+    new import_obsidian8.Notice(host.t("manualTerm.noDictionary"));
+    return;
+  }
+  new ManualTermModal(host, folders, sourceUrl).open();
+}
+var ManualTermModal = class extends import_obsidian8.Modal {
+  constructor(host, folders, sourceUrl) {
+    super(host.app);
+    this.host = host;
+    this.folders = folders;
+    this.sourceUrl = sourceUrl;
+  }
+  onOpen() {
+    const t = (key) => this.host.t(key);
+    this.setTitle(t("manualTerm.add"));
+    const form = this.contentEl.createEl("form", { cls: "lexis-manual-term-form" });
+    const field = (key) => form.createEl("label", { text: t(key), cls: "lexis-manual-term-field" });
+    const term = field("manualTerm.name").createEl("input", { type: "text", attr: { required: "true" } });
+    const aliases = field("manualTerm.aliases").createEl("input", { type: "text", attr: { placeholder: t("manualTerm.aliasPlaceholder") } });
+    const definition = field("manualTerm.definition").createEl("textarea", { attr: { rows: "3" } });
+    const last = this.host.settings.lastSelectionFolder;
+    let folder = this.folders.includes(last) ? last : this.folders[0];
+    if (this.folders.length > 1) {
+      const target = field("selection.chooseDictionary").createEl("select", { cls: "dropdown" });
+      for (const path of this.folders) target.createEl("option", { value: path, text: path });
+      target.value = folder;
+      target.onchange = () => {
+        folder = target.value;
+      };
+    }
+    const sourceLabel2 = form.createEl("label", { cls: "lexis-manual-term-source" });
+    const includeSource = sourceLabel2.createEl("input", { type: "checkbox" });
+    sourceLabel2.createSpan({ text: t("manualTerm.includeSource") });
+    const urlLabel = field("manualTerm.sourceUrl");
+    const url = urlLabel.createEl("input", { type: "url" });
+    url.value = this.sourceUrl;
+    url.required = true;
+    const updateSource = () => {
+      urlLabel.hidden = !includeSource.checked;
+      url.disabled = !includeSource.checked;
+    };
+    includeSource.onchange = updateSource;
+    updateSource();
+    const error = form.createDiv({ cls: "lexis-manual-term-error", attr: { role: "alert" } });
+    const actions = form.createDiv({ cls: "modal-button-container" });
+    const cancel = actions.createEl("button", { type: "button", text: t("common.cancel") });
+    cancel.onclick = () => this.close();
+    const save = actions.createEl("button", { type: "submit", text: t("common.save"), cls: "mod-cta" });
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (save.disabled) return;
+      save.disabled = cancel.disabled = true;
+      error.setText("");
+      void this.host.saveManualTerm({
+        term: term.value,
+        aliases: aliases.value,
+        definition: definition.value,
+        folder,
+        sourceUrl: includeSource.checked ? url.value : ""
+      }).then(() => this.close(), (failure) => {
+        error.setText(failure instanceof Error ? failure.message : t("common.failed"));
+        save.disabled = cancel.disabled = false;
+      });
+    });
+    term.focus();
+  }
+  onClose() {
+    this.contentEl.empty();
   }
 };
 
@@ -5270,6 +5267,22 @@ function createBridgeServer({ Notice: Notice21, Platform: Platform5 }) {
       if (path === "/occurrences" && req.method === "GET") return send(200, await plugin.bridgeWordOccurrences(url.searchParams.get("key")));
       if (path === "/word" && req.method === "DELETE") return send(200, await plugin.bridgeDeleteWord(url.searchParams.get("key") || ""));
       if (path === "/add" && req.method === "POST") return send(200, await plugin.bridgeAddWord(await this.readBody(req)));
+      if (path === "/manual-add" && req.method === "POST") {
+        const body = await this.readBody(req);
+        const field = (key) => typeof body[key] === "string" ? body[key] : "";
+        try {
+          await plugin.saveManualTerm({
+            term: field("term"),
+            aliases: field("aliases"),
+            definition: field("definition"),
+            folder: field("folder"),
+            sourceUrl: field("sourceUrl")
+          });
+          return send(200, { ok: true });
+        } catch (error) {
+          return send(400, { ok: false, error: "manual-add-failed", message: error instanceof Error ? error.message : plugin.t("common.failed") });
+        }
+      }
       if (path === "/tag" && req.method === "POST") return send(200, await plugin.bridgeTagWord(await this.readBody(req)));
       if (path === "/note" && req.method === "POST") return send(200, await plugin.bridgeAnnotate(await this.readBody(req)));
       if (path === "/move" && req.method === "POST") return send(200, await plugin.bridgeMoveWord(await this.readBody(req)));
@@ -15055,7 +15068,6 @@ var LexisPluginReview = class extends LexisPluginDictionary {
   async openHome(location = "center") {
     const sourceFile = this.app.workspace.getActiveFile();
     const workspace = this.app.workspace;
-    const sourceWebUrl = currentWebSource(workspace.getMostRecentLeaf());
     let leaf = location === "sidebar" ? await workspace.ensureSideLeaf(LEXIS_HOME_VIEW, "right", { active: true, reveal: true }) : workspace.getLeavesOfType(LEXIS_HOME_VIEW).find((candidate) => candidate.getRoot() === workspace.rootSplit);
     if (!leaf) {
       leaf = workspace.getLeaf("tab");
@@ -15064,7 +15076,6 @@ var LexisPluginReview = class extends LexisPluginDictionary {
     await workspace.revealLeaf(leaf);
     if (leaf.view instanceof LexisHomeView) {
       if (sourceFile) leaf.view.sourceFilePath = sourceFile.path;
-      leaf.view.sourceWebUrl = sourceWebUrl;
       leaf.view.render();
     }
   }

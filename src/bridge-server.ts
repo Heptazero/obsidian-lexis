@@ -3,6 +3,7 @@
 import type { App } from "obsidian";
 import { LEXIS_BRIDGE_DEFAULT_PORT } from "./constants";
 import type { LexisSettings } from "./types";
+import type { ManualTermDraft } from "./manual-term-data";
 
 interface HttpRequest {
   method?: string;
@@ -41,6 +42,7 @@ interface BridgePlugin {
   bridgeWordOccurrences(key: string | null): Promise<unknown>;
   bridgeDeleteWord(key: string): Promise<unknown>;
   bridgeAddWord(payload: Record<string, unknown>): Promise<unknown>;
+  saveManualTerm(draft: ManualTermDraft): Promise<void>;
   bridgeTagWord(payload: Record<string, unknown>): Promise<unknown>;
   bridgeAnnotate(payload: Record<string, unknown>): Promise<unknown>;
   bridgeMoveWord(payload: Record<string, unknown>): Promise<unknown>;
@@ -132,6 +134,19 @@ function createBridgeServer({ Notice, Platform }: BridgeServerDeps) {
       if (path === "/occurrences" && req.method === "GET") return send(200, await plugin.bridgeWordOccurrences(url.searchParams.get("key")));
       if (path === "/word" && req.method === "DELETE") return send(200, await plugin.bridgeDeleteWord(url.searchParams.get("key") || ""));
       if (path === "/add" && req.method === "POST") return send(200, await plugin.bridgeAddWord(await this.readBody(req)));
+      if (path === "/manual-add" && req.method === "POST") {
+        const body = await this.readBody(req);
+        const field = (key: string) => typeof body[key] === "string" ? body[key] : "";
+        try {
+          await plugin.saveManualTerm({
+            term: field("term"), aliases: field("aliases"), definition: field("definition"),
+            folder: field("folder"), sourceUrl: field("sourceUrl"),
+          });
+          return send(200, { ok: true });
+        } catch (error) {
+          return send(400, { ok: false, error: "manual-add-failed", message: error instanceof Error ? error.message : plugin.t("common.failed") });
+        }
+      }
       if (path === "/tag" && req.method === "POST") return send(200, await plugin.bridgeTagWord(await this.readBody(req)));
       if (path === "/note" && req.method === "POST") return send(200, await plugin.bridgeAnnotate(await this.readBody(req)));
       if (path === "/move" && req.method === "POST") return send(200, await plugin.bridgeMoveWord(await this.readBody(req)));

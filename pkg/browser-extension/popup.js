@@ -9,6 +9,7 @@ let saveTimer = null;
 let styleCfg = null;
 let currentSite = "";
 let siteDictionaryVisibility = {};
+let manualTerm = null;
 
 const shortFolder = (folder) => String(folder || "").split("/").pop() || folder;
 
@@ -20,6 +21,7 @@ async function resolveCurrentSite() {
 }
 
 function renderDictionaries() {
+  manualTerm?.update(styleCfg);
   const container = $("dictionaries");
   container.textContent = "";
   $("currentSite").textContent = currentSite || "当前页面不可设置";
@@ -54,7 +56,7 @@ function renderDictionaries() {
 }
 
 async function load() {
-  const stored = await chrome.storage.local.get(["cfg", "meta", "pendingAdds", "styleConfig", "siteDictionaryVisibility", "selectionPillOffset"]);
+  const stored = await chrome.storage.local.get(["cfg", "meta", "pendingAdds", "styleConfig", "siteDictionaryVisibility", "selectionPillOffset", "lastSelectionFolder"]);
   const { cfg: c, meta, pendingAdds, styleConfig } = stored;
   cfg = Object.assign({}, DEFAULT_CFG, c || {});
   const storedPort = cfg.port;
@@ -75,6 +77,21 @@ async function load() {
   $("opacity").value = cfg.opacity || 100;
   $("opacityVal").textContent = (cfg.opacity || 100) + "%";
   $("useObsidianStyle").checked = !!(cfg.useObsidianStyle !== false && hasStyleConfig);
+  manualTerm = LexisPopupManualTerm.mount($("manualTerm"), {
+    pageUrl: page?.url,
+    lastFolder: stored.lastSelectionFolder,
+    async submit(payload) {
+      if (!(await ensureLocalPermission())) return { ok: false, error: "permission" };
+      await save();
+      return chrome.runtime.sendMessage({ type: "manual-add", payload });
+    },
+    onSaved(folder) {
+      void chrome.storage.local.set({ lastSelectionFolder: folder }).catch(() => {});
+      void chrome.runtime.sendMessage({ type: "sync" }).then(result => {
+        if (result?.ok) renderMeta(result.meta);
+      }).catch(() => {});
+    },
+  });
   toggleObsidianStyle();
   renderDictionaries();
   LexisPillPositionEditor.mount($("pillPosition"), stored.selectionPillOffset,
@@ -161,7 +178,7 @@ function status(text, cls) {
 function ensureLocalPermission() {
   if (!chrome.permissions) return Promise.resolve(true);
   const origin = `http://${$("host").value.trim() || "127.0.0.1"}/*`;
-  return chrome.permissions.request({ origins: [origin] }).then(() => true, () => false);
+  return chrome.permissions.request({ origins: [origin] }).catch(() => false);
 }
 
 $("test").addEventListener("click", async () => {

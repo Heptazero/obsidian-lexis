@@ -328,7 +328,7 @@ document.addEventListener("scroll", (event) => {
 }, { capture: true, passive: true });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type === "lexis-page-context") sendResponse({ site: currentSite });
+  if (message?.type === "lexis-page-context") sendResponse({ site: currentSite, url: location.href });
   if (message?.type === "lexis-preload-visible") {
     void preloadVisibleDetails();
     sendResponse({ ok: true });

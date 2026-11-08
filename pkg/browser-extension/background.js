@@ -119,6 +119,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         } catch (e) { sendResponse({ ok: false, error: "offline" }); }
         return;
       }
+      if (msg.type === "manual-add") {
+        sendResponse(await api(cfg, "/manual-add", { method: "POST", body: msg.payload || {} }));
+        return;
+      }
       if (msg.type === "add") {
         try {
           sendResponse(await api(cfg, "/add", { method: "POST", body: msg.payload || {} }));

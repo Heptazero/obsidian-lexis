@@ -14,7 +14,6 @@ import { LexisPluginDictionary } from "./plugin-dictionary";
 import { LexisReviewView } from "./plugin-views";
 import type { HomeOpenLocation, Lifecycle, ReviewCard, Schedule } from "./plugin-base";
 import { ReviewStartModal } from "./review-start-modal";
-import { currentWebSource } from "./manual-term-data";
 
 export class LexisPluginReview extends LexisPluginDictionary {
   // ---------- 生命周期(归档/常驻/淘汰) ----------
@@ -282,7 +281,6 @@ export class LexisPluginReview extends LexisPluginDictionary {
   async openHome(location: HomeOpenLocation = "center"): Promise<void> {
     const sourceFile = this.app.workspace.getActiveFile();
     const workspace = this.app.workspace;
-    const sourceWebUrl = currentWebSource(workspace.getMostRecentLeaf());
     let leaf = location === "sidebar"
       ? await workspace.ensureSideLeaf(LEXIS_HOME_VIEW, "right", { active: true, reveal: true })
       : workspace.getLeavesOfType(LEXIS_HOME_VIEW).find((candidate) => candidate.getRoot() === workspace.rootSplit);
@@ -293,7 +291,6 @@ export class LexisPluginReview extends LexisPluginDictionary {
     await workspace.revealLeaf(leaf);
     if (leaf.view instanceof LexisHomeView) {
       if (sourceFile) leaf.view.sourceFilePath = sourceFile.path;
-      leaf.view.sourceWebUrl = sourceWebUrl;
       leaf.view.render();
     }
   }
