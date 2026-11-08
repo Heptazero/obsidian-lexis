@@ -279,6 +279,15 @@ export class EncounterStore {
       } else throw new Error("Encounter data changed during the move; source was retained");
     }
     const root = await this.adapter.list(this.folder);
-    if (!root.files.length && !root.folders.length) await this.adapter.rmdir(this.folder, false);
+    if (!root.files.length && !root.folders.length) {
+      try {
+        await this.adapter.rmdir(this.folder, false);
+      } catch (error) {
+        // Some adapters reject removing a directory non-recursively with EISDIR.
+        // Its verified snapshots have already moved; leaving the empty directory is safe.
+        const message = error && typeof error === "object" && "message" in error ? error.message : error;
+        if (typeof message !== "string" || !/\bEISDIR\b/.test(message)) throw error;
+      }
+    }
   }
 }

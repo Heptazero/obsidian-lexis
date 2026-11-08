@@ -4690,7 +4690,14 @@ var EncounterStore = class {
       } else throw new Error("Encounter data changed during the move; source was retained");
     }
     const root = await this.adapter.list(this.folder);
-    if (!root.files.length && !root.folders.length) await this.adapter.rmdir(this.folder, false);
+    if (!root.files.length && !root.folders.length) {
+      try {
+        await this.adapter.rmdir(this.folder, false);
+      } catch (error) {
+        const message = error && typeof error === "object" && "message" in error ? error.message : error;
+        if (typeof message !== "string" || !/\bEISDIR\b/.test(message)) throw error;
+      }
+    }
   }
 };
 

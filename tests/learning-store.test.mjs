@@ -208,6 +208,23 @@ test("hidden legacy encounter snapshots move to the visible default with no hidd
   assert.equal((await encounters.load())["a.md"].lastEncounter,"2026-10-29");
 });
 
+test("an adapter refusing to remove an empty legacy directory does not block startup",async()=>{
+  const io=memoryAdapter(),h=host(io);h.settings.dataFolder="";
+  const oldFolder=".obsidian/plugins/lexis/encounters";
+  const old=new EncounterStore(io,oldFolder,"a".repeat(32),"macos");
+  await old.apply([{path:"a.md",changedAt:123,encounteredAt:123,day:"2026-10-29"}]);
+  const remove=io.rmdir.bind(io);
+  io.rmdir=async (path,recursive)=>{
+    if(path===oldFolder) throw new Error("Path is a directory: rm returned EISDIR");
+    return remove(path,recursive);
+  };
+  await new PluginDataStorage(h).initialize({encounterFolder:oldFolder});
+  assert.deepEqual((await io.list(oldFolder)).files,[]);
+  const encounters=new EncounterStore(io,"Lexis-data","a".repeat(32),"macos");
+  assert.equal((await encounters.load())["a.md"].lastEncounter,"2026-10-29");
+  await new PluginDataStorage(h).initialize({learningStorageVersion:1});
+});
+
 test("synced legacy configuration is sanitized but its stale study records are never reimported",async()=>{
   const io=memoryAdapter(),h=host(io),storage=new PluginDataStorage(h);await storage.initialize({encounterFolder:"Data"});
   h.loadData=async()=>({...seed(),encounterFolder:"Data",syntaxCardStates:{a:{reps:1}}});

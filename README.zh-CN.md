@@ -115,7 +115,7 @@ Lexis 不启用复习也能作为完整的阅读词典。如果少数词条值�
 
 ### 浏览器插件
 
-1. 下载 [Chrome 版 Lexis Web 1.2.4](https://github.com/Heptazero/obsidian-lexis/releases/download/browser-v1.2.4/lexis-web-1.2.4.zip)或 [Firefox 版 Lexis Web 1.2.4](https://github.com/Heptazero/obsidian-lexis/releases/download/browser-v1.2.4/lexis-web-firefox-1.2.4.zip)，然后解压。
+1. 下载 [Chrome 版 Lexis Web 1.2.7](https://github.com/Heptazero/obsidian-lexis/releases/download/browser-v1.2.7/lexis-web-1.2.7.zip)或 [Firefox 版 Lexis Web 1.2.7](https://github.com/Heptazero/obsidian-lexis/releases/download/browser-v1.2.7/lexis-web-firefox-1.2.7.zip)，然后解压。
 2. 打开 `chrome://extensions`，启用“开发者模式”，选择“加载已解压的扩展程序”。
 3. 在 Lexis 设置中启用“本机桥接”，把端口和访问令牌填入 Lexis Web。
 
